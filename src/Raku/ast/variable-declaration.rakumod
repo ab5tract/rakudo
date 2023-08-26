@@ -642,24 +642,27 @@ class RakuAST::VarDeclaration::Simple
 
             if $!initializer {
                 my $initializer := $!initializer;
-                my $method := RakuAST::Method.new(
-                    :signature(RakuAST::Signature.new(
-                        :parameters([
-                            RakuAST::Parameter.new(
-                                target => RakuAST::ParameterTarget::Var.new('$_')
+                if nqp::istype($initializer,RakuAST::Initializer::Assign)
+                    || nqp::istype($initializer,RakuAST::Initializer::Bind) {
+                    my $method := RakuAST::Method.new(
+                        :signature(RakuAST::Signature.new(
+                            :parameters([
+                                RakuAST::Parameter.new(
+                                    target => RakuAST::ParameterTarget::Var.new('$_')
+                                )
+                            ])
+                        )),
+                        :body(RakuAST::Blockoid.new(
+                            RakuAST::StatementList.new(
+                                RakuAST::Statement::Expression.new(
+                                    :expression($initializer.expression)
+                                )
                             )
-                        ])
-                    )),
-                    :body(RakuAST::Blockoid.new(
-                        RakuAST::StatementList.new(
-                            RakuAST::Statement::Expression.new(
-                                :expression($initializer.expression)
-                            )
-                        )
-                    )),
-                );
-                $!attribute-package.add-generated-lexical-declaration($method);
-                self.add-trait(RakuAST::Trait::Will.new('build', $method));
+                        )),
+                    );
+                    $!attribute-package.add-generated-lexical-declaration($method);
+                    self.add-trait(RakuAST::Trait::Will.new('build', $method));
+                }
             }
 
             # For attributes our meta-object is an appropriate Attribute instance
