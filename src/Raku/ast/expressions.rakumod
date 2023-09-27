@@ -2164,6 +2164,22 @@ class RakuAST::ApplyPostfix
     method is-begin-performed-before-children { True }
     method is-begin-performed-after-children  { True }
 
+    method IMPL-ALL-CHILDREN-THAT-WILL-CURRY() {
+        my $condition := -> $n { $n.IMPL-WOULD-CURRY-DIRECTLY };
+        my @initial-results := self.IMPL-UNWRAP-LIST(self.find-nodes(RakuAST::WhateverApplicable, :$condition, :stopper(RakuAST::ApplyListInfix)));
+#        my $total-results := nqp::elems(@initial-results);
+#        if $total-results && nqp::istype(@initial-results[$total-results - 1], RakuAST::ApplyListInfix) {
+#            my $index := 0;
+#            my @final-results;
+#            while $index < $total-results - 2 {
+#                @final-results[$index] := @initial-results[$index];
+#            }
+#            @final-results
+#        } else {
+#            @initial-results
+#        }
+    }
+
     method PERFORM-BEGIN-BEFORE-CHILDREN(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         if self.IMPL-SHOULD-CURRY-ACROSS-ALL-CHILDREN {
             self.IMPL-CURRY($resolver, $context, '');
@@ -2172,26 +2188,28 @@ class RakuAST::ApplyPostfix
     }
 
     method PERFORM-BEGIN-AFTER-CHILDREN(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
-        my $operand := $!operand;
-        if nqp::bitand_i($!postfix.IMPL-CURRIES, 2) {
-            if $operand.IMPL-CURRIED {
-                # We want to find the root of all curried postfixes ...
-                my $condition := -> $n { nqp::istype($n.operand, RakuAST::Var::Lexical) };
-                # ... there should be only one, at the very base of the postfix chain ...
-                my @whatever-postfixes := self.IMPL-UNWRAP-LIST($operand.find-nodes(RakuAST::ApplyPostfix, :$condition));
-                # ... but find-nodes won't include the top-level node in the results, so check and set to origin if applicable.
-                my $origin := nqp::istype($operand, RakuAST::ApplyPostfix) && nqp::istype($operand.operand, RakuAST::Var::Lexical)
-                                ?? $operand
-                                !! @whatever-postfixes[0];
-
-                my $whatever-name := QAST::Node.unique('$whatevercode_arg');
-                $operand.IMPL-UNCURRY;
-                my $param := self.IMPL-CURRY($resolver, $context, $whatever-name).IMPL-LAST-PARAM;
-                nqp::bindattr($origin, RakuAST::ApplyPostfix, '$!operand', $param.target.generate-lookup)
-                    if $origin;
-            }
-        }
+#        my $operand := $!operand;
+#        if nqp::bitand_i($!postfix.IMPL-CURRIES, 2) {
+#            if $operand.IMPL-CURRIED {
+#                # We want to find the root of all curried postfixes ...
+#                my $condition := -> $n { nqp::istype($n.operand, RakuAST::Var::Lexical) };
+#                # ... there should be only one, at the very base of the postfix chain ...
+#                my @whatever-postfixes := self.IMPL-UNWRAP-LIST($operand.find-nodes(RakuAST::ApplyPostfix, :$condition));
+#                # ... but find-nodes won't include the top-level node in the results, so check and set to origin if applicable.
+#                my $origin := nqp::istype($operand, RakuAST::ApplyPostfix) && nqp::istype($operand.operand, RakuAST::Var::Lexical)
+#                                ?? $operand
+#                                !! @whatever-postfixes[0];
+#
+#                my $whatever-name := QAST::Node.unique('$whatevercode_arg');
+#                my $params := $operand.IMPL-UNCURRY;
+#                my $param := self.IMPL-CURRY($resolver, $context, $whatever-name).IMPL-LAST-PARAM;
+#                nqp::bindattr($origin, RakuAST::ApplyPostfix, '$!operand', $param.target.generate-lookup)
+#                    if $origin;
+#            }
+#        }
     }
+
+
 
     method IMPL-EXPR-QAST(RakuAST::IMPL::QASTContext $context) {
         my $postfix-ast := $!postfix.IMPL-POSTFIX-QAST($context, $!operand.IMPL-TO-QAST($context));
