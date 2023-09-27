@@ -1129,11 +1129,44 @@ class RakuAST::MetaInfix::Hyper
 #-------------------------------------------------------------------------------
 # Application of operators
 
+class RakuAST::WhateverApplicable {
+    method IMPL-WOULD-DIRECTLY-CURRY() {
+        for self.IMPL-UNWRAP-LIST(self.operands) {
+            return True if nqp::istype($_, RakuAST::Term::Whatever)
+        }
+        False
+    }
+
+    method IMPL-ALL-CHILDREN-THAT-WILL-CURRY() {
+        my $condition := -> $n { $n.IMPL-WOULD-DIRECTLY-CURRY };
+        self.IMPL-UNRWAP-LIST(self.find-nodes(RakuAST::WhateverApplicable, :$condition))
+    }
+
+    method IMPL-CURRY-ACROSS-ALL-CHILDREN(Resolver $resolver,
+                                          RakuAST::IMPL::QASTContext $context,
+                                          RakuAST::CurryThunk $currier)
+    {
+        my @curryable-children := self.IMPL-ALL-CHILDREN-THAT-WILL-CURRY;
+        @curryable-children.unshift(self) if self.IMPL-WOULD-DIRECTLY-CURRY;
+
+        while @curryable-children {
+            my $child := @curryable-children.shift;
+            my @operands := self.IMPL-UNWRAP-LIST($child.operands);
+            my $total-operands := nqp::elems(@operands);
+            my $index := 0;
+            while $index < $total-operands {
+                
+            }
+        }
+    }
+}
+
 # Application of an infix operator.
 class RakuAST::ApplyInfix
   is RakuAST::Expression
   is RakuAST::BeginTime
   is RakuAST::CheckTime
+  is RakuAST::WhateverApplicable
 {
     has RakuAST::Infixish $.infix;
     has RakuAST::ArgList  $.args;
@@ -1160,6 +1193,7 @@ class RakuAST::ApplyInfix
         $!args.push($pair);
         Nil
     }
+    method operands() { $!args.IMPL-UNWRAP-LIST($!args.args) }
 
     method IMPL-SHOULD-CURRY-ACROSS-ALL-APPLY-INFIXES() {
         for $!args.IMPL-UNWRAP-LIST($!args.args) {
@@ -1184,8 +1218,7 @@ class RakuAST::ApplyInfix
 
         if nqp::bitand_i($CURRIES, 1) {
             # Only do this if we ourselves are a currying infix
-            return Nil unless (my $direct-whatever:= nqp::istype($left, RakuAST::Term::Whatever)
-                                || nqp::istype($right, RakuAST::Term::Whatever))
+            return Nil unless (my $direct-whatever := self.IMPL-WOULD-DIRECTLY-CURRY)
                                 || self.IMPL-SHOULD-CURRY-ACROSS-ALL-APPLY-INFIXES;
 
             my @whatever-infixes;
@@ -1591,6 +1624,7 @@ class RakuAST::Term
 class RakuAST::ApplyPrefix
   is RakuAST::Termish
   is RakuAST::BeginTime
+  is RakuAST::WhateverApplicable
 {
     has RakuAST::Prefixish $.prefix;
     has RakuAST::Expression $.operand;
@@ -1605,6 +1639,8 @@ class RakuAST::ApplyPrefix
     method add-colonpair(RakuAST::ColonPair $pair) {
         $!prefix.add-colonpair($pair);
     }
+
+    method operands { [$!operand] }
 
     method PERFORM-BEGIN(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         my $prefix  := $!prefix;
@@ -2048,6 +2084,7 @@ class RakuAST::MetaPostfix::Hyper
 class RakuAST::ApplyPostfix
   is RakuAST::Termish
   is RakuAST::BeginTime
+  is RakuAST::WhateverApplicable
 {
     has RakuAST::Postfixish $.postfix;
     has RakuAST::Expression $.operand;
@@ -2070,6 +2107,8 @@ class RakuAST::ApplyPostfix
     method add-colonpair(RakuAST::ColonPair $pair) {
         $!postfix.add-colonpair($pair);
     }
+
+    method operands() { [$!operand] }
 
     method can-be-bound-to() {
         $!postfix.can-be-bound-to
