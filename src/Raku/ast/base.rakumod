@@ -149,22 +149,31 @@ class RakuAST::Node {
     }
 
     # Recursively walks the tree finding nodes of the specified type that are
-    # beneath this one. A node that matches the stopper type will be returned
-    # if it satisfies the specified type, but its children shall not be
+    # beneath this one. A node that matches the stopper type will *not* be returned
+    # even if it satisfies the specified type and its children shall not be
     # visited. The search is strict - that is to say, it starts at the children
     # of the current node, but doesn't consider the current one.
-    method find-nodes(Mu $type, Code :$condition, Mu :$stopper) {
-        # Walk the tree searching for matching nodes.
-        my int $have-stopper := !nqp::eqaddr($stopper, Mu);
+    method find-nodes(Mu $type, Code :$condition, Code :$stopper) {
+        # Walk the tree searching for matching nodes.;
         my @visit-queue := [self];
         my @result;
         my $collector := sub collector($node) {
-            if nqp::istype($node, $type) {
-                unless $condition && !$condition($node) {
-                    nqp::push(@result, $node);
+            if nqp::isconcrete($stopper) {
+                my $do-stop := $stopper($node);
+                if nqp::istype($node, $type) && !$do-stop {
+                    unless $condition && !$condition($node) {
+                        nqp::push(@result, $node);
+                    }
                 }
-            }
-            unless $have-stopper && nqp::istype($node, $stopper) {
+                unless $do-stop {
+                    nqp::push(@visit-queue, $node)
+                }
+            } else {
+                if nqp::istype($node, $type) {
+                    unless $condition && !$condition($node) {
+                        nqp::push(@result, $node);
+                    }
+                }
                 nqp::push(@visit-queue, $node);
             }
         }
