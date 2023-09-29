@@ -1147,6 +1147,7 @@ class RakuAST::WhateverApplicable
                 || nqp::istype($n, RakuAST::Postcircumfix::ArrayIndex)
                 || nqp::istype($n, RakuAST::Call)
                 || nqp::istype($n, RakuAST::VarDeclaration::Simple)
+                || (nqp::istype(self, RakuAST::ApplyInfix) && self.operator.operator eq 'xx' && nqp::istype($n, RakuAST::ApplyInfix) && $n.IMPL-SHOULD-CURRY-DIRECTLY)
                 || (nqp::istype($n, RakuAST::WhateverApplicable) && !nqp::bitand_i($n.operator.IMPL-CURRIES, 2))
         }
         self.IMPL-UNWRAP-LIST(self.find-nodes(RakuAST::WhateverApplicable, :$condition, :$stopper))
