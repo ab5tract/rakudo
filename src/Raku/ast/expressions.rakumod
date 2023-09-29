@@ -1141,14 +1141,20 @@ class RakuAST::WhateverApplicable
 
     method IMPL-ALL-CHILDREN-THAT-SHOULD-CURRY() {
         return [] unless nqp::bitand_i(self.operator.IMPL-CURRIES, 2);
+        # Calculate self-based gaurds for $stopper only once
+        my $is-xx := nqp::istype(self, RakuAST::ApplyInfix)
+                && (my $operator := self.operator)
+                && nqp::istype($operator, RakuAST::Infix)
+                && $operator.operator eq 'xx';
+
         my $condition := -> $n { $n.IMPL-SHOULD-CURRY-DIRECTLY };
         my $stopper   := -> $n {
             nqp::istype($n, RakuAST::Block)
                 || nqp::istype($n, RakuAST::Postcircumfix::ArrayIndex)
                 || nqp::istype($n, RakuAST::Call)
                 || nqp::istype($n, RakuAST::VarDeclaration::Simple)
-                || (nqp::istype(self, RakuAST::ApplyInfix) && self.operator.operator eq 'xx' && nqp::istype($n, RakuAST::ApplyInfix) && $n.IMPL-SHOULD-CURRY-DIRECTLY)
                 || (nqp::istype($n, RakuAST::WhateverApplicable) && !nqp::bitand_i($n.operator.IMPL-CURRIES, 2))
+                || ($is-xx && nqp::istype($n, RakuAST::ApplyInfix) && $n.IMPL-SHOULD-CURRY-DIRECTLY)
         }
         self.IMPL-UNWRAP-LIST(self.find-nodes(RakuAST::WhateverApplicable, :$condition, :$stopper))
     }
@@ -1257,7 +1263,7 @@ class RakuAST::ApplyInfix
         my $left    := self.left;
         my $right   := self.right;
 
-        if !$resolver.find-attach-target('block').sunk && self.IMPL-SHOULD-CURRY-ACROSS-ALL-CHILDREN {
+        if self.IMPL-SHOULD-CURRY-ACROSS-ALL-CHILDREN {
             self.IMPL-CURRY($resolver, $context, '');
             self.IMPL-CURRY-ACROSS-ALL-CHILDREN($resolver, $context, self.IMPL-CURRIED);
         }
