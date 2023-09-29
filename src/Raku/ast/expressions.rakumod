@@ -1133,12 +1133,17 @@ class RakuAST::WhateverApplicable
 {
     method IMPL-SHOULD-CURRY-DIRECTLY() {
         return False unless nqp::bitand_i(self.operator.IMPL-CURRIES, 1);
+        return True if self.IMPL-CUSTOM-CURRY-HINTS;
         for self.IMPL-UNWRAP-LIST(self.operands) {
             return True if nqp::istype($_, RakuAST::Term::Whatever)
         }
         False
     }
 
+    # Override this to ask questions about the self when it comes to the should-curry question
+    method IMPL-CUSTOM-CURRY-HINTS { False }
+
+    # Find all of the nodes that should curry into the current one
     method IMPL-ALL-CHILDREN-THAT-SHOULD-CURRY() {
         return [] unless nqp::bitand_i(self.operator.IMPL-CURRIES, 2);
         # Calculate self-based gaurds for $stopper only once
@@ -1171,6 +1176,26 @@ class RakuAST::WhateverApplicable
         my @curryable-children := self.IMPL-ALL-CHILDREN-THAT-SHOULD-CURRY;
         @curryable-children.unshift(self) if self.IMPL-SHOULD-CURRY-DIRECTLY;
 
+        # Some pre-flight checks to make sure that @curryable-children is in a usable state.
+        # First we set up a function to test whether an ApplyInfix has gone all the way down one side.
+        my sub is-apply-infix-down-the-side(str $side, RakuAST::Node $node) {
+            my $is-so :=
+                nqp::istype($node, RakuAST::ApplyInfix)
+                    && (my $applicable := $node."$side"())
+                    && ((nqp::istype($applicable, RakuAST::ApplyInfix) && $applicable.IMPL-SHOULD-CURRY-DIRECTLY)
+                        || is-apply-infix-down-the-side($side, $applicable));
+            $is-so ?? $applicable !! Mu
+        }
+
+        # Default case
+        my $eject := "shift";
+        # In this specific case, the correct first child is buried down on the left side.
+        if nqp::istype(self, RakuAST::ApplyInfix) && !self.IMPL-SHOULD-CURRY-DIRECTLY
+            && (my $first-child := is-apply-infix-down-the-side("left", self.left))
+        {
+            @curryable-children.unshift($first-child);
+        }
+
         while @curryable-children {
             my $child := @curryable-children.shift;
             # We might have already visited this node and resolved the RakuAST::Term::Whatever nodes to the
@@ -1178,9 +1203,10 @@ class RakuAST::WhateverApplicable
             next unless $child.IMPL-SHOULD-CURRY-DIRECTLY;
             if nqp::istype($child, RakuAST::ApplyListInfix) {
                 my @operands := self.IMPL-UNWRAP-LIST(self.operands);
-                my $index := 0;
+                my $index := -1;
                 for @operands {
                     my $operand := $_;
+                    $index++; # it needs to count every time so that we write into the appropriate slot in @operands
                     if nqp::istype($operand, RakuAST::WhateverApplicable) && $operand.IMPL-SHOULD-CURRY-ACROSS-ALL-CHILDREN {
                         $operand.IMPL-CURRY-ACROSS-ALL-CHILDREN($resolver, $context, $curried);
                     }
@@ -1218,6 +1244,7 @@ class RakuAST::WhateverApplicable
         }
     }
 }
+
 
 # Application of an infix operator.
 class RakuAST::ApplyInfix
@@ -1677,19 +1704,6 @@ class RakuAST::ApplyPrefix
     method is-begin-performed-before-children() { True }
     method is-begin-performed-after-children()  { True }
 
-#    method IMPL-ALL-CHILDREN-THAT-SHOULD-CURRY() {
-#        return [] unless nqp::bitand_i(self.operator.IMPL-CURRIES, 2);
-#        my $condition := -> $n { $n.IMPL-SHOULD-CURRY-DIRECTLY };
-#        my $stopper   := -> $n {
-#            nqp::istype($n, RakuAST::Block)
-#                    || nqp::istype($n, RakuAST::Postcircumfix::ArrayIndex)
-#                    || nqp::istype($n, RakuAST::Call)
-#                    || nqp::istype($n, RakuAST::VarDeclaration::Simple)
-#                    || (nqp::istype($n, RakuAST::WhateverApplicable) && !nqp::bitand_i($n.operator.IMPL-CURRIES, 2))
-#        }
-#        self.IMPL-UNWRAP-LIST(self.find-nodes(RakuAST::WhateverApplicable, :$condition, :$stopper))
-#    }
-
     method PERFORM-BEGIN-BEFORE-CHILDREN(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         my $prefix  := $!prefix;
         my $operand := $!operand;
@@ -1710,16 +1724,16 @@ class RakuAST::ApplyPrefix
                     $curried.IMPL-CHECK($resolver, $context, True);
                 }
             }
-            #            elsif nqp::istype($operand, RakuAST::Circumfix::Parentheses)
-            #                && (my $expression := $operand.IMPL-CURRIED-APPLY-INFIX)
-            #            {
-            #                my @params := $expression.IMPL-UNCURRY;
-            #                my $curried := self.IMPL-CURRY($resolver, $context, '');
-            #                for @params {
-            #                    $curried.IMPL-ADD-PARAM($_.target.lexical-name);
-            #                    $curried.IMPL-CHECK($resolver, $context, True);
-            #                }
-            #            }
+            elsif nqp::istype($operand, RakuAST::Circumfix::Parentheses)
+                && (my $expression := $operand.IMPL-SINGULAR-CURRIED-EXPRESSION)
+            {
+                my @params := $expression.IMPL-UNCURRY;
+                my $curried := self.IMPL-CURRY($resolver, $context, '');
+                for @params {
+                    $curried.IMPL-ADD-PARAM($_.target.lexical-name);
+                    $curried.IMPL-CHECK($resolver, $context, True);
+                }
+            }
         }
     }
 
