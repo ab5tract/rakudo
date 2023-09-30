@@ -1140,6 +1140,14 @@ class RakuAST::WhateverApplicable
         False
     }
 
+    method IMPL-OPERANDS-SHOULD-CURRY-DIRECTLY() {
+        my $should-so := False;
+        for self.IMPL-UNWRAP-LIST(self.operands) {
+            $should-so := $should-so || (nqp::istype($_, RakuAST::WhateverApplicable) && $_.IMPL-SHOULD-CURRY-DIRECTLY)
+        }
+        $should-so
+    }
+
     # Override this to ask questions about the self when it comes to the should-curry question
     method IMPL-CUSTOM-CURRY-HINTS { False }
 
@@ -1165,7 +1173,7 @@ class RakuAST::WhateverApplicable
     }
 
     method IMPL-SHOULD-CURRY-ACROSS-ALL-CHILDREN() {
-         self.IMPL-SHOULD-CURRY-DIRECTLY || nqp::elems(self.IMPL-ALL-CHILDREN-THAT-SHOULD-CURRY) > 0
+         self.IMPL-SHOULD-CURRY-DIRECTLY || self.IMPL-OPERANDS-SHOULD-CURRY-DIRECTLY || nqp::elems(self.IMPL-ALL-CHILDREN-THAT-SHOULD-CURRY) > 0
     }
 
     method IMPL-CURRY-ACROSS-ALL-CHILDREN(Resolver $resolver,
@@ -1174,33 +1182,13 @@ class RakuAST::WhateverApplicable
     {
         my $operator-curries := self.operator.IMPL-CURRIES;
         my @curryable-children := self.IMPL-ALL-CHILDREN-THAT-SHOULD-CURRY;
-        @curryable-children.unshift(self) if self.IMPL-SHOULD-CURRY-DIRECTLY;
-
-        # Some pre-flight checks to make sure that @curryable-children is in a usable state.
-        # First we set up a function to test whether an ApplyInfix has gone all the way down one side.
-        my sub is-apply-infix-down-the-side(str $side, RakuAST::Node $node) {
-            my $is-so :=
-                nqp::istype($node, RakuAST::ApplyInfix)
-                    && (my $applicable := $node."$side"())
-                    && ((nqp::istype($applicable, RakuAST::ApplyInfix) && $applicable.IMPL-SHOULD-CURRY-DIRECTLY)
-                        || is-apply-infix-down-the-side($side, $applicable));
-            $is-so ?? $applicable !! Mu
-        }
-
-        # Default case
-        my $eject := "shift";
-        # In this specific case, the correct first child is buried down on the left side.
-        if nqp::istype(self, RakuAST::ApplyInfix) && !self.IMPL-SHOULD-CURRY-DIRECTLY
-            && (my $first-child := is-apply-infix-down-the-side("left", self.left))
-        {
-            @curryable-children.unshift($first-child);
-        }
+        @curryable-children.unshift(self) if self.IMPL-SHOULD-CURRY-DIRECTLY || self.IMPL-OPERANDS-SHOULD-CURRY-DIRECTLY;
 
         while @curryable-children {
             my $child := @curryable-children.shift;
             # We might have already visited this node and resolved the RakuAST::Term::Whatever nodes to the
             # respective $whatevercode_arg parameter target. If so, move on!
-            next unless $child.IMPL-SHOULD-CURRY-DIRECTLY;
+            next unless $child.IMPL-SHOULD-CURRY-DIRECTLY || $child.IMPL-OPERANDS-SHOULD-CURRY-DIRECTLY;
             if nqp::istype($child, RakuAST::ApplyListInfix) {
                 my @operands := self.IMPL-UNWRAP-LIST(self.operands);
                 my $index := -1;
