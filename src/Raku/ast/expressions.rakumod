@@ -1,6 +1,7 @@
 # Marker for anything that can be used as the source for a capture.
 class RakuAST::CaptureSource
-  is RakuAST::Node { }
+  is RakuAST::Node
+{}
 
 # Everything that can appear as an expression does RakuAST::Expression.
 # Furthermore, since every expression can exist as statement, consider

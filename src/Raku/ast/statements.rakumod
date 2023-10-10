@@ -2,7 +2,8 @@
 # block or a statement (or an expression, which can always go in a
 # RakuAST::Statement::Expression)
 class RakuAST::Blorst
-  is RakuAST::Node {
+  is RakuAST::Node
+{
     method as-block() {
         nqp::istype(self, RakuAST::Block)
             ?? self
@@ -23,7 +24,8 @@ class RakuAST::Blorst
 
 # Something that can be the target of a contextualizer.
 class RakuAST::Contextualizable
-  is RakuAST::Node {}
+  is RakuAST::Node
+{}
 
 # A label, which can be placed on a statement.
 class RakuAST::Label

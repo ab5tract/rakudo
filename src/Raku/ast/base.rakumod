@@ -1,5 +1,6 @@
 # The base of all RakuAST nodes.
-class RakuAST::Node {
+class RakuAST::Node
+{
     has RakuAST::Origin $.origin;
 
     # What type does evaluating this node produce, if known?
