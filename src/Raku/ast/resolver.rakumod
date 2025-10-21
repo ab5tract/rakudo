@@ -220,8 +220,8 @@ class RakuAST::Resolver {
         for $!packages {
             my $stash := self.IMPL-STASH-HASH($_.compile-time-value);
             return $partial
-                ?? ($stash{$name}, List.new, 'global')
-                !! self.external-constant($stash, $name)
+                    ?? ($stash{$name}, List.new, 'global')
+                    !! self.external-constant($stash, $name)
                 if nqp::existskey($stash,$name);
         }
 
@@ -229,9 +229,10 @@ class RakuAST::Resolver {
         my @parts := nqp::clone($Rname.IMPL-UNWRAP-LIST($Rname.parts));
         while @parts {
             my $part := @parts.shift;
+            nqp::say("resolving " ~ $part.name ~ " ... ") if nqp::getenvhash<WTF>;
             $name    := nqp::istype($part,RakuAST::Name::Part::Simple)
-              ?? $part.name
-              !! '';
+                              ?? $part.name
+                              !! '';
 
             # Add any sigil for last iteration
             $name := $sigil ~ $name unless @parts;

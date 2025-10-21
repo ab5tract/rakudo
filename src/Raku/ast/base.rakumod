@@ -1,5 +1,44 @@
+# Needed by all nodes, and some other non-nodal classes (name parameterization, etc)
+class RakuAST::ListWrapper {
+    method IMPL-WRAP-LIST(Mu $vm-array) {
+        if nqp::istype($vm-array, List) {
+            # It already is a list
+            $vm-array
+        }
+        else {
+            my $result := nqp::create(List);
+            nqp::bindattr($result, List, '$!reified', $vm-array);
+            $result
+        }
+    }
+
+    method IMPL-UNWRAP-LIST(Mu $list) {
+        if nqp::islist($list) {
+            # Wasn't wrapped anyway
+            $list
+        }
+        elsif nqp::istype($list, List) {
+            my $todo := nqp::getattr($list, List, '$!todo');
+            if nqp::isconcrete($todo) {
+                $todo.reify-all;
+                nqp::getattr($list, List, '$!reified')
+            }
+            else {
+                nqp::isconcrete(nqp::getattr($list, List, '$!reified'))
+                        ?? nqp::getattr($list, List, '$!reified')
+                        !! nqp::bindattr($list, List, '$!reified', nqp::create(IterationBuffer));
+            }
+        }
+        else {
+            nqp::list($list)
+        }
+    }
+}
+
 # The base of all RakuAST nodes.
-class RakuAST::Node {
+class RakuAST::Node
+    is RakuAST::ListWrapper
+{
     has RakuAST::Origin $.origin;
 
     # What type does evaluating this node produce, if known?
@@ -339,39 +378,6 @@ class RakuAST::Node {
         nqp::die('Missing IMPL-INTERPRET implementation on ' ~ self.HOW.name(self))
     }
 
-    method IMPL-WRAP-LIST(Mu $vm-array) {
-        if nqp::istype($vm-array, List) {
-            # It already is a list
-            $vm-array
-        }
-        else {
-            my $result := nqp::create(List);
-            nqp::bindattr($result, List, '$!reified', $vm-array);
-            $result
-        }
-    }
-
-    method IMPL-UNWRAP-LIST(Mu $list) {
-        if nqp::islist($list) {
-            # Wasn't wrapped anyway
-            $list
-        }
-        elsif nqp::istype($list, List) {
-            my $todo := nqp::getattr($list, List, '$!todo');
-            if nqp::isconcrete($todo) {
-                $todo.reify-all;
-                nqp::getattr($list, List, '$!reified')
-            }
-            else {
-                nqp::isconcrete(nqp::getattr($list, List, '$!reified'))
-                    ?? nqp::getattr($list, List, '$!reified')
-                    !! nqp::bindattr($list, List, '$!reified', nqp::create(IterationBuffer));
-            }
-        }
-        else {
-            nqp::list($list)
-        }
-    }
 
     method IMPL-WRAP-MAP(Mu $vm-hash) {
         if nqp::istype($vm-hash, Map) {

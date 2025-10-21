@@ -302,6 +302,7 @@ class RakuAST::Code
                     }
                     elsif $name ne '$_' { #TODO figure out why we specifially don't declare $_ in ExpressionThunks
                         my $decl := $!resolver.resolve-lexical-constant($name);
+
                         if $decl {
                             $decl.to-begin-time($resolver, $context); # Ensure any required lookups are resolved
                             my $value := $decl.compile-time-value;

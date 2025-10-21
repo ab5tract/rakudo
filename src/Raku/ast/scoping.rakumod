@@ -1003,8 +1003,11 @@ class RakuAST::PackageInstaller {
                 action => self.dba ~ ' name'
             if $illegal-pseudo-package;
 
+        nqp::say("current package: " ~ $current-package.raku);
+
         if $name.is-identifier {
             $final := $name.canonicalize(:colonpairs(0));
+            nqp::say("is-identifier: " ~ $final);
             $lexical := $resolver.resolve-lexical-constant($final);
             $resolver.current-scope.merge-generated-lexical-declaration:
                 :$resolver,
@@ -1014,7 +1017,8 @@ class RakuAST::PackageInstaller {
                 $target := $current-package;
 
                 my %stash := $resolver.IMPL-STASH-HASH($target);
-                if nqp::existskey(%stash, $final) && !(%stash{$final} =:= $type-object || nqp::istype(%stash{$final}.HOW, Perl6::Metamodel::PackageHOW)) {
+                if nqp::existskey(%stash, $final)
+                && !(%stash{$final} =:= $type-object || nqp::istype(%stash{$final}.HOW, Perl6::Metamodel::PackageHOW)) {
                     $resolver.add-sorry: $resolver.build-exception:
                         'X::Redeclaration', :symbol($final);
                 }

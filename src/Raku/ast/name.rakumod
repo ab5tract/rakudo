@@ -220,6 +220,7 @@ class RakuAST::Name
     method canonicalize(:$colonpairs) {
         my $canon-parts := nqp::list_s();
         my $first := 1;
+        my $parameterization;
         for $!parts {
             if nqp::istype($_, RakuAST::Name::Part::Simple) {
                 nqp::push_s($canon-parts, $_.name);
@@ -236,16 +237,31 @@ class RakuAST::Name
                     my $expr := $_.expr;
                     nqp::push_s($canon-parts, '(' ~ ($expr.origin ?? $expr.origin.Str !! $expr.DEPARSE) ~ ')');
                 }
+            } elsif nqp::istype($_, RakuAST::Name::Part::Parameterization) {
+                # There should only be one parameterization part per name
+                nqp::die("There should only ever be a single parameterization name part per name")
+                    if $parameterization;
+                $parameterization := $_;
             }
             else {
                 nqp::die('canonicalize NYI for non-simple name part ' ~ $_.HOW.name($_));
             }
             $first := 0;
         }
+
         my $name := nqp::join('::', $canon-parts);
+
+        if $parameterization {
+            my @params := self.IMPL-UNWRAP-LIST($parameterization.names);
+            if @params {
+                $name := $name ~ '[' ~ nqp::join(',', @params) ~ ']'
+            }
+        }
+
         unless nqp::isconcrete($colonpairs) && !$colonpairs {
             $name := $name ~ self.colonpair-suffix;
         }
+
         $name
     }
 
@@ -475,6 +491,25 @@ class RakuAST::Name::Part::Simple
 
     method IMPL-QAST-INDIRECT-LOOKUP-PART(RakuAST::IMPL::QASTContext $context, Mu $stash-qast, Int $is-final, str :$sigil) {
         QAST::SVal.new( :value($is-final && $sigil ?? $sigil ~ $!name !! $!name) )
+    }
+}
+
+class RakuAST::Name::Part::Parameterization
+  is RakuAST::Name::Part
+  is RakuAST::ListWrapper
+{
+    has List $!names;
+
+    method new() {
+        my $obj := nqp::create(self);
+        nqp::bindattr($obj, RakuAST::Name::Part::Parameterization, '$!names', nqp::list_s());
+        $obj
+    }
+
+    method names() { self.IMPL-WRAP-LIST($!names) }
+
+    method add-name(str $name) {
+        nqp::push_s($!names, $name)
     }
 }
 
