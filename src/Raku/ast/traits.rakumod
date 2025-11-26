@@ -184,6 +184,17 @@ class RakuAST::Trait::Is
         $obj
     }
 
+    method apply(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context, RakuAST::TraitTarget $target, *%named) {
+        nqp::findmethod(self,'apply')($resolver,$context,$target,|%named);
+        if $!type
+        && $!type.meta-object.HOW.archetypes.generic
+        && my $role := $resolver.find-attach-target('generics-pad')
+        {
+            nqp::say("give me my meta mollo: " ~ ) if nqp::getenvhash<WTF>;
+            $role.ADD-GENERIC-LEXICAL($target)
+        }
+    }
+
     method PERFORM-BEGIN(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         # See if the name resolves as a type and commit to that.
         unless $!type {
