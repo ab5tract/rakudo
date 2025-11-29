@@ -534,6 +534,10 @@ class RakuAST::Role
         unless nqp::defined($!instantiation-lexicals) {
             nqp::bindattr(self, RakuAST::Role, '$!instantiation-lexicals', []);
         }
+        if my @role-body-lexicals := $role-body.generic-lexicals {
+            nqp::say("we have " ~ nqp::elems(@role-body-lexicals) ~ " role body lexicals") if nqp::getenvhash<WTF>;
+            nqp::push($!instantiation-lexicals, |@role-body-lexicals)
+        }
         $body.statement-list.unshift-statement(
             $resolve-instantiations := RakuAST::Role::ResolveInstantiations.new(
                 $!instantiation-lexicals)
@@ -767,7 +771,7 @@ class RakuAST::Class
         # about being generic after traits are applied.
         if self.scope eq 'my'   # This narrows it down considerably, as roles can only have my-scope classes
         && (my $role := $resolver.find-attach-target("generics-pad"))
-        && $role.is-parameterization-generic
+        && self.traits-include-is-generic
         {
             nqp::say("they found it! I don't know how they found it but they found it") if nqp::getenvhash<WTF>;
             $role.IMPL-ADD-GENERIC-LEXICAL(self)

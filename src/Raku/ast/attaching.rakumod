@@ -8,7 +8,7 @@
 class RakuAST::AttachTarget
   is RakuAST::Node
 {
-    # Expected to return a (possibly empty) List of attach target names
+    # Expected to return a (possibly empty) Array of attach target names
     # for this node.  Must be supplied by the consuming class.
     method attach-target-names() {
         nqp::die('attach-target-names not implemented for ' ~ self.HOW.name(self));

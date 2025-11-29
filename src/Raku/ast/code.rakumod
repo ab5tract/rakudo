@@ -2363,8 +2363,10 @@ class RakuAST::Sub
 
 class RakuAST::RoleBody
   is RakuAST::Sub
+  is RakuAST::AttachTarget
 {
     has RakuAST::LexicalFixup $.fixup;
+    has List $!generic-lexicals;
 
     method new(          str :$scope,
                          str :$multiness,
@@ -2385,6 +2387,7 @@ class RakuAST::RoleBody
         nqp::bindattr($obj, RakuAST::Sub, '$!body',
           $body // RakuAST::Blockoid.new);
         nqp::bindattr($obj, RakuAST::RoleBody, '$!fixup', RakuAST::LexicalFixup);
+        nqp::bindattr($obj, RakuAST::RoleBody, '$!generic-lexicals', nqp::list());
         $obj.set-WHY($WHY);
         $obj
     }
@@ -2398,6 +2401,12 @@ class RakuAST::RoleBody
         nqp::bindattr(self, RakuAST::Routine, '$!signature', $new-signature);
         Nil
     }
+
+    method attach-target-names() { [ 'role-body' ] }
+    method clear-attachments()   { nqp::bindattr(self,RakuAST::RoleBody,'$!generic-lexicals',nqp::list()) }
+
+    method add-generic-lexical(Mu $generic-lexical) { nqp::push($!generic-lexicals, $generic-lexical) }
+    method generic-lexicals() { self.IMPL-UNWRAP-LIST($!generic-lexicals) }
 
     method PERFORM-PARSE(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         nqp::findmethod(RakuAST::Routine, 'PERFORM-PARSE')(self, $resolver, $context);

@@ -36,6 +36,16 @@ class RakuAST::TraitTarget {
         self.IMPL-WRAP-LIST(nqp::islist($traits) ?? $traits !! [])
     }
 
+    method traits-include-is-generic() {
+        my int $has-is-generic := 0;
+        for self.IMPL-UNWRAP-LIST(self.traits) -> $trait {
+            last if $has-is-generic := nqp::istype($trait,RakuAST::Trait::Is)
+                                    && $trait.type
+                                    && $trait.type.meta-object.HOW.archetypes.generic
+        }
+        $has-is-generic
+    }
+
     method add-trait-sorries() {
         if $!sorries {
             self.add-sorry($_) for $!sorries;
@@ -184,14 +194,15 @@ class RakuAST::Trait::Is
         $obj
     }
 
+
     method apply(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context, RakuAST::TraitTarget $target, *%named) {
-        nqp::findmethod(self,'apply')($resolver,$context,$target,|%named);
+        nqp::findmethod(RakuAST::Trait,'apply')(self,$resolver,$context,$target,|%named);
         if $!type
         && $!type.meta-object.HOW.archetypes.generic
         && my $role := $resolver.find-attach-target('generics-pad')
         {
-            nqp::say("give me my meta mollo: " ~ ) if nqp::getenvhash<WTF>;
-            $role.ADD-GENERIC-LEXICAL($target)
+            nqp::say("give me my meta mollo: " ~ $!type.meta-object.HOW.archetypes.generic) if nqp::getenvhash<WTF>;
+            $role.IMPL-ADD-GENERIC-LEXICAL($target);
         }
     }
 

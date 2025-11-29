@@ -436,6 +436,11 @@ class RakuAST::Type::Parameterized
         $visitor($!args);
     }
 
+    method lexical-name() {
+        my $mo := self.stubbed-meta-object;
+        $mo.HOW.name($mo)
+    }
+
     method PERFORM-BEGIN(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         my $ptype := self.IMPL-BASE-TYPE.compile-time-value;
         unless nqp::can($ptype.HOW, 'parameterize') || ($*COMPILING_CORE_SETTING // 0) == 1 {
@@ -453,13 +458,16 @@ class RakuAST::Type::Parameterized
         if $fail {
             $resolver.produce-compilation-exception.throw;
         }
-
     }
 
     method PERFORM-CHECK(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         if $!args.IMPL-HAS-ONLY-COMPILE-TIME-VALUES && !$resolver.have-check-time-problems {
             # Force parameterization now
             self.meta-object;
+        }
+        if my $role-body := $resolver.find-attach-target('role-body') {
+            nqp::say("here we go!") if nqp::getenvhash<WTF>;
+            $role-body.add-generic-lexical(self);
         }
     }
 
