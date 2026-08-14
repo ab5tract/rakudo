@@ -15,8 +15,11 @@ NQP_PREFIX  = @nqp_prefix@
 NQP_JARS = @nqp_jars@
 BLD_NQP_JARS = @bld_nqp_jars@
 
-RUNTIME_JAVAS = @nfp(src/vm/jvm/runtime/org/raku/rakudo/*.java)@
+RUNTIME_SOURCES = @nfp(src/vm/jvm/runtime/org/raku/rakudo/*.java)@ @nfp(src/vm/jvm/runtime/org/raku/rakudo/*.kt)@
 RUNTIME_JAR = rakudo-runtime.jar
+# The runtime layer is mixed Java/Kotlin; its build lives in
+# rakudo-runtime/ and runs on the nested nqp checkout's Gradle wrapper.
+GRADLEW = @nfp(nqp/gradlew)@
 
 @bpv(BAT)@    = @runner_suffix@
 
@@ -47,11 +50,10 @@ RUNTIME_JAR = rakudo-runtime.jar
 
 @include(Makefile-backend-common)@
 
-$(RUNTIME_JAR): $(RUNTIME_JAVAS)
-	@echo(+++ Generating	$@)@
-	$(NOECHO)$(MKPATH) bin
-	$(NOECHO)$(JAVAC) --release 9 -cp @q($(BLD_NQP_JARS))@ -g:none -d bin -encoding UTF8 $(RUNTIME_JAVAS)
-	$(NOECHO)$(JAR) cf0 rakudo-runtime.jar -C bin@slash@ .
+$(RUNTIME_JAR): $(RUNTIME_SOURCES) @nfp(rakudo-runtime/build.gradle.kts)@
+	@echo(+++ Generating	$@ (Gradle))@
+	$(NOECHO)cd @nfp(rakudo-runtime)@ && @nfp(../nqp/gradlew)@ --console=plain -q jar
+	$(NOECHO)$(CP) @nfp(rakudo-runtime/build/libs/rakudo-runtime.jar)@ $(RUNTIME_JAR)
 
 @bpm(RUN_RAKUDO_SCRIPT)@: @@nfp(@template(@backend_subdir@/rakudo-j-build.in)@)@@
 	$(NOECHO)$(RM_F) @q(@bpm(RUN_RAKUDO_SCRIPT)@)@
@@ -75,7 +77,7 @@ $(J_RUNNER): @@script(create-jvm-runner.pl)@@@for_specs( @bsm(SETTING_@ucspec@)@
 
 eval-client.pl:
 	@echo(+++ Setting up	$@)@
-	$(NOECHO)$(CP) @nfpq($(SDKROOT)$(NQP_PREFIX)/bin/eval-client.pl)@ .
+	$(NOECHO)$(CP) @nfpq($(SDKROOT)$(NQP_PREFIX)/bin/eval-client.pl)@ . || $(CP) @nfpq($(SDKROOT)$(NQP_PREFIX)/tools/jvm/eval-client.pl)@ .
 
 ##  testing targets
 
