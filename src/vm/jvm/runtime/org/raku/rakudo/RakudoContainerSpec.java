@@ -1,7 +1,8 @@
 package org.raku.rakudo;
 
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.lang.reflect.Field;
-import sun.misc.Unsafe;
 
 import org.raku.nqp.runtime.*;
 import org.raku.nqp.sixmodel.*;
@@ -91,18 +92,19 @@ public class RakudoContainerSpec extends ContainerSpec {
 
     /* Atomic operations. */
 
-    private Unsafe unsafe;
-    private long scalarValueOffset;
+    /* VarHandle for the generated Scalar class's $!value slot (field_1),
+     * formerly a sun.misc.Unsafe field offset. Cached lazily from the
+     * first container seen, as the Unsafe version cached its offset; the
+     * single-field cache also removes that version's two-field publication
+     * race (worst case now is a harmless recomputation). */
+    private VarHandle scalarValueHandle;
 
-    @SuppressWarnings("restriction")
     private void ensureAtomicsReady(SixModelObject cont) {
-        if (unsafe == null) {
+        if (scalarValueHandle == null) {
             try {
-                Field unsafeField = Unsafe.class.getDeclaredField("theUnsafe");
-                unsafeField.setAccessible(true);
-                unsafe = (Unsafe)unsafeField.get(null);
-                scalarValueOffset = unsafe.objectFieldOffset(
-                    cont.getClass().getDeclaredField("field_1"));
+                Field field = cont.getClass().getDeclaredField("field_1");
+                field.setAccessible(true);
+                scalarValueHandle = MethodHandles.lookup().unreflectVarHandle(field);
             }
             catch (Exception e) {
                 throw new RuntimeException(e);
@@ -118,7 +120,7 @@ public class RakudoContainerSpec extends ContainerSpec {
 
     public SixModelObject atomic_load(ThreadContext tc, SixModelObject cont) {
         ensureAtomicsReady(cont);
-        return (SixModelObject)unsafe.getObjectVolatile(cont, scalarValueOffset);
+        return (SixModelObject)scalarValueHandle.getVolatile(cont);
     }
 
     public void atomic_store(ThreadContext tc, SixModelObject cont,
