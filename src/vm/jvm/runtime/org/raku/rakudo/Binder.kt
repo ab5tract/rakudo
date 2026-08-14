@@ -626,7 +626,7 @@ object Binder {
                         var bindee = decontValue
                         if ((paramFlags and SIG_ELEM_IS_COPY) != 0) {
                             val BOOTArray = tc.gc.BOOTArray!!
-                            bindee = gcx.Array.st.REPR.allocate(tc, gcx.Array.st)
+                            bindee = gcx.Array!!.st.REPR.allocate(tc, gcx.Array!!.st)
                             bindee.bind_attribute_boxed(tc, gcx.List, "$!reified",
                                 HINT_LIST_reified, BOOTArray.st.REPR.allocate(tc, BOOTArray.st))
                             RakOps.p6store(bindee, decontValue, tc)
@@ -639,7 +639,7 @@ object Binder {
                         var bindee = decontValue
                         if ((paramFlags and SIG_ELEM_IS_COPY) != 0) {
                             val BOOTHash = tc.gc.BOOTHash!!
-                            bindee = gcx.Hash.st.REPR.allocate(tc, gcx.Hash.st)
+                            bindee = gcx.Hash!!.st.REPR.allocate(tc, gcx.Hash!!.st)
                             bindee.bind_attribute_boxed(tc, gcx.Map, "$!storage",
                                 HINT_ENUMMAP_storage, BOOTHash.st.REPR.allocate(tc, BOOTHash.st))
                             RakOps.p6store(bindee, decontValue, tc)
@@ -657,7 +657,7 @@ object Binder {
                                 Ops.istype(paramType, gcx.Iterable, tc) != 0L
                         }
                         if (wrap || varName == "\$_") {
-                            val stScalar = gcx.Scalar.st
+                            val stScalar = gcx.Scalar!!.st
                             val new_cont = stScalar.REPR.allocate(tc, stScalar)
                             val desc = param.get_attribute_boxed(tc, gcx.Parameter,
                                 "$!container_descriptor", HINT_container_descriptor)
@@ -871,7 +871,7 @@ object Binder {
                         Ops.invokeDirect(tc, ofMeth, Ops.invocantCallSite, arrayOf<Any?>(paramType))
                         val ofType = Ops.result_o(tc.curFrame!!)
 
-                        val arrayHOW = gcx.Array.st.HOW
+                        val arrayHOW = gcx.Array!!.st.HOW
                         val parameterizeMeth = Ops.findmethod(arrayHOW, "parameterize", tc)
                         Ops.invokeDirect(tc, parameterizeMeth, parameterizeArray, arrayOf<Any?>(arrayHOW, gcx.Array, ofType))
                         defaultType = Ops.result_o(tc.curFrame!!)
@@ -897,7 +897,7 @@ object Binder {
                     Ops.invokeDirect(tc, keyofMeth, Ops.invocantCallSite, arrayOf<Any?>(paramType))
                     val keyofType = Ops.result_o(tc.curFrame!!)
 
-                    val hashHOW = gcx.Hash.st.HOW
+                    val hashHOW = gcx.Hash!!.st.HOW
                     val parameterizeMeth = Ops.findmethod(hashHOW, "parameterize", tc)
                     Ops.invokeDirect(tc, parameterizeMeth, parameterizeHash, arrayOf<Any?>(hashHOW, gcx.Hash, ofType, keyofType))
                     defaultType = Ops.result_o(tc.curFrame!!)
@@ -990,7 +990,7 @@ object Binder {
                     bindFail = BIND_RESULT_OK
                 }
                 else {
-                    val posArgs = gcx.EMPTYARR.clone(tc)
+                    val posArgs = gcx.EMPTYARR!!.clone(tc)
                     for (k in curPosArg until numPosArgs) {
                         when (csd.argFlags[k]) {
                         CallSiteDescriptor.ARG_OBJ ->
@@ -1008,7 +1008,7 @@ object Binder {
                     val namedArgs = vmHashOfRemainingNameds(tc, gcx, namedArgsCopy, args)
 
                     val capType = gcx.Capture
-                    val capSnap = capType.st.REPR.allocate(tc, capType.st)
+                    val capSnap = capType!!.st.REPR.allocate(tc, capType.st)
                     capSnap.bind_attribute_boxed(tc, capType, "@!list", HINT_CAPTURE_list, posArgs)
                     capSnap.bind_attribute_boxed(tc, capType, "%!hash", HINT_CAPTURE_hash, namedArgs)
 
@@ -1035,7 +1035,7 @@ object Binder {
             /* Could it be a named slurpy? */
             else if ((flags and SIG_ELEM_SLURPY_NAMED) != 0) {
                 val slurpy = vmHashOfRemainingNameds(tc, gcx, namedArgsCopy, args)
-                val bindee = gcx.Hash.st.REPR.allocate(tc, gcx.Hash.st)
+                val bindee = gcx.Hash!!.st.REPR.allocate(tc, gcx.Hash!!.st)
                 bindee.bind_attribute_boxed(tc, gcx.Map, "$!storage",
                     HINT_ENUMMAP_storage, slurpy)
                 bindFail = bindOneParam(tc, gcx, cf, param, bindee, CallSiteDescriptor.ARG_OBJ,
@@ -1054,7 +1054,7 @@ object Binder {
                 if ((flags and (SIG_ELEM_SLURPY_POS or SIG_ELEM_SLURPY_LOL or SIG_ELEM_SLURPY_ONEARG)) != 0) {
                     /* Create Raku array, create VM array of all remaining things,
                      * then store it. */
-                    val slurpy = gcx.EMPTYARR.clone(tc)
+                    val slurpy = gcx.EMPTYARR!!.clone(tc)
                     while (curPosArg < numPosArgs) {
                         when (csd.argFlags[curPosArg]) {
                         CallSiteDescriptor.ARG_OBJ ->
@@ -1200,7 +1200,7 @@ object Binder {
 
     /* Takes any nameds we didn't capture yet and makes a VM Hash of them. */
     private fun vmHashOfRemainingNameds(tc: ThreadContext, gcx: RakOps.GlobalExt, namedArgsCopy: Object2IntOpenHashMap<String>?, args: Array<Any?>?): SixModelObject {
-        var slurpy: SixModelObject = gcx.Mu
+        var slurpy: SixModelObject = gcx.Mu!!
         if (namedArgsCopy != null) {
             val BOOTHash = tc.gc.BOOTHash!!
             slurpy = BOOTHash.st.REPR.allocate(tc, BOOTHash.st)
