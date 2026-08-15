@@ -12,9 +12,9 @@ import org.raku.nqp.runtime.Ops
 import org.raku.nqp.runtime.StaticCodeInfo
 import org.raku.nqp.runtime.ThreadContext
 import org.raku.nqp.sixmodel.ContainerSpec
+import org.raku.nqp.sixmodel.Inlining
 import org.raku.nqp.sixmodel.STable
 import org.raku.nqp.sixmodel.SixModelObject
-import org.raku.nqp.sixmodel.StorageSpec
 import org.raku.nqp.sixmodel.TypeObject
 import org.raku.nqp.sixmodel.reprs.CallCaptureInstance
 import org.raku.nqp.sixmodel.reprs.ContextRefInstance
@@ -410,7 +410,7 @@ object RakOps {
                 /* Straight type check failed, but it's possible we're returning
                  * an Int that can unbox into an int or similar. */
                 val spec = rtype!!.st.REPR.get_storage_spec(tc, rtype.st)
-                if (spec.inlineable.toInt() == 0 || Ops.istype(rtype, decontValue!!.st.WHAT, tc) == 0L) {
+                if (spec.inlining == Inlining.REFERENCE || Ops.istype(rtype, decontValue!!.st.WHAT, tc) == 0L) {
                     if (Ops.istype(decontValue!!.st.WHAT, bypassType, tc) == 0L) {
                         val thrower = getThrower(tc, "X::TypeCheck::Return")
                         if (thrower == null)
