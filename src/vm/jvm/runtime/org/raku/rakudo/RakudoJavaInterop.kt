@@ -8,9 +8,9 @@ import org.raku.nqp.runtime.ExceptionHandling
 import org.raku.nqp.runtime.GlobalContext
 import org.raku.nqp.runtime.Ops
 import org.raku.nqp.runtime.ThreadContext
+import org.raku.nqp.sixmodel.Boxable
 import org.raku.nqp.sixmodel.STable
 import org.raku.nqp.sixmodel.SixModelObject
-import org.raku.nqp.sixmodel.StorageSpec
 
 import java.net.MalformedURLException
 import java.net.URL
@@ -519,22 +519,22 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
                 // ...and two for boxeds
                 val innerSS = Ops.decont(Ops.decont(inArg, tc), tc)!!
                     .st.REPR.get_storage_spec(tc, Ops.decont(inArg, tc)!!.st)
-                if ((outerSS.can_box.toInt() and StorageSpec.CAN_BOX_NUM.toInt()) != 0) {
+                if (Boxable.NUM in outerSS.canBox) {
                     outArg = Ops.unbox_n(inArg, tc)
                 }
-                else if ((outerSS.can_box.toInt() and StorageSpec.CAN_BOX_STR.toInt()) != 0) {
+                else if (Boxable.STR in outerSS.canBox) {
                     outArg = Ops.unbox_s(inArg, tc)
                 }
-                else if ((outerSS.can_box.toInt() and StorageSpec.CAN_BOX_INT.toInt()) != 0) {
+                else if (Boxable.INT in outerSS.canBox) {
                     outArg = Ops.unbox_i(inArg, tc)
                 }
-                else if ((innerSS.can_box.toInt() and StorageSpec.CAN_BOX_NUM.toInt()) != 0) {
+                else if (Boxable.NUM in innerSS.canBox) {
                     outArg = Ops.unbox_n(inArg, tc)
                 }
-                else if ((innerSS.can_box.toInt() and StorageSpec.CAN_BOX_STR.toInt()) != 0) {
+                else if (Boxable.STR in innerSS.canBox) {
                     outArg = Ops.unbox_s(inArg, tc)
                 }
-                else if ((innerSS.can_box.toInt() and StorageSpec.CAN_BOX_INT.toInt()) != 0) {
+                else if (Boxable.INT in innerSS.canBox) {
                     outArg = Ops.unbox_i(inArg, tc)
                 }
                 else {
