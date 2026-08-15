@@ -61,6 +61,14 @@ class RakuAST::OnlyStar
         True  # `{*}` dispatches to candidates, so it is never useless when sunk
     }
 
+#?if !moar
+    method PRODUCE-IMPLICIT-LOOKUPS() {
+        [
+            RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('Routine')),
+        ]
+    }
+#?endif
+
     method IMPL-EXPR-QAST(RakuAST::IMPL::QASTContext $context) {
         # The dispatch op is the only code in an onlystar body, and a
         # frame's location, as reported by Code.file and Code.line, comes
@@ -72,12 +80,52 @@ class RakuAST::OnlyStar
         # dispatcher's junction handling.
         self.IMPL-SET-NODE(
             QAST::Stmts.new(
+#?if moar
                 QAST::Op.new(
                     :op('dispatch'),
                     QAST::SVal.new( :value('boot-resume') ),
-                    QAST::IVal.new( :value(nqp::const::DISP_ONLYSTAR) ))),
+                    QAST::IVal.new( :value(nqp::const::DISP_ONLYSTAR) ))
+#?endif
+#?if !moar
+                # No new-dispatch here, so do what the legacy frontend's
+                # autogenerate_proto does: consult the routine's own dispatch
+                # cache for the incoming capture, falling back to asking it to
+                # pick a candidate, and invoke whatever comes back.
+                self.IMPL-ONLYSTAR-DISPATCH-QAST
+#?endif
+                ),
             :key);
     }
+
+#?if !moar
+    method IMPL-ONLYSTAR-DISPATCH-QAST() {
+        my $Routine := self.IMPL-UNWRAP-LIST(self.get-implicit-lookups)[0].compile-time-value;
+        my sub curcode() {
+            QAST::Op.new( :op('getcodeobj'), QAST::Op.new( :op('curcode') ) )
+        }
+        QAST::Op.new(
+            :op('invokewithcapture'),
+            QAST::Op.new(
+                :op('ifnull'),
+                QAST::Op.new(
+                    :op('multicachefind'),
+                    QAST::Var.new(
+                        :name('$!dispatch_cache'), :scope('attribute'),
+                        curcode(),
+                        QAST::WVal.new( :value($Routine) ),
+                    ),
+                    QAST::Op.new( :op('usecapture') )
+                ),
+                QAST::Op.new(
+                    :op('callmethod'), :name('find_best_dispatchee'),
+                    curcode(),
+                    QAST::Op.new( :op('savecapture') )
+                ),
+            ),
+            QAST::Op.new( :op('usecapture') )
+        )
+    }
+#?endif
 
     method IMPL-REGEX-TOP-LEVEL-QAST(
       RakuAST::IMPL::QASTContext  $context,
