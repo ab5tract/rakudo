@@ -703,6 +703,25 @@ sub gen_nqp {
           );
         $impls->{$b}{bin} = $bin;
         my %c        = read_config($bin);
+
+        # java-to-kotlin prototype: with no installed nqp-j and no
+        # --with-nqp, fall back to the nested nqp checkout's Gradle-built
+        # runner (and then its Makefile-built one, if any).
+        if ( $b eq 'jvm' && !%c && !$bconfig->{nqp_bin} ) {
+            for my $cand ( "nqp-j-gradle$exe", "nqp-j$exe" ) {
+                my $try = File::Spec->catfile( $startdir, 'nqp', $cand );
+                next unless -e $try;
+                my %tc = read_config($try);
+                if (%tc) {
+                    $bin = $try;
+                    %c   = %tc;
+                    $impls->{$b}{bin} = $bin;
+                    $self->msg("Using the nested nqp checkout's $cand\n");
+                    last;
+                }
+            }
+        }
+
         my $nqp_have = $c{'nqp::version'} || '';
         $self->backend_config( $b, \%c ) if %c;
         my $nqp_ver_ok =
