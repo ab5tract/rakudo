@@ -909,6 +909,7 @@ class RakuAST::Call::Method
             my @parts := nqp::split('::', $name);
             if nqp::elems(@parts) == 1 {
                 my $dispatcher := self.dispatcher;
+#?if moar
                 if $dispatcher eq 'dispatch:<.?>' && $!name.is-identifier {
                     # A maybe-method call ($obj.?meth) with a known method
                     # name. Resolve the method through the invocant's
@@ -937,6 +938,7 @@ class RakuAST::Call::Method
                     self.args.IMPL-ADD-QAST-ARGS($context, $call);
                     return $stmts;
                 }
+#?endif
 
                 if $dispatcher {
                     # A method call going through a dispatch: method
@@ -976,6 +978,7 @@ class RakuAST::Call::Method
                         $qualified-qast;
                 }
                 else {
+#?if moar
                     my $temp := QAST::Node.unique('inv_once');
                     my $stmts := QAST::Stmts.new(
                         QAST::Op.new(
@@ -997,6 +1000,16 @@ class RakuAST::Call::Method
                     );
                     self.args.IMPL-ADD-QAST-ARGS($context, $call);
                     return $stmts;
+#?endif
+#?if !moar
+                    # No new-dispatch, so go through Mu's dispatch:<::>, which
+                    # is what the legacy frontend emits for a qualified call.
+                    $call := QAST::Op.new:
+                        :op('callmethod'), :name('dispatch:<::>'),
+                        $invocant-qast,
+                        QAST::SVal.new(:value($name)),
+                        $qualified-qast;
+#?endif
                 }
             }
         }
@@ -1334,15 +1347,28 @@ class RakuAST::Call::PrivateMethod
                     nqp::die("Private method $name not found on " ~ $package.HOW.name($package));
                 }
             }
+            my $package-qast := $!package.HOW.archetypes.parametric
+              ?? self.IMPL-UNWRAP-LIST(self.get-implicit-lookups)[0].IMPL-EXPR-QAST($context)
+              !! QAST::WVal.new(:value($!package));
+#?if moar
             $call := QAST::Op.new(
                 :op('dispatch'),
                 QAST::SVal.new(:value('raku-meth-private')),
-                $!package.HOW.archetypes.parametric
-                  ?? self.IMPL-UNWRAP-LIST(self.get-implicit-lookups)[0].IMPL-EXPR-QAST($context)
-                  !! QAST::WVal.new(:value($!package)),
+                $package-qast,
                 QAST::SVal.new(:value($name)),
                 $invocant-qast,
             );
+#?endif
+#?if !moar
+            # No new-dispatch, so go through Mu's dispatch:<!>, the same call
+            # the unresolved case below makes.
+            $call := QAST::Op.new(
+                :op('callmethod'), :name('dispatch:<!>'),
+                $invocant-qast,
+                QAST::SVal.new(:value($name)),
+                $package-qast,
+            );
+#?endif
         }
         else {
             $call := QAST::Op.new(
