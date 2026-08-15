@@ -128,7 +128,7 @@ augment class Match {
             $match = nqp::eqat($tgt, $topic_str, $pos);
         }
 
-#?if moar
+#?if !js
         # ignoremark+ignorecase
         elsif im == 3 {
             $match = nqp::eqaticim($tgt, $topic_str, $pos);
@@ -144,7 +144,7 @@ augment class Match {
             $match = nqp::eqatic($tgt, $topic_str, $pos);
         }
 #?endif
-#?if !moar
+#?if js
 
 # This branch is required because neither the JVM nor the JS implementations
 # have the nqp::eqat* ops. However, nqp::ordbaseat just throws a NYI
@@ -258,7 +258,6 @@ augment class Match {
             $match = nqp::eqat($tgt, $topic_str, $pos);
         }
 
-#?if !jvm
         # ignoremark+ignorecase
         elsif im == 3 {
             $match = nqp::eqaticim($tgt, $topic_str, $pos);
@@ -273,48 +272,6 @@ augment class Match {
         elsif im == 1 {
             $match = nqp::eqatic($tgt, $topic_str, $pos);
         }
-#?endif
-#?if jvm
-
-# This branch is required because neither the JVM nor the JS implementations
-# have the nqp::eqat* ops. However, nqp::ordbaseat just throws a NYI
-# exception for both, so the code doesn't actually work.
-
-        # ignoremark(+ignorecase?)
-        elsif im == 2 || im == 3 {
-            my int $k = -1;
-
-            # ignorecase+ignoremark
-            if im == 3 {
-                my str $tgt_fc   = nqp::fc(nqp::substr($tgt,$pos,$len));
-                my str $topic_fc = nqp::fc($topic_str);
-                Nil while nqp::islt_i(++$k,$len)
-                  && nqp::iseq_i(
-                    nqp::ordbaseat($tgt_fc, nqp::add_i($pos,$k)),
-                    nqp::ordbaseat($topic_fc, $k)
-                  );
-            }
-
-            # ignoremark
-            else {
-                Nil while nqp::islt_i(++$k, $len)
-                  && nqp::iseq_i(
-                    nqp::ordbaseat($tgt, nqp::add_i($pos,$k)),
-                    nqp::ordbaseat($topic_str, $k)
-                  );
-            }
-
-            $match = nqp::iseq_i($k,$len); # match if completed
-        }
-
-        # ignorecase
-        else {
-            $match = nqp::iseq_s(
-              nqp::fc(nqp::substr($tgt, $pos, $len)),
-              nqp::fc($topic_str)
-            )
-        }
-#?endif
 
         if $match
           && nqp::isgt_i($len,$maxlen)
