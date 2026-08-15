@@ -6,10 +6,10 @@ import org.raku.nqp.runtime.CallFrame
 import org.raku.nqp.runtime.CallSiteDescriptor
 import org.raku.nqp.runtime.Ops
 import org.raku.nqp.runtime.ThreadContext
+import org.raku.nqp.sixmodel.Boxable
 import org.raku.nqp.sixmodel.REPR
 import org.raku.nqp.sixmodel.STable
 import org.raku.nqp.sixmodel.SixModelObject
-import org.raku.nqp.sixmodel.StorageSpec
 import org.raku.nqp.sixmodel.reprs.ContextRefInstance
 import org.raku.nqp.sixmodel.reprs.P6int
 import org.raku.nqp.sixmodel.reprs.P6str
@@ -346,7 +346,7 @@ object Binder {
             val spec = unboxVal.st.REPR.get_storage_spec(tc, unboxVal.st)
             when (desiredNative) {
                 SIG_ELEM_NATIVE_INT_VALUE ->
-                    if ((spec.can_box.toInt() and StorageSpec.CAN_BOX_INT.toInt()) != 0) {
+                    if (Boxable.INT in spec.canBox) {
                         flag = CallSiteDescriptor.ARG_INT.toInt()
                         arg_i = unboxVal.get_int(tc)
                     }
@@ -358,7 +358,7 @@ object Binder {
                         return BIND_RESULT_FAIL
                     }
                 SIG_ELEM_NATIVE_UINT_VALUE ->
-                    if ((spec.can_box.toInt() and StorageSpec.CAN_BOX_INT.toInt()) != 0) {
+                    if (Boxable.INT in spec.canBox) {
                         flag = CallSiteDescriptor.ARG_UINT.toInt()
                         arg_i = unboxVal.get_int(tc)
                     }
@@ -370,7 +370,7 @@ object Binder {
                         return BIND_RESULT_FAIL
                     }
                 SIG_ELEM_NATIVE_NUM_VALUE ->
-                    if ((spec.can_box.toInt() and StorageSpec.CAN_BOX_NUM.toInt()) != 0) {
+                    if (Boxable.NUM in spec.canBox) {
                         flag = CallSiteDescriptor.ARG_NUM.toInt()
                         arg_n = unboxVal.get_num(tc)
                     }
@@ -382,7 +382,7 @@ object Binder {
                         return BIND_RESULT_FAIL
                     }
                 SIG_ELEM_NATIVE_STR_VALUE ->
-                    if ((spec.can_box.toInt() and StorageSpec.CAN_BOX_STR.toInt()) != 0) {
+                    if (Boxable.STR in spec.canBox) {
                         flag = CallSiteDescriptor.ARG_STR.toInt()
                         arg_s = unboxVal.get_str(tc)
                     }
