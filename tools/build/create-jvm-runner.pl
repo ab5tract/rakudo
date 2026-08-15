@@ -160,10 +160,10 @@ sub install {
 }
 
 my $classpath = join($cpsep, ($rakudo_jars, $jardir, $libdir, $nqplibdir));
-my $jopts = '-noverify -Xms100m'
+my $jopts = '-noverify -Xms100m --enable-native-access=ALL-UNNAMED'
           . ' -cp ' . ($^O eq 'MSWin32' ? '"%CLASSPATH%";' : '$CLASSPATH:') . $classpath
           . ' -Dperl6.prefix=' . ($type eq 'install' && $^O ne 'MSWin32' ? '$DIR/..' : $prefix)
-          . ' -Djna.library.path=' . $sharedir
+          . ' -Dnqp.library.path=' . $sharedir
           . ($^O eq 'MSWin32' ? ' -Dperl6.execname="%~dpf0"' : ' -Dperl6.execname="$EXEC"');
 my $jdbopts = '-Xdebug -Xrunjdwp:transport=dt_socket,address=' 
             . ($^O eq 'MSWin32' ? '8000' : '${RAKUDO_JDB_PORT:=8000}') 
