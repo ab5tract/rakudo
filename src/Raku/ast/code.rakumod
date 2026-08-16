@@ -45,6 +45,11 @@ class RakuAST::Blockoid
 class RakuAST::OnlyStar
   is RakuAST::Blockoid
   is RakuAST::Term
+#?if !moar
+  # Backends without new-dispatch build the proto's dispatch by hand and need
+  # Routine to reach the routine's `$!dispatch_cache` attribute.
+  is RakuAST::ImplicitLookups
+#?endif
 {
     method new() {
         my $obj := nqp::create(self);
