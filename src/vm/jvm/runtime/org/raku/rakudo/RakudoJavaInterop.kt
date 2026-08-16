@@ -902,9 +902,9 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
             // ...but here's what we actually do:
             /* NOTE: reflective URLClassLoader.addURL — JDK-9+-fragile, but
              * preserved as-is. */
-            val meth_addURL = URLClassLoader::class.java.getDeclaredMethod("addURL", URL::class.java)
-            meth_addURL.setAccessible(true)
-            meth_addURL.invoke(javaClass.classLoader, URL(thePath))
+            val methAddURL = URLClassLoader::class.java.getDeclaredMethod("addURL", URL::class.java)
+            methAddURL.setAccessible(true)
+            methAddURL.invoke(javaClass.classLoader, URL(thePath))
         }
         catch (nsme: NoSuchMethodException) {
             throw ExceptionHandling.dieInternal(gc.getCurrentThreadContext()!!, nsme)
@@ -934,7 +934,7 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
 
         val hash = gc.BOOTHash!!.st.REPR.allocate(tc, gc.BOOTHash!!.st)
 
-        val method_order = gc.BOOTArray!!.st.REPR.allocate(tc, gc.BOOTArray!!.st)
+        val methodOrder = gc.BOOTArray!!.st.REPR.allocate(tc, gc.BOOTArray!!.st)
         val methods = gc.BOOTHash!!.st.REPR.allocate(tc, gc.BOOTHash!!.st)
         val submethods = gc.BOOTHash!!.st.REPR.allocate(tc, gc.BOOTHash!!.st)
 
@@ -985,7 +985,7 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
         while (it.hasNext()) {
             val ent = it.next()
             if (ent.value != null) {
-                method_order.bind_pos_boxed(tc, pos++, ent.value)
+                methodOrder.bind_pos_boxed(tc, pos++, ent.value)
                 methods.bind_key_boxed(tc, ent.key, ent.value)
                 hash.bind_key_boxed(tc, ent.key, ent.value)
             }
@@ -998,7 +998,7 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
 
         ThisHOW.bind_attribute_boxed(tc, gcx.JavaHOW, "%!submethods", STable.NO_HINT, submethods)
         ThisHOW.bind_attribute_boxed(tc, gcx.JavaHOW, "%!methods", STable.NO_HINT, Ops.hllizefor(methods, "Raku", tc))
-        ThisHOW.bind_attribute_boxed(tc, gcx.JavaHOW, "@!method_order", STable.NO_HINT, method_order)
+        ThisHOW.bind_attribute_boxed(tc, gcx.JavaHOW, "@!method_order", STable.NO_HINT, methodOrder)
 
         hash.bind_key_boxed(tc, "/TYPE/", freshType)
 
