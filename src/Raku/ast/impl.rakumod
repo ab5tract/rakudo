@@ -287,11 +287,17 @@ class RakuAST::IMPL::QASTContext {
                 nqp::setcodeobj($coderef, $code-obj);
                 nqp::bindattr($code-obj, Code, '$!do', $coderef);
                 if $drain-compstuff-fixups {
-                    my $fixups := nqp::getattr($code-obj, Code, '@!compstuff')[3];
-                    if $fixups {
-                        $fixups.pop() while $fixups.list;
+                    # A code object un-stubbed by an earlier fixup has its
+                    # @!compstuff already nulled; indexing that is a VMNull
+                    # at_pos_boxed, not an empty list.
+                    my $compstuff := nqp::getattr($code-obj, Code, '@!compstuff');
+                    if nqp::isconcrete($compstuff) {
+                        my $fixups := $compstuff[3];
+                        if $fixups {
+                            $fixups.pop() while $fixups.list;
+                        }
+                        nqp::bindattr($code-obj, Code, '@!compstuff', nqp::null());
                     }
-                    nqp::bindattr($code-obj, Code, '@!compstuff', nqp::null());
                 }
             }
 
@@ -301,11 +307,14 @@ class RakuAST::IMPL::QASTContext {
                     nqp::setcodeobj($clone, $code-obj);
                     nqp::bindattr($code-obj, Code, '$!do', $clone);
                     if $drain-compstuff-fixups {
-                        my $fixups := nqp::getattr($code-obj, Code, '@!compstuff')[3];
-                        if $fixups {
-                            $fixups.pop() while $fixups.list;
+                        my $compstuff := nqp::getattr($code-obj, Code, '@!compstuff');
+                        if nqp::isconcrete($compstuff) {
+                            my $fixups := $compstuff[3];
+                            if $fixups {
+                                $fixups.pop() while $fixups.list;
+                            }
+                            nqp::bindattr($code-obj, Code, '@!compstuff', nqp::null());
                         }
-                        nqp::bindattr($code-obj, Code, '@!compstuff', nqp::null());
                     }
                 }
             }
