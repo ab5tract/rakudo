@@ -5586,7 +5586,15 @@ class RakuAST::BlockThunk
         my $code := nqp::create(self.IMPL-THUNK-OBJECT-TYPE);
         my $param := nqp::create(Parameter);
         nqp::bindattr_s($param, Parameter, '$!variable_name', '$_');
-        nqp::bindattr_i($param, Parameter, '$!flags', 2048 + 16384); # Optional + default from outer
+        # Same shape as the implicit topic RakuAST::Block builds: typed Mu and
+        # raw. A backend that binds with the runtime binder reads this
+        # Parameter rather than lowered QAST, and an unset $!type left it
+        # checking the bound value against whatever the empty slot held.
+        nqp::bindattr($param, Parameter, '$!type', Mu);
+        nqp::bindattr_i($param, Parameter, '$!flags',
+            nqp::const::SIG_ELEM_IS_RAW
+            +| nqp::const::SIG_ELEM_IS_OPTIONAL
+            +| nqp::const::SIG_ELEM_DEFAULT_FROM_OUTER);
         my $sig := nqp::create(Signature);
         nqp::bindattr($sig, Signature, '@!params', [$param]);
         nqp::bindattr_i($sig, Signature, '$!arity', 0);
