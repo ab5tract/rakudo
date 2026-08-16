@@ -922,6 +922,7 @@ class RakuAST::Infix
                                  int $negate ) {
         # Handle cases of s/// or m// separately. For a non-negating smartmatch this case could've been reduced to
         # plain topic localization except that we must ensure a False returned when there is no match.
+#?if moar
         if (nqp::istype($right, RakuAST::RegexThunk) || nqp::istype($right, RakuAST::Transliteration))
             && (!nqp::can($right, 'match-immediately') || $right.match-immediately)
         {
@@ -949,6 +950,10 @@ class RakuAST::Infix
                 $left.IMPL-TO-QAST($context),
                 $sm-call);
         }
+#?endif
+        # Without new-dispatch there is no raku-smartmatch dispatcher, so the
+        # s///-and-m//-specific shortcut above is skipped and these go through
+        # the general path below, i.e. the plain infix operator.
 
         # Only the RHS evaluation needs $_ bound to the topic; the match
         # itself is the plain infix operator, which keeps the smartmatch

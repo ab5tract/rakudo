@@ -340,6 +340,7 @@ class RakuAST::Signature
         my $bindings := QAST::Stmts.new();
         my $parameters := $!parameters // [];
         if $needs-full-binder {
+#?if moar
             $bindings.push(QAST::Op.new(
                 :op('if'),
                 QAST::Op.new(
@@ -352,6 +353,11 @@ class RakuAST::Signature
                 ),
                 QAST::Op.new( :op('p6bindsig') )
             ));
+#?endif
+#?if !moar
+            # No new-dispatch to resume a failed bind, so bind directly.
+            $bindings.push(QAST::Op.new( :op('p6bindsig') ));
+#?endif
         }
         else {
             if $!implicit-invocant {
@@ -364,9 +370,11 @@ class RakuAST::Signature
                 $bindings.push($!implicit-slurpy-hash.IMPL-TO-QAST($context));
             }
         }
+#?if moar
         if $multi {
             $bindings.push(QAST::Op.new( :op('bindcomplete') ));
         }
+#?endif
         $bindings
     }
 
@@ -1707,11 +1715,25 @@ class RakuAST::Parameter
                         QAST::Op.new(
                             :op('bind'),
                             $temp-qast-var,
+#?if moar
                             QAST::Op.new(
                                 :op<dispatch>,
                                 QAST::SVal.new(:value<raku-coercion>),
                                 QAST::Var.new(:name($low-param-type), :scope<local>),
-                                $temp-qast-var)))));
+                                $temp-qast-var)
+#?endif
+#?if !moar
+                            # No new-dispatch: ask the coercion's metaobject
+                            # directly. CoercionHOW.coerce has its own
+                            # non-moar path for exactly this.
+                            QAST::Op.new(
+                                :op('callmethod'), :name('coerce'),
+                                QAST::Op.new( :op('how'),
+                                    QAST::Var.new(:name($low-param-type), :scope<local>) ),
+                                QAST::Var.new(:name($low-param-type), :scope<local>),
+                                $temp-qast-var)
+#?endif
+                            ))));
         }
         elsif $is-coercive {
             $get-decont-var := -> { NQPMu }
@@ -1730,11 +1752,21 @@ class RakuAST::Parameter
                     QAST::Op.new(
                         :op('bind'),
                         $temp-qast-var,
+#?if moar
                         QAST::Op.new(
                             :op<dispatch>,
                             QAST::SVal.new(:value<raku-coercion>),
                             QAST::WVal.new(:value($param-type)),
-                            $temp-qast-var))));
+                            $temp-qast-var)
+#?endif
+#?if !moar
+                        QAST::Op.new(
+                            :op('callmethod'), :name('coerce'),
+                            QAST::Op.new( :op('how'), QAST::WVal.new(:value($param-type)) ),
+                            QAST::WVal.new(:value($param-type)),
+                            $temp-qast-var)
+#?endif
+                        )));
         }
 
         # If it's optional, do any default handling.
