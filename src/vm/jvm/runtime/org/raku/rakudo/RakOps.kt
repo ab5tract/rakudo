@@ -603,6 +603,24 @@ object RakOps {
     private val dispThrower = CallSiteDescriptor(
         byteArrayOf(CallSiteDescriptor.ARG_STR), null)
 
+    /* Sinking a statement used to compile to a `can`/`callmethod sink` pair
+     * inline, which spends one invokedynamic call site per sunk statement.
+     * The core setting has enough of them for that alone to push a class past
+     * HotSpot's 65535-invokedynamic-per-class ceiling, so the whole thing
+     * lives here instead. Returns the sinkee, as MoarVM's p6sink does. */
+    @JvmStatic
+    fun p6sink(obj: SixModelObject?, tc: ThreadContext): SixModelObject? {
+        if (obj != null && Ops.isconcrete(obj, tc) != 0L) {
+            val meth = Ops.findmethodNonFatal(obj, "sink", tc)
+            if (Ops.isnull(meth) == 0L)
+                Ops.invokeDirect(tc, meth, invocantCallSite, arrayOf<Any?>(obj))
+        }
+        return obj
+    }
+
+    private val invocantCallSite = CallSiteDescriptor(
+        byteArrayOf(CallSiteDescriptor.ARG_OBJ), null)
+
     @JvmStatic
     fun p6finddispatcher(usage: String?, tc: ThreadContext): SixModelObject? {
         var dispatcher: SixModelObject? = null
