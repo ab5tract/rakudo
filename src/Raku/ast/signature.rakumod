@@ -340,6 +340,7 @@ class RakuAST::Signature
         my $bindings := QAST::Stmts.new();
         my $parameters := $!parameters // [];
         if $needs-full-binder {
+#?if moar
             $bindings.push(QAST::Op.new(
                 :op('if'),
                 QAST::Op.new(
@@ -352,6 +353,11 @@ class RakuAST::Signature
                 ),
                 QAST::Op.new( :op('p6bindsig') )
             ));
+#?endif
+#?if !moar
+            # No new-dispatch to resume a failed bind, so bind directly.
+            $bindings.push(QAST::Op.new( :op('p6bindsig') ));
+#?endif
         }
         else {
             if $!implicit-invocant {
@@ -364,9 +370,11 @@ class RakuAST::Signature
                 $bindings.push($!implicit-slurpy-hash.IMPL-TO-QAST($context));
             }
         }
+#?if moar
         if $multi {
             $bindings.push(QAST::Op.new( :op('bindcomplete') ));
         }
+#?endif
         $bindings
     }
 
