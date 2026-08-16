@@ -901,6 +901,22 @@ class RakuAST::Call::Method
             !! 3
     }
 
+    method IMPL-DISPATCHER-NAME-QAST(RakuAST::IMPL::QASTContext $context, $name) {
+#?if moar
+        QAST::SVal.new(:value($name))
+#?endif
+#?if !moar
+        # A `dispatch:<...>` method takes the name as a Str. With no
+        # new-dispatch to box a native str on the way in, a bare SVal arrives
+        # as a BOOTStr and the Str(Any) coercion rejects it. A string literal
+        # carries both an object and a native form, which is what the legacy
+        # frontend's `add_string_constant` produces here.
+        # hllizefor: the name reaches here as a BOOTStr, and a literal built
+        # from that boxes back to BOOTStr rather than Str.
+        RakuAST::StrLiteral.new(nqp::hllizefor(nqp::unbox_s($name), 'Raku')).IMPL-EXPR-QAST($context)
+#?endif
+    }
+
     method IMPL-POSTFIX-QAST(RakuAST::IMPL::QASTContext $context, Mu $invocant-qast) {
         my $name := $!name.canonicalize;
         my $call;
@@ -946,7 +962,7 @@ class RakuAST::Call::Method
                         :op('callmethod'),
                         :name($dispatcher),
                         $invocant-qast,
-                        QAST::SVal.new(:value($name))
+                        self.IMPL-DISPATCHER-NAME-QAST($context, $name)
                     );
                     $inline-dot := self.IMPL-INLINE && $dispatcher eq 'dispatch:<.=>';
                 }
@@ -974,7 +990,7 @@ class RakuAST::Call::Method
                         :name($dispatcher),
                         QAST::SVal.new( :value('dispatch:<::>') ),
                         $invocant-qast,
-                        QAST::SVal.new(:value($name)),
+                        self.IMPL-DISPATCHER-NAME-QAST($context, $name),
                         $qualified-qast;
                 }
                 else {
@@ -1007,7 +1023,7 @@ class RakuAST::Call::Method
                     $call := QAST::Op.new:
                         :op('callmethod'), :name('dispatch:<::>'),
                         $invocant-qast,
-                        QAST::SVal.new(:value($name)),
+                        self.IMPL-DISPATCHER-NAME-QAST($context, $name),
                         $qualified-qast;
 #?endif
                 }
@@ -1365,7 +1381,8 @@ class RakuAST::Call::PrivateMethod
             $call := QAST::Op.new(
                 :op('callmethod'), :name('dispatch:<!>'),
                 $invocant-qast,
-                QAST::SVal.new(:value($name)),
+                # A Str, not a bare SVal: see IMPL-DISPATCHER-NAME-QAST.
+                RakuAST::StrLiteral.new($name).IMPL-EXPR-QAST($context),
                 $package-qast,
             );
 #?endif
