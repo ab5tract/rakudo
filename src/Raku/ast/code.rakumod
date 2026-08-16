@@ -3355,6 +3355,17 @@ class RakuAST::Routine
     }
 
     method IMPL-WRAP-RETURN-HANDLER(RakuAST::IMPL::QASTContext $context, QAST::Node $body) {
+#?if !moar
+        # An onlystar proto's body *is* the dispatch, so its result is the
+        # candidate's result, container and all. MoarVM's boot-resume dispatch
+        # never comes back through here, but the hand-built dispatch the other
+        # backends use does, and a p6decontrv wrapper would then strip the
+        # container off every `is raw` candidate - Hash.AT-KEY among them,
+        # which is what autovivification is built on. The legacy frontend
+        # likewise wraps nothing around an onlystar body.
+        return $body if nqp::can(self, 'body')
+            && nqp::istype(self.body, RakuAST::OnlyStar);
+#?endif
         my $result := $body;
         my $routine := self.compile-time-value;
         my $signature := nqp::getattr($routine, Code, '$!signature');
