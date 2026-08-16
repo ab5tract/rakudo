@@ -694,8 +694,12 @@ class RakuAST::Regex::CapturingGroup
         # in the lexpad; we'll look it up when we need it. This means we can
         # avoid closure-cloning it per time we enter it, for example if it is
         # quantified.
-        my $block := self.IMPL-QAST-FORM-BLOCK($context, :blocktype('declaration_static'));
-        self.IMPL-LINK-META-OBJECT($context, $block);
+        # Go through IMPL-QAST-BLOCK rather than forming and linking by hand:
+        # linking registers a code ref, and the IMPL-CLOSURE-QAST below asks
+        # for the block again, so a hand-formed one that never reached
+        # $!qast-block would be built and registered a second time under the
+        # same cuid.
+        my $block := self.IMPL-QAST-BLOCK($context, :blocktype('declaration_static'));
         my $decl := self.IMPL-UNWRAP-LIST(self.get-implicit-declarations())[0];
         QAST::Stmts.new(
             $block,
@@ -928,7 +932,15 @@ class RakuAST::Regex::CharClassEnumerationElement
     # character.
     method range-endpoint() {
         my str $chars := self.IMPL-CCLASS-ENUM-CHARS({});
+#?if jvm
+        # JVM strings are UTF-16, so a codepoint above the BMP is two `chars`
+        # but one `codes`. A synthetic gets past this check and is caught by
+        # the caller's non-synthetic-ord.
+        nqp::codes($chars) == 1 ?? $chars !! Nil
+#?endif
+#?if !jvm
         nqp::chars($chars) == 1 ?? $chars !! Nil
+#?endif
     }
 }
 
@@ -1154,7 +1166,14 @@ class RakuAST::Regex::CharClass::Specified
     }
 
     method IMPL-CCLASS-ENUM-CHARS(%mods) {
+#?if jvm
+        # See range-endpoint: count codepoints, since a non-BMP one is two
+        # UTF-16 `chars` here.
+        self.negated || nqp::codes($!characters) != 1 ?? "" !! $!characters
+#?endif
+#?if !jvm
         self.negated || nqp::chars($!characters) != 1 ?? "" !! $!characters
+#?endif
     }
 
     method IMPL-CCLASS-ENUM-QAST(RakuAST::IMPL::QASTContext $context, %mods, Bool $negate) {
@@ -1616,9 +1635,11 @@ class RakuAST::Regex::Assertion::Named::RegexArg
         # in the lexpad; we'll look it up when we need it. This means we can
         # avoid closure-cloning it per time we enter it, which may help if we
         # are scanning or it's in a quantified thing.
+        # See the note in RakuAST::Regex::CapturingGroup: forming and linking
+        # by hand leaves $!qast-block unset, so the IMPL-CLOSURE-QAST below
+        # would build and register a second block under the same cuid.
         my str $name := self.IMPL-UNIQUE-NAME;
-        my $block := self.IMPL-QAST-FORM-BLOCK($context, :blocktype('declaration_static'));
-        self.IMPL-LINK-META-OBJECT($context, $block);
+        my $block := self.IMPL-QAST-BLOCK($context, :blocktype('declaration_static'));
         QAST::Stmts.new(
             $block,
             QAST::Op.new(
