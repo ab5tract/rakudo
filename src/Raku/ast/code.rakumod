@@ -407,10 +407,21 @@ class RakuAST::Code
             my $block := self.IMPL-QAST-BLOCK($context, :blocktype<declaration_static>);
             $precomp := self.IMPL-COMPILE-DYNAMICALLY($resolver, $context, $block);
         };
+        my int $compiling;
         my $stub := nqp::freshcoderef(sub (*@pos, *%named) {
             my $code-obj := nqp::getcodeobj(nqp::curcode());
             unless $precomp {
+                # Compiling this routine must not need to call it: $precomp is
+                # only set once the thunk finishes, so a re-entrant call would
+                # recurse until the stack runs out with nothing to say about
+                # which routine caused it.
+                nqp::die("Circular dependency compiling routine '"
+                    ~ (self.name ?? self.name.canonicalize !! '<anon>')
+                    ~ "': compiling it calls it")
+                  if $compiling;
+                $compiling := 1;
                 $compiler-thunk();
+                $compiling := 0;
             }
             unless nqp::isnull($code-obj) {
                 return $code-obj(|@pos, |%named);
