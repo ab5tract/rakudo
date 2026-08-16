@@ -146,7 +146,21 @@ class RakuAST::OnlyStar
 class RakuAST::Code
   is RakuAST::ParseTime
 {
-    has Bool $.custom-args;
+    has Bool $!custom-args;
+
+    # Whether this code object binds its arguments with the runtime binder
+    # rather than lowered per-parameter QAST. On the JVM the lowered form
+    # does not reproduce the binder's semantics, so everything goes through
+    # the binder there, exactly as the legacy frontend does (its
+    # `add_signature_binding_code` gates every shortcut behind `#?if !jvm`).
+    method custom-args() {
+#?if jvm
+        True
+#?endif
+#?if !jvm
+        $!custom-args ?? True !! False
+#?endif
+    }
     has Mu $!qast-block;
     has str $!cuid;
 
@@ -1093,13 +1107,14 @@ class RakuAST::ExpressionThunk
         for self.IMPL-UNWRAP-LIST($signature.parameters) {
             $stmts.push($_.target.IMPL-QAST-DECL($context)) if $_.target.lexical-name ne '$_' || self.declare-topic;
         }
-        $stmts.push($signature.IMPL-QAST-BINDINGS($context));
+        $stmts.push($signature.IMPL-QAST-BINDINGS($context, :needs-full-binder(self.custom-args)));
         my $block :=
             self.IMPL-SET-NODE(
                 QAST::Block.new(
                     :blocktype('declaration_static'),
                     $stmts),
                 :key);
+        $block.custom_args(1) if self.custom-args;
         $stmts := QAST::Stmts.new();
         if nqp::istype(self, RakuAST::ImplicitDeclarations) {
             for self.IMPL-UNWRAP-LIST(self.get-implicit-declarations()) -> $decl {
