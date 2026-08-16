@@ -3355,6 +3355,17 @@ class RakuAST::Routine
     }
 
     method IMPL-WRAP-RETURN-HANDLER(RakuAST::IMPL::QASTContext $context, QAST::Node $body) {
+#?if !moar
+        # An onlystar proto's body *is* the dispatch, so its result is the
+        # candidate's result, container and all. MoarVM's boot-resume dispatch
+        # never comes back through here, but the hand-built dispatch the other
+        # backends use does, and a p6decontrv wrapper would then strip the
+        # container off every `is raw` candidate - Hash.AT-KEY among them,
+        # which is what autovivification is built on. The legacy frontend
+        # likewise wraps nothing around an onlystar body.
+        return $body if nqp::can(self, 'body')
+            && nqp::istype(self.body, RakuAST::OnlyStar);
+#?endif
         my $result := $body;
         my $routine := self.compile-time-value;
         my $signature := nqp::getattr($routine, Code, '$!signature');
@@ -5575,7 +5586,15 @@ class RakuAST::BlockThunk
         my $code := nqp::create(self.IMPL-THUNK-OBJECT-TYPE);
         my $param := nqp::create(Parameter);
         nqp::bindattr_s($param, Parameter, '$!variable_name', '$_');
-        nqp::bindattr_i($param, Parameter, '$!flags', 2048 + 16384); # Optional + default from outer
+        # Same shape as the implicit topic RakuAST::Block builds: typed Mu and
+        # raw. A backend that binds with the runtime binder reads this
+        # Parameter rather than lowered QAST, and an unset $!type left it
+        # checking the bound value against whatever the empty slot held.
+        nqp::bindattr($param, Parameter, '$!type', Mu);
+        nqp::bindattr_i($param, Parameter, '$!flags',
+            nqp::const::SIG_ELEM_IS_RAW
+            +| nqp::const::SIG_ELEM_IS_OPTIONAL
+            +| nqp::const::SIG_ELEM_DEFAULT_FROM_OUTER);
         my $sig := nqp::create(Signature);
         nqp::bindattr($sig, Signature, '@!params', [$param]);
         nqp::bindattr_i($sig, Signature, '$!arity', 0);
