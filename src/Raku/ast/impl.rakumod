@@ -193,7 +193,20 @@ class RakuAST::IMPL::QASTContext {
     }
 
     method add-code-ref(Mu $code-ref, Mu $block) {
+        # The code ref table is keyed by cuid: $!sub-id-to-sc-idx holds one
+        # index per cuid, and the backends map a block to its method by cuid
+        # too. A second registration of the same cuid - a code object linked
+        # twice, or two block objects formed for one AST node - would take a
+        # fresh slot and orphan the old one, leaving an index that the
+        # backend can no longer name a method for. Reuse the slot instead.
+        my str $cuid := $block.cuid;
         my int $code-ref-idx;
+        if nqp::existskey($!sub-id-to-sc-idx, $cuid) {
+            $code-ref-idx := $!sub-id-to-sc-idx{$cuid};
+            nqp::scsetcode($!sc, $code-ref-idx, $code-ref)
+              unless nqp::isconcrete($!world-bridge);
+            return Nil;
+        }
         if nqp::isconcrete($!world-bridge) {
             $code-ref-idx := $!world-bridge.add_root_code_ref($code-ref, $block);
         }
@@ -202,7 +215,7 @@ class RakuAST::IMPL::QASTContext {
             nqp::push($!code-ref-blocks, $block);
             nqp::scsetcode($!sc, $code-ref-idx, $code-ref);
         }
-        $!sub-id-to-sc-idx{$block.cuid} := $code-ref-idx;
+        $!sub-id-to-sc-idx{$cuid} := $code-ref-idx;
     }
 
     # Run the passed fixup producer and add the QAST it returns to fixup tasks
