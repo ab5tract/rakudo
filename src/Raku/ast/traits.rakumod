@@ -79,6 +79,20 @@ class RakuAST::TraitTarget {
                         $ex := $resolver.build-exception: 'X::AdHoc', :payload(nqp::getmessage($_))
                             unless nqp::isconcrete($ex);
                     }
+#?if jvm
+                    # A trait that dies leaves its declarand uncomposed and the
+                    # sorry is only reported at check time, which is far away
+                    # from the cause when the setting itself is being built.
+                    # RAKUDO_DEBUG_TRAIT reports it here instead.
+                    if nqp::atkey(nqp::getenvhash(), 'RAKUDO_DEBUG_TRAIT') {
+                        my $dbg-origin := (nqp::can(self, 'origin') && self.origin)
+                          ?? self.origin.as-match.file ~ ':' ~ self.origin.as-match.line !! '?';
+                        nqp::say('[trait-failed] on ' ~ $target.HOW.name($target)
+                          ~ ' at ' ~ $dbg-origin
+                          ~ ' extype=' ~ nqp::getextype($_) ~ ': ' ~ nqp::getmessage($_));
+                        nqp::rethrow($_);
+                    }
+#?endif
                     nqp::push($!sorries, $ex);
                     $resolver.note-deferred-begin-sorry;
                 }
