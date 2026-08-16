@@ -463,9 +463,15 @@ role Raku::Common {
 
         {
             if nqp::can($lang,'herelang') {
-                my $delim := $<nibble>.ast.literal-value // $/.panic(
+                # A native str, not the literal's Str object: the stopper
+                # rule interpolates this through `!INTERPOLATE`, which
+                # invokes anything `nqp::isinvokable` accepts -- and every
+                # Raku type answers to that on backends where Mu carries an
+                # invocation handler for CALL-ME. The legacy frontend passes
+                # a str here too (via World.nibble_to_str).
+                my str $delim := nqp::unbox_s($<nibble>.ast.literal-value // $/.panic(
                   "Stopper '" ~ $<nibble> ~ "' too complex for heredoc"
-                );
+                ));
                 $*CU.queue-heredoc(Herestub.new(
                   :$delim, :grammar($lang.herelang), :orignode(self)
                 ));

@@ -926,7 +926,15 @@ class RakuAST::Regex::CharClassEnumerationElement
     # character.
     method range-endpoint() {
         my str $chars := self.IMPL-CCLASS-ENUM-CHARS({});
+#?if jvm
+        # JVM strings are UTF-16, so a codepoint above the BMP is two `chars`
+        # but one `codes`. A synthetic gets past this check and is caught by
+        # the caller's non-synthetic-ord.
+        nqp::codes($chars) == 1 ?? $chars !! Nil
+#?endif
+#?if !jvm
         nqp::chars($chars) == 1 ?? $chars !! Nil
+#?endif
     }
 }
 
@@ -1152,7 +1160,14 @@ class RakuAST::Regex::CharClass::Specified
     }
 
     method IMPL-CCLASS-ENUM-CHARS(%mods) {
+#?if jvm
+        # See range-endpoint: count codepoints, since a non-BMP one is two
+        # UTF-16 `chars` here.
+        self.negated || nqp::codes($!characters) != 1 ?? "" !! $!characters
+#?endif
+#?if !jvm
         self.negated || nqp::chars($!characters) != 1 ?? "" !! $!characters
+#?endif
     }
 
     method IMPL-CCLASS-ENUM-QAST(RakuAST::IMPL::QASTContext $context, %mods, Bool $negate) {
