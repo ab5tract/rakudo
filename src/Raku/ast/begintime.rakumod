@@ -63,6 +63,12 @@ class RakuAST::BeginTime
 
             # Can handle it properly
             if nqp::istype(self,RakuAST::CheckTime) {
+#?if jvm
+                # See the RAKUDO_DEBUG_TRAIT note in traits.rakumod: report the
+                # begin-time failure where it happens rather than at check time.
+                nqp::rethrow(nqp::decont($_))
+                  if nqp::atkey(nqp::getenvhash(), 'RAKUDO_DEBUG_TRAIT');
+#?endif
                 self.add-sorry: $ex;
                 $resolver.note-deferred-begin-sorry;
             }
