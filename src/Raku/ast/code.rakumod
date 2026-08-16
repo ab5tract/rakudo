@@ -45,6 +45,11 @@ class RakuAST::Blockoid
 class RakuAST::OnlyStar
   is RakuAST::Blockoid
   is RakuAST::Term
+#?if !moar
+  # Backends without new-dispatch build the proto's dispatch by hand and need
+  # Routine to reach the routine's `$!dispatch_cache` attribute.
+  is RakuAST::ImplicitLookups
+#?endif
 {
     method new() {
         my $obj := nqp::create(self);
@@ -61,6 +66,14 @@ class RakuAST::OnlyStar
         True  # `{*}` dispatches to candidates, so it is never useless when sunk
     }
 
+#?if !moar
+    method PRODUCE-IMPLICIT-LOOKUPS() {
+        [
+            RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('Routine')),
+        ]
+    }
+#?endif
+
     method IMPL-EXPR-QAST(RakuAST::IMPL::QASTContext $context) {
         # The dispatch op is the only code in an onlystar body, and a
         # frame's location, as reported by Code.file and Code.line, comes
@@ -72,12 +85,52 @@ class RakuAST::OnlyStar
         # dispatcher's junction handling.
         self.IMPL-SET-NODE(
             QAST::Stmts.new(
+#?if moar
                 QAST::Op.new(
                     :op('dispatch'),
                     QAST::SVal.new( :value('boot-resume') ),
-                    QAST::IVal.new( :value(nqp::const::DISP_ONLYSTAR) ))),
+                    QAST::IVal.new( :value(nqp::const::DISP_ONLYSTAR) ))
+#?endif
+#?if !moar
+                # No new-dispatch here, so do what the legacy frontend's
+                # autogenerate_proto does: consult the routine's own dispatch
+                # cache for the incoming capture, falling back to asking it to
+                # pick a candidate, and invoke whatever comes back.
+                self.IMPL-ONLYSTAR-DISPATCH-QAST
+#?endif
+                ),
             :key);
     }
+
+#?if !moar
+    method IMPL-ONLYSTAR-DISPATCH-QAST() {
+        my $Routine := self.IMPL-UNWRAP-LIST(self.get-implicit-lookups)[0].compile-time-value;
+        my sub curcode() {
+            QAST::Op.new( :op('getcodeobj'), QAST::Op.new( :op('curcode') ) )
+        }
+        QAST::Op.new(
+            :op('invokewithcapture'),
+            QAST::Op.new(
+                :op('ifnull'),
+                QAST::Op.new(
+                    :op('multicachefind'),
+                    QAST::Var.new(
+                        :name('$!dispatch_cache'), :scope('attribute'),
+                        curcode(),
+                        QAST::WVal.new( :value($Routine) ),
+                    ),
+                    QAST::Op.new( :op('usecapture') )
+                ),
+                QAST::Op.new(
+                    :op('callmethod'), :name('find_best_dispatchee'),
+                    curcode(),
+                    QAST::Op.new( :op('savecapture') )
+                ),
+            ),
+            QAST::Op.new( :op('usecapture') )
+        )
+    }
+#?endif
 
     method IMPL-REGEX-TOP-LEVEL-QAST(
       RakuAST::IMPL::QASTContext  $context,
@@ -98,7 +151,21 @@ class RakuAST::OnlyStar
 class RakuAST::Code
   is RakuAST::ParseTime
 {
-    has Bool $.custom-args;
+    has Bool $!custom-args;
+
+    # Whether this code object binds its arguments with the runtime binder
+    # rather than lowered per-parameter QAST. On the JVM the lowered form
+    # does not reproduce the binder's semantics, so everything goes through
+    # the binder there, exactly as the legacy frontend does (its
+    # `add_signature_binding_code` gates every shortcut behind `#?if !jvm`).
+    method custom-args() {
+#?if jvm
+        True
+#?endif
+#?if !jvm
+        $!custom-args ?? True !! False
+#?endif
+    }
     has Mu $!qast-block;
     has str $!cuid;
 
@@ -1045,13 +1112,14 @@ class RakuAST::ExpressionThunk
         for self.IMPL-UNWRAP-LIST($signature.parameters) {
             $stmts.push($_.target.IMPL-QAST-DECL($context)) if $_.target.lexical-name ne '$_' || self.declare-topic;
         }
-        $stmts.push($signature.IMPL-QAST-BINDINGS($context));
+        $stmts.push($signature.IMPL-QAST-BINDINGS($context, :needs-full-binder(self.custom-args)));
         my $block :=
             self.IMPL-SET-NODE(
                 QAST::Block.new(
                     :blocktype('declaration_static'),
                     $stmts),
                 :key);
+        $block.custom_args(1) if self.custom-args;
         $stmts := QAST::Stmts.new();
         if nqp::istype(self, RakuAST::ImplicitDeclarations) {
             for self.IMPL-UNWRAP-LIST(self.get-implicit-declarations()) -> $decl {
@@ -2677,8 +2745,46 @@ class RakuAST::Routine
         [
             RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('Callable')),
             RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('&FATALIZE')),
+#?if !moar
+            RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('MultiDispatcher')),
+            RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('MethodDispatcher')),
+#?endif
         ]
     }
+
+#?if !moar
+    # Backends without new-dispatch resolve callsame/nextsame and friends by
+    # walking the caller chain for a frame that holds a $*DISPATCHER lexical,
+    # which each routine has to claim on entry with `takedispatcher`. A multi
+    # candidate's slot starts out as MultiDispatcher so it can vivify. This
+    # mirrors what `Perl6::Actions::routine_def` does on the legacy frontend;
+    # without it `callsame` dies with "not in the dynamic scope of a
+    # dispatcher".
+    method IMPL-ADD-DISPATCHER-QAST(Mu $block) {
+        my @lookups := self.IMPL-UNWRAP-LIST(self.get-implicit-lookups);
+        # A multi candidate vivifies a MultiDispatcher, a method a
+        # MethodDispatcher; a plain sub gets an empty slot that only
+        # `takedispatcher` fills, and a regex is dispatched by the proto
+        # regex machinery rather than by this protocol.
+        my $proto := self.multiness eq 'multi'
+          ?? @lookups[2].compile-time-value
+          !! nqp::istype(self, RakuAST::Method)
+            ?? @lookups[3].compile-time-value
+            !! Mu;
+        $block[0].push(nqp::eqaddr($proto, Mu)
+          ?? QAST::Var.new(
+               :name('$*DISPATCHER'), :scope('lexical'), :decl('var'))
+          !! QAST::Var.new(
+               :name('$*DISPATCHER'), :scope('lexical'), :decl('static'),
+               :value($proto)));
+        $block.symbol('$*DISPATCHER', :scope('lexical'));
+        $block[0].push(QAST::Op.new(
+            :op('takedispatcher'),
+            QAST::SVal.new( :value('$*DISPATCHER') )
+        ));
+        Nil
+    }
+#?endif
 
     method IMPL-FATALIZE() {
         self.IMPL-UNWRAP-LIST(self.get-implicit-lookups)[1].resolution.compile-time-value;
@@ -2968,7 +3074,20 @@ class RakuAST::Routine
                     self.IMPL-QAST-DECLS($context)
                 ), :key);
         self.IMPL-ADD-LOWERED-DEBUG-MAPPINGS($block);
+#?if !moar
+        # An onlystar proto's frame only routes the call on to a candidate, so
+        # it must not count as the caller a `return` in the candidate returns
+        # from: `throwpayloadlexcaller` skips thunk frames when looking for the
+        # routine to unwind. The legacy frontend marks the proto body the same
+        # way in `Perl6::Actions::onlystar`.
+        $block.is_thunk(1)
+          if nqp::istype(self.body, RakuAST::OnlyStar)
+          && !nqp::istype(self, RakuAST::RegexDeclaration);
+#?endif
         my $signature := self.placeholder-signature || $!signature;
+#?if !moar
+        self.IMPL-ADD-DISPATCHER-QAST($block);
+#?endif
         $block.push($signature.IMPL-QAST-BINDINGS($context, :needs-full-binder(self.custom-args), :multi(self.multiness eq 'multi'), :invocant-decl(self.IMPL-SELF-DECLARATION)));
         $block.custom_args(1) if self.custom-args;
         $block.arity($signature.arity);
