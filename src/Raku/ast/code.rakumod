@@ -407,10 +407,21 @@ class RakuAST::Code
             my $block := self.IMPL-QAST-BLOCK($context, :blocktype<declaration_static>);
             $precomp := self.IMPL-COMPILE-DYNAMICALLY($resolver, $context, $block);
         };
+        my int $compiling;
         my $stub := nqp::freshcoderef(sub (*@pos, *%named) {
             my $code-obj := nqp::getcodeobj(nqp::curcode());
             unless $precomp {
+                # Compiling this routine must not need to call it: $precomp is
+                # only set once the thunk finishes, so a re-entrant call would
+                # recurse until the stack runs out with nothing to say about
+                # which routine caused it.
+                nqp::die("Circular dependency compiling routine '"
+                    ~ (self.name ?? self.name.canonicalize !! '<anon>')
+                    ~ "': compiling it calls it")
+                  if $compiling;
+                $compiling := 1;
                 $compiler-thunk();
+                $compiling := 0;
             }
             unless nqp::isnull($code-obj) {
                 return $code-obj(|@pos, |%named);
@@ -1414,7 +1425,7 @@ class RakuAST::ScopePhaser {
         my $attr := '$!' ~ $name;
         my $list := nqp::getattr(self, RakuAST::ScopePhaser, $attr);
         $list := nqp::bindattr(self, RakuAST::ScopePhaser, $attr, [])
-          unless $list;
+          unless nqp::isconcrete($list);
 
         for $list {
             if nqp::eqaddr($_, $phaser) {
@@ -1429,7 +1440,7 @@ class RakuAST::ScopePhaser {
     method IMPL-ADD-PHASER-TO-LEAVE-ORDER(Str $type, RakuAST::StatementPrefix::Phaser $phaser) {
         my $list := nqp::getattr(self, RakuAST::ScopePhaser, '$!LEAVE-ORDER');
         $list := nqp::bindattr(self, RakuAST::ScopePhaser, '$!LEAVE-ORDER', [])
-          unless $list;
+          unless nqp::isconcrete($list);
 
         for $list {
             if nqp::eqaddr($_, $phaser) {
@@ -1503,7 +1514,10 @@ class RakuAST::ScopePhaser {
     }
 
     method has-loop-phasers() {
-        return True if $!FIRST || $!NEXT || $!LAST;
+        return True
+          if nqp::isconcrete($!FIRST)
+          || nqp::isconcrete($!NEXT)
+          || nqp::isconcrete($!LAST);
         if nqp::istype(self, RakuAST::Meta) {
             my $phasers := nqp::getattr(self.meta-object, Block, '$!phasers');
             nqp::ishash($phasers) && (
@@ -1519,9 +1533,13 @@ class RakuAST::ScopePhaser {
 
     method has-any-phasers() {
         return True
-          if $!ENTER || $!LEAVE || $!KEEP  || $!UNDO || $!FIRST || $!NEXT
-          || $!LAST  || $!PRE   || $!POST  || $!QUIT || $!TEMP  || $!CLOSE
-          || $!let   || $!temp;
+          if nqp::isconcrete($!ENTER) || nqp::isconcrete($!LEAVE)
+          || nqp::isconcrete($!KEEP)  || nqp::isconcrete($!UNDO)
+          || nqp::isconcrete($!FIRST) || nqp::isconcrete($!NEXT)
+          || nqp::isconcrete($!LAST)  || nqp::isconcrete($!PRE)
+          || nqp::isconcrete($!POST)  || nqp::isconcrete($!QUIT)
+          || nqp::isconcrete($!TEMP)  || nqp::isconcrete($!CLOSE)
+          || nqp::isconcrete($!let)   || nqp::isconcrete($!temp);
         if nqp::istype(self, RakuAST::Meta) {
             nqp::isconcrete(nqp::getattr(self.meta-object, Block, '$!phasers'))
               ?? True !! False
@@ -1533,7 +1551,7 @@ class RakuAST::ScopePhaser {
 
     method add-list-to-code-object(Str $attr, $code-object) {
         my $list := nqp::getattr(self, RakuAST::ScopePhaser, $attr);
-        if $list {
+        if nqp::isconcrete($list) {
             my $name := nqp::substr($attr,2);  # $!FOO -> FOO
             for $list {
                 $code-object.add_phaser($name, $_.meta-object);
@@ -1551,16 +1569,16 @@ class RakuAST::ScopePhaser {
         self.add-list-to-code-object( '$!POST', $code-object);
         self.add-list-to-code-object('$!CLOSE', $code-object);
 
-        if $!LEAVE-ORDER {
+        if nqp::isconcrete($!LEAVE-ORDER) {
             for $!LEAVE-ORDER {
                 $code-object.add_phaser($_[0], $_[1].meta-object);
             }
         }
 
-        if $!let {
+        if nqp::isconcrete($!let) {
             $code-object.add_phaser('UNDO', $!let.meta-object);
         }
-        if $!temp {
+        if nqp::isconcrete($!temp) {
             $code-object.add_phaser('LEAVE', $!temp.meta-object);
         }
     }
@@ -1624,20 +1642,20 @@ class RakuAST::ScopePhaser {
             $qast[0].push($rebinds) if nqp::elems($rebinds.list);
         }
 
-        if $!has-exit-handler || self.needs-result > 1 || $phasers && (nqp::istype($phasers, Code) || nqp::existskey($phasers, 'LEAVE') || nqp::existskey($phasers, 'POST')) {
+        if nqp::isconcrete($!has-exit-handler) || self.needs-result > 1 || nqp::isconcrete($phasers) && (nqp::istype($phasers, Code) || nqp::existskey($phasers, 'LEAVE') || nqp::existskey($phasers, 'POST')) {
             $qast.has_exit_handler(1);
         }
 
-        if $!PRE || $phasers && nqp::ishash($phasers) && nqp::existskey($phasers, 'PRE') {
+        if nqp::isconcrete($!PRE) || nqp::isconcrete($phasers) && nqp::ishash($phasers) && nqp::existskey($phasers, 'PRE') {
             my $pre-setup := QAST::Stmts.new;
             my %seen;
-            if $!PRE {
+            if nqp::isconcrete($!PRE) {
                 for $!PRE {
                     $pre-setup.push($_.IMPL-CALLISH-QAST($context));
                     %seen{nqp::objectid($_.meta-object)} := 1;
                 }
             }
-            if $block {
+            if nqp::isconcrete($block) {
                 my $pre-phasers := $block.phasers('PRE');
                 if nqp::isconcrete($pre-phasers) {
                     for $pre-phasers.FLATTENABLE_LIST {
@@ -1654,7 +1672,7 @@ class RakuAST::ScopePhaser {
             $qast[0].push(QAST::Op.new( :op('p6clearpre') ));
         }
 
-        if $!FIRST || $phasers && nqp::ishash($phasers) && nqp::existskey($phasers, 'FIRST') {
+        if nqp::isconcrete($!FIRST) || nqp::isconcrete($phasers) && nqp::ishash($phasers) && nqp::existskey($phasers, 'FIRST') {
             my $first-setup := QAST::Stmts.new;
             my $calls := QAST::Stmts.new(
                 QAST::Op.new(:op<call>, :name<&infix:<=>>,
@@ -1681,13 +1699,13 @@ class RakuAST::ScopePhaser {
                 )
             );
             my %seen;
-            if $!FIRST {
+            if nqp::isconcrete($!FIRST) {
                 for $!FIRST {
                     $calls.push($_.IMPL-CALLISH-QAST($context));
                     %seen{nqp::objectid($_.meta-object)} := 1;
                 }
             }
-            if $block {
+            if nqp::isconcrete($block) {
             my $first-phasers := $block.phasers('FIRST');
                 if nqp::isconcrete($first-phasers) {
                     for $first-phasers.FLATTENABLE_LIST {
@@ -1701,10 +1719,10 @@ class RakuAST::ScopePhaser {
             $qast[0].push: $first-setup;
         }
 
-        if $!ENTER || $phasers && nqp::ishash($phasers) && nqp::existskey($phasers, 'ENTER') {
+        if nqp::isconcrete($!ENTER) || nqp::isconcrete($phasers) && nqp::ishash($phasers) && nqp::existskey($phasers, 'ENTER') {
             my $enter-setup := QAST::Stmts.new;
             my %seen;
-            if $!ENTER {
+            if nqp::isconcrete($!ENTER) {
                 for $!ENTER {
                     my $result-name := $_.result-name;
                     $enter-setup.push(
@@ -1735,15 +1753,16 @@ class RakuAST::ScopePhaser {
             self.IMPL-ADD-ENTER-PHASERS-TO-QAST($qast, $enter-setup);
         }
 
-        if $!let {
+        if nqp::isconcrete($!let) {
             self.IMPL-ADD-PHASER-QAST($context, $!let, '!LET-RESTORE', $qast);
         }
-        if $!temp {
+        if nqp::isconcrete($!temp) {
             self.IMPL-ADD-PHASER-QAST($context, $!temp, '!TEMP-RESTORE', $qast);
         }
 
-        if $!LAST || $!NEXT || $!QUIT || $!CLOSE
-            || $phasers && nqp::ishash($phasers) && (
+        if nqp::isconcrete($!LAST) || nqp::isconcrete($!NEXT)
+            || nqp::isconcrete($!QUIT) || nqp::isconcrete($!CLOSE)
+            || nqp::isconcrete($phasers) && nqp::ishash($phasers) && (
                    nqp::existskey($phasers, 'LAST')
                 || nqp::existskey($phasers, 'NEXT')
                 || nqp::existskey($phasers, 'QUIT')
@@ -1762,8 +1781,9 @@ class RakuAST::ScopePhaser {
             );
         }
 
-        if $!LEAVE || $!KEEP || $!UNDO || $!POST
-            || $phasers && (nqp::istype($phasers, Code) || nqp::ishash($phasers) && (
+        if nqp::isconcrete($!LEAVE) || nqp::isconcrete($!KEEP)
+            || nqp::isconcrete($!UNDO) || nqp::isconcrete($!POST)
+            || nqp::isconcrete($phasers) && (nqp::istype($phasers, Code) || nqp::ishash($phasers) && (
                    nqp::existskey($phasers, 'LEAVE')
                 || nqp::existskey($phasers, 'KEEP')
                 || nqp::existskey($phasers, 'UNDO')
@@ -1779,11 +1799,11 @@ class RakuAST::ScopePhaser {
     }
 
     method IMPL-STUB-PHASERS(RakuAST::Resolver $resolver, RakuAST::IMPL::Context $context) {
-        if $!let {
+        if nqp::isconcrete($!let) {
             $!let.IMPL-BEGIN($resolver, $context);
             $!let.IMPL-STUB-CODE($resolver, $context);
         }
-        if $!temp {
+        if nqp::isconcrete($!temp) {
             $!temp.IMPL-BEGIN($resolver, $context);
             $!temp.IMPL-STUB-CODE($resolver, $context);
         }
