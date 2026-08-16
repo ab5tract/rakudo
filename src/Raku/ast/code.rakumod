@@ -2745,8 +2745,46 @@ class RakuAST::Routine
         [
             RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('Callable')),
             RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('&FATALIZE')),
+#?if !moar
+            RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('MultiDispatcher')),
+            RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('MethodDispatcher')),
+#?endif
         ]
     }
+
+#?if !moar
+    # Backends without new-dispatch resolve callsame/nextsame and friends by
+    # walking the caller chain for a frame that holds a $*DISPATCHER lexical,
+    # which each routine has to claim on entry with `takedispatcher`. A multi
+    # candidate's slot starts out as MultiDispatcher so it can vivify. This
+    # mirrors what `Perl6::Actions::routine_def` does on the legacy frontend;
+    # without it `callsame` dies with "not in the dynamic scope of a
+    # dispatcher".
+    method IMPL-ADD-DISPATCHER-QAST(Mu $block) {
+        my @lookups := self.IMPL-UNWRAP-LIST(self.get-implicit-lookups);
+        # A multi candidate vivifies a MultiDispatcher, a method a
+        # MethodDispatcher; a plain sub gets an empty slot that only
+        # `takedispatcher` fills, and a regex is dispatched by the proto
+        # regex machinery rather than by this protocol.
+        my $proto := self.multiness eq 'multi'
+          ?? @lookups[2].compile-time-value
+          !! nqp::istype(self, RakuAST::Method)
+            ?? @lookups[3].compile-time-value
+            !! Mu;
+        $block[0].push(nqp::eqaddr($proto, Mu)
+          ?? QAST::Var.new(
+               :name('$*DISPATCHER'), :scope('lexical'), :decl('var'))
+          !! QAST::Var.new(
+               :name('$*DISPATCHER'), :scope('lexical'), :decl('static'),
+               :value($proto)));
+        $block.symbol('$*DISPATCHER', :scope('lexical'));
+        $block[0].push(QAST::Op.new(
+            :op('takedispatcher'),
+            QAST::SVal.new( :value('$*DISPATCHER') )
+        ));
+        Nil
+    }
+#?endif
 
     method IMPL-FATALIZE() {
         self.IMPL-UNWRAP-LIST(self.get-implicit-lookups)[1].resolution.compile-time-value;
@@ -3036,7 +3074,20 @@ class RakuAST::Routine
                     self.IMPL-QAST-DECLS($context)
                 ), :key);
         self.IMPL-ADD-LOWERED-DEBUG-MAPPINGS($block);
+#?if !moar
+        # An onlystar proto's frame only routes the call on to a candidate, so
+        # it must not count as the caller a `return` in the candidate returns
+        # from: `throwpayloadlexcaller` skips thunk frames when looking for the
+        # routine to unwind. The legacy frontend marks the proto body the same
+        # way in `Perl6::Actions::onlystar`.
+        $block.is_thunk(1)
+          if nqp::istype(self.body, RakuAST::OnlyStar)
+          && !nqp::istype(self, RakuAST::RegexDeclaration);
+#?endif
         my $signature := self.placeholder-signature || $!signature;
+#?if !moar
+        self.IMPL-ADD-DISPATCHER-QAST($block);
+#?endif
         $block.push($signature.IMPL-QAST-BINDINGS($context, :needs-full-binder(self.custom-args), :multi(self.multiness eq 'multi'), :invocant-decl(self.IMPL-SELF-DECLARATION)));
         $block.custom_args(1) if self.custom-args;
         $block.arity($signature.arity);
