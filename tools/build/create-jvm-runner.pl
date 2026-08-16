@@ -160,7 +160,11 @@ sub install {
 }
 
 my $classpath = join($cpsep, ($rakudo_jars, $jardir, $libdir, $nqplibdir));
-my $jopts = '-noverify -Xms100m --enable-native-access=ALL-UNNAMED'
+# The RakuAST frontend walks deeply nested ASTs (VarLowering's
+# IMPL-WALK recurses once per node), and the JVM's default main-thread
+# stack overflows on a file the size of the core setting. MoarVM grows
+# its stack on demand; here it has to be asked for up front.
+my $jopts = '-noverify -Xms100m -Xss64m --enable-native-access=ALL-UNNAMED'
           . ' -cp ' . ($^O eq 'MSWin32' ? '"%CLASSPATH%";' : '$CLASSPATH:') . $classpath
           . ' -Dperl6.prefix=' . ($type eq 'install' && $^O ne 'MSWin32' ? '$DIR/..' : $prefix)
           . ' -Dnqp.library.path=' . $sharedir
