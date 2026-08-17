@@ -1723,14 +1723,14 @@ class RakuAST::Parameter
                         QAST::Op.new(
                             :op('bind'),
                             $temp-qast-var,
-#?if moar
+#?if !js
                             QAST::Op.new(
                                 :op<dispatch>,
                                 QAST::SVal.new(:value<raku-coercion>),
                                 QAST::Var.new(:name($low-param-type), :scope<local>),
                                 $temp-qast-var)
 #?endif
-#?if !moar
+#?if js
                             # No new-dispatch: ask the coercion's metaobject
                             # directly. CoercionHOW.coerce has its own
                             # non-moar path for exactly this.
@@ -1760,14 +1760,14 @@ class RakuAST::Parameter
                     QAST::Op.new(
                         :op('bind'),
                         $temp-qast-var,
-#?if moar
+#?if !js
                         QAST::Op.new(
                             :op<dispatch>,
                             QAST::SVal.new(:value<raku-coercion>),
                             QAST::WVal.new(:value($param-type)),
                             $temp-qast-var)
 #?endif
-#?if !moar
+#?if js
                         QAST::Op.new(
                             :op('callmethod'), :name('coerce'),
                             QAST::Op.new( :op('how'), QAST::WVal.new(:value($param-type)) ),
