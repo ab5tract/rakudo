@@ -27,8 +27,12 @@ sub qast-has-lowered(Mu $qast, str $prefix --> Bool:D) {
 
 # The parameter transforms hang ops under the QAST::Var param node
 # itself, which qast-descendable never enters, so probing for them
-# needs a walk of every node's children.
+# needs a walk of every QAST node's children, not just the descendable
+# ones. Stopping at a non-QAST leaf is what keeps that safe: .list on a
+# leaf returns a one-element list holding the leaf itself, so descending
+# into one recurses until the stack gives out.
 sub qast-deep-has-op(Mu $qast, str $op --> Bool:D) {
+    return False unless nqp::istype($qast, QAST::Node);
     if nqp::istype($qast, QAST::Op) {
         return True if $qast.op eq $op;
     }
