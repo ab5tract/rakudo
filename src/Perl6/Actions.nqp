@@ -886,7 +886,7 @@ register_op_desugar('time_n', -> $qast {
 });
 {
     register_op_desugar('p6decontrv_internal', -> $qast {
-#?if moar
+#?if !js
         QAST::Op.new(:op('dispatch'),
           QAST::SVal.new(
             :value($qast[1] eq '6c' ?? 'raku-rv-decont-6c' !! 'raku-rv-decont')
@@ -896,7 +896,7 @@ register_op_desugar('time_n', -> $qast {
           )
         )
 #?endif
-#?if !moar
+#?if js
         my $result   := QAST::Node.unique('result');
         my $Scalar   := QAST::WVal.new(:value(nqp::gethllsym('Raku','Scalar')));
         my $Iterable := QAST::WVal.new(:value(nqp::gethllsym('Raku','Iterable')));
