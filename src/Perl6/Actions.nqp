@@ -975,14 +975,14 @@ register_op_desugar('time_n', -> $qast {
 }
 {
     register_op_desugar('p6attrinited', -> $qast {
-#?if moar
+#?if !js
         QAST::Op.new(
           :op('dispatch'), :returns(int),
           QAST::SVal.new( :value('raku-is-attr-inited') ),
           $qast[0]
         );
 #?endif
-#?if !moar
+#?if js
         QAST::Op.new(
           :op('callmethod'), :name('check'),
           QAST::WVal.new(
