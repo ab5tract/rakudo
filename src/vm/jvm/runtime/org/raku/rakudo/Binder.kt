@@ -104,7 +104,7 @@ object Binder {
         for (i in 0 until numParams) {
             val param = params.at_pos_boxed(tc, i.toLong())!!
             param.get_attribute_native(tc, gcx.Parameter, "$!flags", HINT_flags)
-            val flags = tc.native_i.toInt()
+            val flags = tc.nativeI.toInt()
             val namedNames = param.get_attribute_boxed(tc,
                 gcx.Parameter, "@!named_names", HINT_named_names)
 
@@ -150,7 +150,7 @@ object Binder {
         val sci = cf.codeRef.staticInfo
         for (i in 0 until elems) {
             typeCaps.at_pos_native(tc, i)
-            val name = tc.native_s
+            val name = tc.nativeS
             cf.oLex!![sci.oTryGetLexicalIdx(name!!)] = type
         }
     }
@@ -254,9 +254,9 @@ object Binder {
             origArg: Any?, origFlag: Byte, noNomTypeCheck: Boolean, isSlurpyNamed: Boolean, error: Array<Any?>?): Int {
         /* Get parameter flags and variable name. */
         param.get_attribute_native(tc, gcx.Parameter, "$!flags", HINT_flags)
-        val paramFlags = tc.native_i.toInt()
+        val paramFlags = tc.nativeI.toInt()
         param.get_attribute_native(tc, gcx.Parameter, "$!variable_name", HINT_variable_name)
-        var varName = tc.native_s
+        var varName = tc.nativeS
         var hasVarName = true
         if (varName == null || varName.isEmpty()) {
             varName = "<anon>"
@@ -268,16 +268,16 @@ object Binder {
         /* We'll put the value to bind into one of the following locals, and
          * flag will indicate what type of thing it is. */
         val flag: Int
-        var arg_i: Long = 0
-        var arg_n: Double = 0.0
-        var arg_s: String? = null
-        var arg_o: SixModelObject? = null
+        var argI: Long = 0
+        var argN: Double = 0.0
+        var argS: String? = null
+        var argO: SixModelObject? = null
 
         /* Check if boxed/unboxed expectations are met. */
         val desiredNative = paramFlags and SIG_ELEM_NATIVE_VALUE
-        val is_rw = (paramFlags and SIG_ELEM_IS_RW) != 0
+        val isRw = (paramFlags and SIG_ELEM_IS_RW) != 0
         val gotNative = origFlag.toInt() and (CallSiteDescriptor.ARG_INT.toInt() or CallSiteDescriptor.ARG_UINT.toInt() or CallSiteDescriptor.ARG_NUM.toInt() or CallSiteDescriptor.ARG_STR.toInt())
-        if (is_rw && desiredNative != 0) {
+        if (isRw && desiredNative != 0) {
             when (desiredNative) {
             SIG_ELEM_NATIVE_INT_VALUE ->
                 if (gotNative != 0 || Ops.iscont_i(origArg as SixModelObject?) == 0L) {
@@ -313,32 +313,32 @@ object Binder {
                 }
             }
             flag = CallSiteDescriptor.ARG_OBJ.toInt()
-            arg_o = origArg as SixModelObject?
+            argO = origArg as SixModelObject?
         }
         else if (desiredNative == 0 && gotNative == CallSiteDescriptor.ARG_OBJ.toInt()) {
             flag = gotNative
-            arg_o = origArg as SixModelObject?
+            argO = origArg as SixModelObject?
         }
         else if (desiredNative == SIG_ELEM_NATIVE_INT_VALUE && gotNative == CallSiteDescriptor.ARG_INT.toInt()) {
             flag = gotNative
-            arg_i = origArg as Long
+            argI = origArg as Long
         }
         else if (desiredNative == SIG_ELEM_NATIVE_UINT_VALUE && gotNative == CallSiteDescriptor.ARG_UINT.toInt()) {
             flag = gotNative
-            arg_i = origArg as Long
+            argI = origArg as Long
         }
         else if (desiredNative == SIG_ELEM_NATIVE_NUM_VALUE && gotNative == CallSiteDescriptor.ARG_NUM.toInt()) {
             flag = gotNative
-            arg_n = origArg as Double
+            argN = origArg as Double
         }
         else if (desiredNative == SIG_ELEM_NATIVE_STR_VALUE && gotNative == CallSiteDescriptor.ARG_STR.toInt()) {
             flag = gotNative
-            arg_s = origArg as String?
+            argS = origArg as String?
         }
         else if (desiredNative == 0) {
             /* We need to do a boxing operation. */
             flag = CallSiteDescriptor.ARG_OBJ.toInt()
-            arg_o = createBox(tc, gcx, origArg, gotNative)
+            argO = createBox(tc, gcx, origArg, gotNative)
         }
         else {
             /* We need to do an unboxing operation. */
@@ -348,7 +348,7 @@ object Binder {
                 SIG_ELEM_NATIVE_INT_VALUE ->
                     if (Boxable.INT in spec.canBox) {
                         flag = CallSiteDescriptor.ARG_INT.toInt()
-                        arg_i = unboxVal.get_int(tc)
+                        argI = unboxVal.get_int(tc)
                     }
                     else {
                         if (error != null)
@@ -360,7 +360,7 @@ object Binder {
                 SIG_ELEM_NATIVE_UINT_VALUE ->
                     if (Boxable.INT in spec.canBox) {
                         flag = CallSiteDescriptor.ARG_UINT.toInt()
-                        arg_i = unboxVal.get_int(tc)
+                        argI = unboxVal.get_int(tc)
                     }
                     else {
                         if (error != null)
@@ -372,7 +372,7 @@ object Binder {
                 SIG_ELEM_NATIVE_NUM_VALUE ->
                     if (Boxable.NUM in spec.canBox) {
                         flag = CallSiteDescriptor.ARG_NUM.toInt()
-                        arg_n = unboxVal.get_num(tc)
+                        argN = unboxVal.get_num(tc)
                     }
                     else {
                         if (error != null)
@@ -384,7 +384,7 @@ object Binder {
                 SIG_ELEM_NATIVE_STR_VALUE ->
                     if (Boxable.STR in spec.canBox) {
                         flag = CallSiteDescriptor.ARG_STR.toInt()
-                        arg_s = unboxVal.get_str(tc)
+                        argS = unboxVal.get_str(tc)
                     }
                     else {
                         if (error != null)
@@ -411,9 +411,9 @@ object Binder {
         var paramType = param.get_attribute_boxed(tc, gcx.Parameter, "$!type", HINT_type)
         val ContextRef: SixModelObject?
         var HOW: SixModelObject?
-        if (flag == CallSiteDescriptor.ARG_OBJ.toInt() && !(is_rw && desiredNative != 0)) {
+        if (flag == CallSiteDescriptor.ARG_OBJ.toInt() && !(isRw && desiredNative != 0)) {
             /* We need to work on the decontainerized value. */
-            decontValue = Ops.decont(arg_o, tc)
+            decontValue = Ops.decont(argO, tc)
 
             /* HLL map it as needed. */
             val beforeHLLize = decontValue
@@ -441,11 +441,11 @@ object Binder {
                 /* If the expected type is Positional, see if we need to do the
                  * positional bind failover. */
                 if (paramType === gcx.Positional) {
-                    if (Ops.istype_nd(arg_o, gcx.PositionalBindFailover, tc) != 0L) {
-                        val ig = Ops.findmethod(arg_o, "cache", tc)
-                        Ops.invokeDirect(tc, ig, Ops.invocantCallSite, arrayOf<Any?>(arg_o))
-                        arg_o = Ops.result_o(tc.curFrame!!)
-                        decontValue = Ops.decont(arg_o, tc)
+                    if (Ops.istype_nd(argO, gcx.PositionalBindFailover, tc) != 0L) {
+                        val ig = Ops.findmethod(argO, "cache", tc)
+                        Ops.invokeDirect(tc, ig, Ops.invocantCallSite, arrayOf<Any?>(argO))
+                        argO = Ops.result_o(tc.curFrame!!)
+                        decontValue = Ops.decont(argO, tc)
                     }
                     else if (Ops.istype_nd(decontValue, gcx.PositionalBindFailover, tc) != 0L) {
                         val ig = Ops.findmethod(decontValue, "cache", tc)
@@ -498,14 +498,14 @@ object Binder {
                 /* Also enforce definedness check */
                 if ((paramFlags and SIG_ELEM_DEFINEDNES_CHECK) != 0) {
 
-                    /* Don't check decontValue for concreteness though, but arg_o,
+                    /* Don't check decontValue for concreteness though, but argO,
                        seeing as we don't have a isconcrete_nodecont */
-                    val shouldBeConcrete = (paramFlags and SIG_ELEM_DEFINED_ONLY) != 0 && Ops.isconcrete(arg_o, tc) != 1L
-                    if (shouldBeConcrete || ((paramFlags and SIG_ELEM_UNDEFINED_ONLY) != 0 && Ops.isconcrete(arg_o, tc) == 1L)) {
+                    val shouldBeConcrete = (paramFlags and SIG_ELEM_DEFINED_ONLY) != 0 && Ops.isconcrete(argO, tc) != 1L
+                    if (shouldBeConcrete || ((paramFlags and SIG_ELEM_UNDEFINED_ONLY) != 0 && Ops.isconcrete(argO, tc) == 1L)) {
                         if (error != null) {
                             val typeName = Ops.typeName(param.get_attribute_boxed(tc,
                                 gcx.Parameter, "$!type", HINT_type), tc)
-                            val argName = Ops.typeName(arg_o, tc)
+                            val argName = Ops.typeName(argO, tc)
                             var methodName = cf.codeRef.name
                             val thrower = RakOps.getThrower(tc, "X::Parameter::InvalidConcreteness")
                             if (thrower != null) {
@@ -569,9 +569,9 @@ object Binder {
                 }
 
                 val coerceMeth = Ops.findmethod(HOW, "coerce", tc)
-                Ops.invokeDirect(tc, coerceMeth, genIns, arrayOf<Any?>(HOW, paramType, arg_o))
-                arg_o = Ops.result_o(tc.curFrame!!)
-                decontValue = Ops.decont(arg_o, tc)
+                Ops.invokeDirect(tc, coerceMeth, genIns, arrayOf<Any?>(HOW, paramType, argO))
+                argO = Ops.result_o(tc.curFrame!!)
+                decontValue = Ops.decont(argO, tc)
             }
         }
 
@@ -584,22 +584,22 @@ object Binder {
                 if (hasVarName) {
                     when (flag) {
                         CallSiteDescriptor.ARG_INT.toInt() ->
-                            cf.iLex!![sci.iTryGetLexicalIdx(varName)] = arg_i
+                            cf.iLex!![sci.iTryGetLexicalIdx(varName)] = argI
                         CallSiteDescriptor.ARG_UINT.toInt() ->
-                            cf.iLex!![sci.uTryGetLexicalIdx(varName)] = arg_i
+                            cf.iLex!![sci.uTryGetLexicalIdx(varName)] = argI
                         CallSiteDescriptor.ARG_NUM.toInt() ->
-                            cf.nLex!![sci.nTryGetLexicalIdx(varName)] = arg_n
+                            cf.nLex!![sci.nTryGetLexicalIdx(varName)] = argN
                         CallSiteDescriptor.ARG_STR.toInt() ->
-                            cf.sLex!![sci.sTryGetLexicalIdx(varName)] = arg_s
+                            cf.sLex!![sci.sTryGetLexicalIdx(varName)] = argS
                     }
                 }
             }
 
             /* Otherwise it's some objecty case. */
-            else if (is_rw) {
-                if (Ops.isrwcont(arg_o, tc) == 1L) {
+            else if (isRw) {
+                if (Ops.isrwcont(argO, tc) == 1L) {
                     if (hasVarName)
-                        cf.oLex!![sci.oTryGetLexicalIdx(varName)] = arg_o
+                        cf.oLex!![sci.oTryGetLexicalIdx(varName)] = argO
                 } else {
                     val thrower = RakOps.getThrower(tc, "X::Parameter::RW")
                     if (thrower == null) {
@@ -616,7 +616,7 @@ object Binder {
             else if (hasVarName) {
                 if ((paramFlags and SIG_ELEM_IS_RAW) != 0) {
                     /* Just bind the thing as is into the lexpad. */
-                    cf.oLex!![sci.oTryGetLexicalIdx(varName)] = if (didHLLTransform) decontValue else arg_o
+                    cf.oLex!![sci.oTryGetLexicalIdx(varName)] = if (didHLLTransform) decontValue else argO
                 }
                 else {
                     /* If it's an array, copy means make a new one and store,
@@ -658,14 +658,14 @@ object Binder {
                         }
                         if (wrap || varName == "\$_") {
                             val stScalar = gcx.Scalar!!.st
-                            val new_cont = stScalar.REPR.allocate(tc, stScalar)
+                            val newCont = stScalar.REPR.allocate(tc, stScalar)
                             val desc = param.get_attribute_boxed(tc, gcx.Parameter,
                                 "$!container_descriptor", HINT_container_descriptor)
-                            new_cont.bind_attribute_boxed(tc, gcx.Scalar, "$!descriptor",
+                            newCont.bind_attribute_boxed(tc, gcx.Scalar, "$!descriptor",
                                 RakudoContainerSpec.HINT_descriptor.toLong(), desc)
-                            new_cont.bind_attribute_boxed(tc, gcx.Scalar, "$!value",
+                            newCont.bind_attribute_boxed(tc, gcx.Scalar, "$!value",
                                 RakudoContainerSpec.HINT_value.toLong(), decontValue)
-                            cf.oLex!![sci.oTryGetLexicalIdx(varName)] = new_cont
+                            cf.oLex!![sci.oTryGetLexicalIdx(varName)] = newCont
                         }
                         else {
                             cf.oLex!![sci.oTryGetLexicalIdx(varName)] = decontValue
@@ -694,19 +694,19 @@ object Binder {
                 when (flag) {
                     CallSiteDescriptor.ARG_INT.toInt() ->
                         Ops.invokeDirect(tc, acceptsMeth,
-                            ACCEPTS_i, arrayOf<Any?>(consType, arg_i))
+                            ACCEPTS_i, arrayOf<Any?>(consType, argI))
                     CallSiteDescriptor.ARG_UINT.toInt() ->
                         Ops.invokeDirect(tc, acceptsMeth,
-                            ACCEPTS_u, arrayOf<Any?>(consType, arg_i))
+                            ACCEPTS_u, arrayOf<Any?>(consType, argI))
                     CallSiteDescriptor.ARG_NUM.toInt() ->
                         Ops.invokeDirect(tc, acceptsMeth,
-                            ACCEPTS_n, arrayOf<Any?>(consType, arg_n))
+                            ACCEPTS_n, arrayOf<Any?>(consType, argN))
                     CallSiteDescriptor.ARG_STR.toInt() ->
                         Ops.invokeDirect(tc, acceptsMeth,
-                            ACCEPTS_s, arrayOf<Any?>(consType, arg_s))
+                            ACCEPTS_s, arrayOf<Any?>(consType, argS))
                     else ->
                         Ops.invokeDirect(tc, acceptsMeth,
-                            ACCEPTS_o, arrayOf<Any?>(consType, arg_o))
+                            ACCEPTS_o, arrayOf<Any?>(consType, argO))
                 }
                 if (Ops.istrue(Ops.result_o(tc.curFrame!!), tc) == 0L) {
                     /* Constraint type check failed; produce error if needed. */
@@ -821,7 +821,7 @@ object Binder {
         /* Is the "get default from outer" flag set? */
         if ((flags and SIG_ELEM_DEFAULT_FROM_OUTER) != 0) {
             param.get_attribute_native(tc, gcx.Parameter, "$!variable_name", HINT_variable_name)
-            val varName = tc.native_s
+            val varName = tc.nativeS
             var curOuter = cf.outer
             while (curOuter != null) {
                 val idx = curOuter.codeRef.staticInfo.oTryGetLexicalIdx(varName!!)
@@ -859,7 +859,7 @@ object Binder {
                     /* TODO: Find clean solution for handling @deprecation
                      * during compiliation of setting. */
                     param.get_attribute_native(tc, gcx.Parameter, "$!variable_name", HINT_variable_name)
-                    val varName = tc.native_s
+                    val varName = tc.nativeS
                     if (varName!! == "@deprecation") {
                         val compilingCoreSetting = Ops.getlexdyn("$*COMPILING_CORE_SETTING", tc)
                         if (Ops.isnull(compilingCoreSetting) == 0L)
@@ -908,7 +908,7 @@ object Binder {
             }
             else {
                 param.get_attribute_native(tc, gcx.Parameter, "$!flags", HINT_flags)
-                val paramFlags = tc.native_i.toInt()
+                val paramFlags = tc.nativeI.toInt()
                 when (paramFlags and SIG_ELEM_NATIVE_VALUE) {
                     SIG_ELEM_NATIVE_INT_VALUE ->
                         return createBox(tc, gcx, 0L, CallSiteDescriptor.ARG_INT.toInt())
@@ -976,7 +976,7 @@ object Binder {
             /* Get parameter, its flags and any named names. */
             val param = params.at_pos_boxed(tc, i)!!
             param.get_attribute_native(tc, gcx.Parameter, "$!flags", HINT_flags)
-            val flags = tc.native_i.toInt()
+            val flags = tc.nativeI.toInt()
             val namedNames = param.get_attribute_boxed(tc,
                 gcx.Parameter, "@!named_names", HINT_named_names)
 
@@ -986,7 +986,7 @@ object Binder {
                  * Of course, if there's no variable name we can (cheaply) do pretty
                  * much nothing. */
                 param.get_attribute_native(tc, gcx.Parameter, "$!variable_name", HINT_variable_name)
-                if (tc.native_s == null) {
+                if (tc.nativeS == null) {
                     bindFail = BIND_RESULT_OK
                 }
                 else {
@@ -1027,7 +1027,7 @@ object Binder {
                 else {
                     val nextParam = params.at_pos_boxed(tc, i + 1)!!
                     nextParam.get_attribute_native(tc, gcx.Parameter, "$!flags", HINT_flags)
-                    if ((tc.native_i.toInt() and (SIG_ELEM_SLURPY_POS or SIG_ELEM_SLURPY_NAMED)) != 0)
+                    if ((tc.nativeI.toInt() and (SIG_ELEM_SLURPY_POS or SIG_ELEM_SLURPY_NAMED)) != 0)
                         suppressArityFail = true
                 }
             }
@@ -1125,7 +1125,7 @@ object Binder {
                     val numNames = namedNames.elems(tc)
                     for (j in 0 until numNames) {
                         namedNames.at_pos_native(tc, j)
-                        val name = tc.native_s
+                        val name = tc.nativeS
                         if (namedArgsCopy.containsKey(name)) {
                             lookup = namedArgsCopy.removeInt(name)
                             break
@@ -1145,7 +1145,7 @@ object Binder {
                         if (error != null) {
                             namedNames.at_pos_native(tc, 0)
                             error[0] = "Required named argument '" +
-                                tc.native_s +
+                                tc.nativeS +
                                 "' not passed"
                         }
                         return BIND_RESULT_FAIL
