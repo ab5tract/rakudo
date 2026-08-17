@@ -1707,17 +1707,8 @@ class RakuAST::VarDeclaration::Simple
                     QAST::Stmts.new(
                         QAST::Var.new( :scope('lexical'), :decl('static'), :name(self.name),
                             :value($!lowered-away-sentinel) ),
-                        # A parameter's binding supplies the container, so
-                        # vivifying one here is dead in the best case. On a
-                        # backend that binds parameters in the frame prologue
-                        # rather than inline, this declaration runs *after*
-                        # the binding, and the fresh container would replace
-                        # the argument. Just declare the local.
-                        $!is-parameter
-                            ?? QAST::Var.new( :scope('local'), :decl('var'),
-                                   :name($local-name) )
-                            !! QAST::Var.new( :scope('local'), :decl('contvar'),
-                                   :name($local-name), :value($container) )
+                        QAST::Var.new( :scope('local'), :decl('contvar'),
+                            :name($local-name), :value($container) )
                     )
                 }
                 else {
