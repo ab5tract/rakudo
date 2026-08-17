@@ -951,7 +951,7 @@ register_op_desugar('time_n', -> $qast {
 }
 {
     register_op_desugar('p6assign', -> $qast {
-#?if moar
+#?if !js
         my $cont := QAST::Node.unique('assign_cont');
         QAST::Stmts.new(
           QAST::Op.new(
@@ -968,7 +968,7 @@ register_op_desugar('time_n', -> $qast {
           QAST::Var.new( :name($cont), :scope('local') )
         )
 #?endif
-#?if !moar
+#?if js
         QAST::Op.new( :op('assign'), $qast[0], $qast[1] )
 #?endif
     });
