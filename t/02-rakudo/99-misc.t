@@ -147,7 +147,7 @@ class ParameterChild is Parameter {
 }
 is ParameterChild.new(foobar => 'Baz').foobar, 'Baz', 'Subclassing of Parameter works';
 
-is Parameter.new(:name('$a'), :type(Int), :optional).perl, 'Int $a?', 'Parameter takes by-name parameters itself';
+is Parameter.new(:name('$a'), :type(Int), :optional).raku, 'Int $a?', 'Parameter takes by-name parameters itself';
 
 subtest 'Temporal', {
     my $posix = 915148800.999_999_999_999_9;

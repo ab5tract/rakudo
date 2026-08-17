@@ -90,6 +90,12 @@ $ops.map_classlib_hll_op('Raku', 'p6setiterbuftype', $TYPE_P6OPS, 'p6setiterbuft
 $ops.map_classlib_hll_op('Raku', 'p6isbindable', $TYPE_P6OPS, 'p6isbindable', [$RT_OBJ, $RT_OBJ], $RT_INT, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6bindcaptosig', $TYPE_P6OPS, 'p6bindcaptosig', [$RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6typecheckrv', $TYPE_P6OPS, 'p6typecheckrv', [$RT_OBJ, $RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
+# Force a value into an object register, boxing a native if that is what it
+# takes. The dispatchers work in objects, so this is how a native value
+# reaches one. MoarVM spells it the same way.
+$ops.add_hll_op('Raku', 'p6box', -> $qastcomp, $op {
+    $qastcomp.as_jast(nqp::atpos($op, 0), :want($RT_OBJ))
+});
 $ops.add_hll_op('Raku', 'p6decontrv', :!inlinable, -> $qastcomp, $op {
     my $is_rw;
     if nqp::istype($op[0], QAST::WVal) {
@@ -102,7 +108,10 @@ $ops.add_hll_op('Raku', 'p6decontrv', :!inlinable, -> $qastcomp, $op {
         $qastcomp.as_jast($op[1])
     }
     else {
-        $qastcomp.as_jast(QAST::Op.new( :op('p6decontrv_internal'), $op[1] ));
+        # The second child is the language revision the desugar picks its
+        # dispatcher by. Only moar emits p6decontrv_6c so far (see
+        # decontrv_op in Actions.nqp), so here it is always the 6.d one.
+        $qastcomp.as_jast(QAST::Op.new( :op('p6decontrv_internal'), $op[1], '' ));
     }
 });
 $ops.map_classlib_hll_op('Raku', 'p6capturelex', $TYPE_P6OPS, 'p6capturelex', [$RT_OBJ], $RT_OBJ, :tc, :!inlinable);
