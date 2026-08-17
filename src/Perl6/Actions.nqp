@@ -886,7 +886,7 @@ register_op_desugar('time_n', -> $qast {
 });
 {
     register_op_desugar('p6decontrv_internal', -> $qast {
-#?if moar
+#?if !js
         QAST::Op.new(:op('dispatch'),
           QAST::SVal.new(
             :value($qast[1] eq '6c' ?? 'raku-rv-decont-6c' !! 'raku-rv-decont')
@@ -896,7 +896,7 @@ register_op_desugar('time_n', -> $qast {
           )
         )
 #?endif
-#?if !moar
+#?if js
         my $result   := QAST::Node.unique('result');
         my $Scalar   := QAST::WVal.new(:value(nqp::gethllsym('Raku','Scalar')));
         my $Iterable := QAST::WVal.new(:value(nqp::gethllsym('Raku','Iterable')));
@@ -951,7 +951,7 @@ register_op_desugar('time_n', -> $qast {
 }
 {
     register_op_desugar('p6assign', -> $qast {
-#?if moar
+#?if !js
         my $cont := QAST::Node.unique('assign_cont');
         QAST::Stmts.new(
           QAST::Op.new(
@@ -968,21 +968,21 @@ register_op_desugar('time_n', -> $qast {
           QAST::Var.new( :name($cont), :scope('local') )
         )
 #?endif
-#?if !moar
+#?if js
         QAST::Op.new( :op('assign'), $qast[0], $qast[1] )
 #?endif
     });
 }
 {
     register_op_desugar('p6attrinited', -> $qast {
-#?if moar
+#?if !js
         QAST::Op.new(
           :op('dispatch'), :returns(int),
           QAST::SVal.new( :value('raku-is-attr-inited') ),
           $qast[0]
         );
 #?endif
-#?if !moar
+#?if js
         QAST::Op.new(
           :op('callmethod'), :name('check'),
           QAST::WVal.new(
