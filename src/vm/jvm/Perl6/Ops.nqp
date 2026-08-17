@@ -179,6 +179,10 @@ $ops.map_classlib_hll_op('nqp', 'p6settypes', $TYPE_P6OPS, 'p6settypes', [$RT_OB
 $ops.map_classlib_hll_op('nqp', 'p6setitertype', $TYPE_P6OPS, 'p6setitertype', [$RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('nqp', 'p6setiterbuftype', $TYPE_P6OPS, 'p6setiterbuftype', [$RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('nqp', 'p6isbindable', $TYPE_P6OPS, 'p6isbindable', [$RT_OBJ, $RT_OBJ], $RT_INT, :tc);
+# The bind_error handler the HLL config registers is bootstrap code, so it
+# needs this under the nqp HLL as well as the Raku one.
+$ops.map_classlib_hll_op('nqp', 'p6bindfailerror', $TYPE_P6OPS, 'p6bindfailerror', [$RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
+$ops.map_classlib_hll_op('Raku', 'p6bindfailerror', $TYPE_P6OPS, 'p6bindfailerror', [$RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('nqp', 'p6inpre', $TYPE_P6OPS, 'p6inpre', [], $RT_INT, :tc);
 $ops.map_classlib_hll_op('nqp', 'jvmrakudointerop', $TYPE_P6OPS, 'jvmrakudointerop', [], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'jvmrakudointerop', $TYPE_P6OPS, 'jvmrakudointerop', [], $RT_OBJ, :tc);

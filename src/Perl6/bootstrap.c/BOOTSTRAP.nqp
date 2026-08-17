@@ -6035,6 +6035,16 @@ nqp::sethllconfig('Raku', nqp::hash(
             }
         }
     },
+#?if jvm
+
+    # The JVM binds with its own binder rather than the one above, which is
+    # not built there, so ask that one to bind the capture again and report
+    # what went wrong. Reached when a lowered parameter's check fails and no
+    # dispatch asked to resume on it.
+    'bind_error', -> $capture, $code {
+        nqp::p6bindfailerror($capture, $code);
+    },
+#?endif
 #?if !jvm
 
     'bind_error', -> $capture {

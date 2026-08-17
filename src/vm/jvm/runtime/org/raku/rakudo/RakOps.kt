@@ -284,6 +284,36 @@ object RakOps {
         return theCsd
     }
 
+    /**
+     * Report why binding failed, for the HLL bind_error hook. A lowered
+     * parameter's check has already failed and no dispatch wanted to resume
+     * on it, so re-run the binder over the arguments the frame was entered
+     * with to find out which parameter did not match and raise the language's
+     * own error. The capture is an nqp one, straight off the failing frame,
+     * so this cannot go through p6bindcaptosig -- that takes a Raku Capture.
+     */
+    @JvmStatic
+    fun p6bindfailerror(cap: SixModelObject?, code: SixModelObject?, tc: ThreadContext): SixModelObject? {
+        val capture = cap as? CallCaptureInstance
+            ?: throw ExceptionHandling.dieInternal(tc, "p6bindfailerror needs a capture")
+        val gcx = key.getGC(tc)
+        val sig = code!!.get_attribute_boxed(tc, gcx.Code, "\$!signature", HINT_CODE_SIG)
+        val params = sig!!.get_attribute_boxed(tc, gcx.Signature, "@!params", HINT_SIG_PARAMS)
+
+        /* Bind into the frame that failed, not this one, so anything the
+         * binder reports is phrased against it. */
+        val frame = tc.curFrame!!.caller ?: tc.curFrame!!
+        val error = arrayOfNulls<Any>(3)
+        Binder.bind(tc, gcx, frame, params!!, capture.descriptor!!, capture.args, false, error)
+        if (error[0] is String)
+            throw ExceptionHandling.dieInternal(tc, error[0] as String)
+        if (error[0] != null)
+            Ops.invokeDirect(tc, error[0] as SixModelObject?,
+                error[1] as CallSiteDescriptor, error[2] as Array<Any?>)
+        /* The binder found nothing to complain about, so say what we know. */
+        throw ExceptionHandling.dieInternal(tc, "Bind check failed")
+    }
+
     @JvmStatic
     fun p6bindcaptosig(sig: SixModelObject?, cap: SixModelObject?, tc: ThreadContext): SixModelObject? {
         val cf = tc.curFrame!!
