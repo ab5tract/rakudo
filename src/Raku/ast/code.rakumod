@@ -154,17 +154,9 @@ class RakuAST::Code
     has Bool $!custom-args;
 
     # Whether this code object binds its arguments with the runtime binder
-    # rather than lowered per-parameter QAST. On the JVM the lowered form
-    # does not reproduce the binder's semantics, so everything goes through
-    # the binder there, exactly as the legacy frontend does (its
-    # `add_signature_binding_code` gates every shortcut behind `#?if !jvm`).
+    # rather than lowered per-parameter QAST.
     method custom-args() {
-#?if jvm
-        True
-#?endif
-#?if !jvm
         $!custom-args ?? True !! False
-#?endif
     }
     has Mu $!qast-block;
     has str $!cuid;
