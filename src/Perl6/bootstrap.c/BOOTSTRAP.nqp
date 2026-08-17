@@ -6186,7 +6186,7 @@ nqp::sethllconfig('Raku', nqp::hash(
     'int64_multidim_ref', Int64MultidimRef,
 #?endif
 
-#?if moar
+#?if !js
     'call_dispatcher',         'raku-call',
     'method_call_dispatcher',  'raku-meth-call',
     'find_method_dispatcher',  'raku-find-meth',
@@ -6199,7 +6199,7 @@ nqp::sethllconfig('Raku', nqp::hash(
 #?endif
 ));
 
-#?if moar
+#?if !js
 my @types_for_hll_role := nqp::list(Mu, Int, Num, Str, List, Hash, ForeignCode);
 my @transform_type := nqp::list(
     Mu,
