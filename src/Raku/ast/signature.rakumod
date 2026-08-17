@@ -1270,9 +1270,17 @@ class RakuAST::Parameter
         # owning routine compiles, which can happen during BEGIN (for
         # example, a trait_mod multi applied to an attribute, or a
         # method in a role body).
+        # The JVM binds a named parameter by a single name, so an alias of any
+        # length needs the binder there; elsewhere only a three-name one does.
+#?if jvm
+        my int $inline-names := 1;
+#?endif
+#?if !jvm
+        my int $inline-names := 2;
+#?endif
         $!owner.set-custom-args
             if nqp::isconcrete($!owner)
-            && ($!sub-signature || nqp::elems($!names) > 2);
+            && ($!sub-signature || nqp::elems($!names) > $inline-names);
         self.IMPL-SET-CUSTOM-ARGS-FOR-GENERIC;
 
         $!target.to-begin-time($resolver, $context) if $!target;
