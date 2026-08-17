@@ -1719,8 +1719,8 @@ class RakuAST::VarDeclaration::Simple
                     QAST::Stmts.new(
                         QAST::Var.new( :scope('lexical'), :decl('static'), :name(self.name),
                             :value($!lowered-away-sentinel) ),
-                        QAST::Var.new( :scope('local'), :decl('contvar'), :name($local-name),
-                            :value($container) )
+                        QAST::Var.new( :scope('local'), :decl('contvar'),
+                            :name($local-name), :value($container) )
                     )
                 }
                 else {
