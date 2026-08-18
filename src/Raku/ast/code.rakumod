@@ -45,7 +45,7 @@ class RakuAST::Blockoid
 class RakuAST::OnlyStar
   is RakuAST::Blockoid
   is RakuAST::Term
-#?if !moar
+#?if js
   # Backends without new-dispatch build the proto's dispatch by hand and need
   # Routine to reach the routine's `$!dispatch_cache` attribute.
   is RakuAST::ImplicitLookups
@@ -66,7 +66,7 @@ class RakuAST::OnlyStar
         True  # `{*}` dispatches to candidates, so it is never useless when sunk
     }
 
-#?if !moar
+#?if js
     method PRODUCE-IMPLICIT-LOOKUPS() {
         [
             RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('Routine')),
@@ -85,13 +85,13 @@ class RakuAST::OnlyStar
         # dispatcher's junction handling.
         self.IMPL-SET-NODE(
             QAST::Stmts.new(
-#?if moar
+#?if !js
                 QAST::Op.new(
                     :op('dispatch'),
                     QAST::SVal.new( :value('boot-resume') ),
                     QAST::IVal.new( :value(nqp::const::DISP_ONLYSTAR) ))
 #?endif
-#?if !moar
+#?if js
                 # No new-dispatch here, so do what the legacy frontend's
                 # autogenerate_proto does: consult the routine's own dispatch
                 # cache for the incoming capture, falling back to asking it to
@@ -102,7 +102,7 @@ class RakuAST::OnlyStar
             :key);
     }
 
-#?if !moar
+#?if js
     method IMPL-ONLYSTAR-DISPATCH-QAST() {
         my $Routine := self.IMPL-UNWRAP-LIST(self.get-implicit-lookups)[0].compile-time-value;
         my sub curcode() {
@@ -2757,14 +2757,14 @@ class RakuAST::Routine
         [
             RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('Callable')),
             RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('&FATALIZE')),
-#?if !moar
+#?if js
             RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('MultiDispatcher')),
             RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('MethodDispatcher')),
 #?endif
         ]
     }
 
-#?if !moar
+#?if js
     # Backends without new-dispatch resolve callsame/nextsame and friends by
     # walking the caller chain for a frame that holds a $*DISPATCHER lexical,
     # which each routine has to claim on entry with `takedispatcher`. A multi
@@ -3086,7 +3086,7 @@ class RakuAST::Routine
                     self.IMPL-QAST-DECLS($context)
                 ), :key);
         self.IMPL-ADD-LOWERED-DEBUG-MAPPINGS($block);
-#?if !moar
+#?if js
         # An onlystar proto's frame only routes the call on to a candidate, so
         # it must not count as the caller a `return` in the candidate returns
         # from: `throwpayloadlexcaller` skips thunk frames when looking for the
@@ -3097,7 +3097,7 @@ class RakuAST::Routine
           && !nqp::istype(self, RakuAST::RegexDeclaration);
 #?endif
         my $signature := self.placeholder-signature || $!signature;
-#?if !moar
+#?if js
         self.IMPL-ADD-DISPATCHER-QAST($block);
 #?endif
         $block.push($signature.IMPL-QAST-BINDINGS($context, :needs-full-binder(self.custom-args), :multi(self.multiness eq 'multi'), :invocant-decl(self.IMPL-SELF-DECLARATION)));
@@ -3364,7 +3364,7 @@ class RakuAST::Routine
         $context.ensure-sc($routine);
 
         # Add return exception and decont handler if needed.
-        my str $decont-rv-op := $context.lang-version lt 'd' && $context.is-moar
+        my str $decont-rv-op := $context.lang-version lt 'd' && !$context.is-js
             ?? 'p6decontrv_6c'
             !! 'p6decontrv';
         unless $routine.rw {

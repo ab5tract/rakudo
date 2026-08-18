@@ -47,7 +47,7 @@ $ops.add_hll_op('Raku', 'p6bindsig', :!inlinable, -> $qastcomp, $op {
         "p6bindsig", $TYPE_CSD, $TYPE_TC, $TYPE_CSD, "[$TYPE_OBJ" ));
     $il.append(JAST::Instruction.new( :op('dup') ));
 
-    my $natlbl := JAST::Label.new( :name('p6bindsig_no_autothread') );
+    my $natlbl := JAST::Label.new( :name($qastcomp.unique('p6bindsig_no_autothread_')) );
     $il.append(JAST::Instruction.new( :op('ifnonnull'), $natlbl ));
     $il.append(JAST::Instruction.new( :op('aload'), 'cf' ));
     $il.append(JAST::Instruction.new( :op('invokevirtual'),
@@ -61,6 +61,26 @@ $ops.add_hll_op('Raku', 'p6bindsig', :!inlinable, -> $qastcomp, $op {
     $il.append(JAST::Instruction.new( :op('astore'), '__args' ));
 
     $ops.result($il, $RT_VOID);
+});
+$ops.add_hll_op('Raku', 'p6trybindsig', :!inlinable, -> $qastcomp, $op {
+    my $il := JAST::InstructionList.new();
+    $il.append(JAST::Instruction.new( :op('aload_1') ));
+    $il.append(JAST::Instruction.new( :op('aload'), 'csd' ));
+    $il.append(JAST::Instruction.new( :op('aload'), '__args' ));
+    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_P6OPS,
+        "p6trybindsig", 'Long', $TYPE_TC, $TYPE_CSD, "[$TYPE_OBJ" ));
+
+    # The runtime left any flattened callsite on the frame and the matching
+    # arguments in tc.flatArgs; reload the locals from there. On a failed
+    # bind the values are unused: assertparamcheck abandons the frame.
+    $il.append(JAST::Instruction.new( :op('aload'), 'cf' ));
+    $il.append(JAST::Instruction.new( :op('getfield'), $TYPE_CF, 'csd', $TYPE_CSD ));
+    $il.append(JAST::Instruction.new( :op('astore'), 'csd' ));
+    $il.append(JAST::Instruction.new( :op('aload_1') ));
+    $il.append(JAST::Instruction.new( :op('getfield'), $TYPE_TC, 'flatArgs', "[$TYPE_OBJ" ));
+    $il.append(JAST::Instruction.new( :op('astore'), '__args' ));
+
+    $ops.result($il, $RT_INT);
 });
 our $Binder;
 proto sub trial_bind(*@args) {
@@ -90,30 +110,41 @@ $ops.map_classlib_hll_op('Raku', 'p6setiterbuftype', $TYPE_P6OPS, 'p6setiterbuft
 $ops.map_classlib_hll_op('Raku', 'p6isbindable', $TYPE_P6OPS, 'p6isbindable', [$RT_OBJ, $RT_OBJ], $RT_INT, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6bindcaptosig', $TYPE_P6OPS, 'p6bindcaptosig', [$RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6typecheckrv', $TYPE_P6OPS, 'p6typecheckrv', [$RT_OBJ, $RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
+$ops.map_classlib_hll_op('Raku', 'p6decontrv_rt', $TYPE_P6OPS, 'p6decontrv_rt', [$RT_OBJ, $RT_OBJ, $RT_INT], $RT_OBJ, :tc);
+$ops.map_classlib_hll_op('Raku', 'p6bindwillresume', $TYPE_OPS, 'bindWillResumeOnFailure', [], $RT_INT, :tc);
 # Force a value into an object register, boxing a native if that is what it
 # takes. The dispatchers work in objects, so this is how a native value
 # reaches one. MoarVM spells it the same way.
 $ops.add_hll_op('Raku', 'p6box', -> $qastcomp, $op {
     $qastcomp.as_jast(nqp::atpos($op, 0), :want($RT_OBJ))
 });
-$ops.add_hll_op('Raku', 'p6decontrv', :!inlinable, -> $qastcomp, $op {
-    my $is_rw;
-    if nqp::istype($op[0], QAST::WVal) {
-        $is_rw := nqp::istrue($op[0].value.rw);
+sub decontrv_op($version) {
+    -> $qastcomp, $op {
+        my $is_rw;
+        if nqp::istype($op[0], QAST::WVal) {
+            $is_rw := nqp::istrue($op[0].value.rw);
+        }
+        else {
+            nqp::die('p6decontrv expects a QAST::WVal as its first child');
+        }
+        if $is_rw {
+            $qastcomp.as_jast($op[1])
+        }
+        else {
+            # The version picks the dispatcher: 'raku-rv-decont-6c' also
+            # decontainerizes a Proxy on return, which 6.c/6.d code relies
+            # on. Emitted as a static call with the dispatch site cached per
+            # routine (not the shared p6decontrv_internal desugar, whose
+            # dispatch op would put an invokedynamic on every return).
+            $qastcomp.as_jast(QAST::Op.new( :op('p6decontrv_rt'),
+                $op[0],
+                QAST::Op.new( :op('wantdecont'), $op[1] ),
+                QAST::IVal.new( :value($version eq '6c' ?? 1 !! 0) ) ));
+        }
     }
-    else {
-        nqp::die('p6decontrv expects a QAST::WVal as its first child');
-    }
-    if $is_rw {
-        $qastcomp.as_jast($op[1])
-    }
-    else {
-        # The second child is the language revision the desugar picks its
-        # dispatcher by. Only moar emits p6decontrv_6c so far (see
-        # decontrv_op in Actions.nqp), so here it is always the 6.d one.
-        $qastcomp.as_jast(QAST::Op.new( :op('p6decontrv_internal'), $op[1], '' ));
-    }
-});
+}
+$ops.add_hll_op('Raku', 'p6decontrv',    :!inlinable, decontrv_op(''));
+$ops.add_hll_op('Raku', 'p6decontrv_6c', :!inlinable, decontrv_op('6c'));
 $ops.map_classlib_hll_op('Raku', 'p6capturelex', $TYPE_P6OPS, 'p6capturelex', [$RT_OBJ], $RT_OBJ, :tc, :!inlinable);
 $ops.map_classlib_hll_op('Raku', 'p6bindassert', $TYPE_P6OPS, 'p6bindassert', [$RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6stateinit', $TYPE_P6OPS, 'p6stateinit', [], $RT_INT, :tc, :!inlinable);

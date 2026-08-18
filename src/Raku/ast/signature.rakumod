@@ -340,6 +340,10 @@ class RakuAST::Signature
         my $bindings := QAST::Stmts.new();
         my $parameters := $!parameters // [];
         if $needs-full-binder {
+#?if js
+            # No new-dispatch to resume a failed bind, so bind directly.
+            $bindings.push(QAST::Op.new( :op('p6bindsig') ));
+#?endif
 #?if moar
             $bindings.push(QAST::Op.new(
                 :op('if'),
@@ -354,9 +358,18 @@ class RakuAST::Signature
                 QAST::Op.new( :op('p6bindsig') )
             ));
 #?endif
-#?if !moar
-            # No new-dispatch to resume a failed bind, so bind directly.
-            $bindings.push(QAST::Op.new( :op('p6bindsig') ));
+#?if jvm
+            # As on MoarVM, but as a plain op: a dispatch instruction here
+            # would cost an invokedynamic per full-binder prologue.
+            $bindings.push(QAST::Op.new(
+                :op('if'),
+                QAST::Op.new( :op('p6bindwillresume') ),
+                QAST::Op.new(
+                    :op('assertparamcheck'),
+                    QAST::Op.new( :op('p6trybindsig') )
+                ),
+                QAST::Op.new( :op('p6bindsig') )
+            ));
 #?endif
         }
         else {
@@ -370,7 +383,7 @@ class RakuAST::Signature
                 $bindings.push($!implicit-slurpy-hash.IMPL-TO-QAST($context));
             }
         }
-#?if moar
+#?if !js
         if $multi {
             $bindings.push(QAST::Op.new( :op('bindcomplete') ));
         }
