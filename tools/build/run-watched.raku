@@ -26,6 +26,13 @@ sub MAIN(
 ) {
     @cmd or die "nothing to run: pass the command after --\n";
 
+    # Compile the patterns before anything starts: a broken regex must fail
+    # here, not inside the react block once the child is already running.
+    my @pats = @show.map: -> $s {
+        my $rx = try "anon regex \{ $s \}".EVAL;
+        $rx // die "bad --show pattern '$s': { $!.message }\n";
+    };
+
     my $fh = open $log, :w, :out-buffer(0);
     $fh.say: "=== { @cmd.join(' ') } ===";
     $fh.say: "=== started { DateTime.now } ===";
@@ -48,10 +55,10 @@ sub MAIN(
         whenever $proc.stderr { emit $_ }
 
         # Progress markers straight to the terminal.
-        if @show {
+        if @pats {
             my $lines = Supply.merge($proc.stdout.lines, $proc.stderr.lines);
-            for @show -> $pat {
-                whenever $lines.grep(/<$pat>/) -> $l {
+            for @pats -> $pat {
+                whenever $lines.grep($pat) -> $l {
                     note "[{(now - $started).Int}s] $l";
                 }
             }
