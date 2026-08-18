@@ -438,10 +438,10 @@ my class Junction { # declared in BOOTSTRAP
               nqp::stmts(
                 nqp::while(
                   nqp::islt_i($i,$elems)
-#?if !moar
+#?if js
                     && matcher.ACCEPTS(nqp::atpos($!eigenstates,$i)).not,
 #?endif
-#?if moar
+#?if !js
                     && nqp::dispatch('raku-smartmatch', nqp::atpos($!eigenstates, $i), matcher, nqp::unbox_i(-1)),
 #?endif
                   ++$i
@@ -453,10 +453,10 @@ my class Junction { # declared in BOOTSTRAP
                 nqp::stmts(
                   nqp::while(
                     nqp::islt_i($i,$elems)
-#?if !moar
+#?if js
                       && matcher.ACCEPTS(nqp::atpos($!eigenstates,$i)).Bool,
 #?endif
-#?if moar
+#?if !js
                       && nqp::dispatch('raku-smartmatch', nqp::atpos($!eigenstates, $i), matcher, nqp::unbox_i(1)),
 #?endif
                     ++$i
@@ -468,10 +468,10 @@ my class Junction { # declared in BOOTSTRAP
                   nqp::stmts(
                     nqp::while(
                       nqp::islt_i($i,$elems)
-#?if !moar
+#?if js
                         && matcher.ACCEPTS(nqp::atpos($!eigenstates,$i)).not,
 #?endif
-#?if moar
+#?if !js
                         && nqp::dispatch('raku-smartmatch', nqp::atpos($!eigenstates, $i), matcher, nqp::unbox_i(-1)),
 #?endif
                       ++$i
@@ -484,10 +484,10 @@ my class Junction { # declared in BOOTSTRAP
                     nqp::while(
                       nqp::islt_i(++$i,$elems) && nqp::isle_i($seen,1),
                       nqp::if(
-#?if !moar
+#?if js
                         matcher.ACCEPTS(nqp::atpos($!eigenstates,$i)).Bool,
 #?endif
-#?if moar
+#?if !js
                         nqp::dispatch('raku-smartmatch', nqp::atpos($!eigenstates, $i), matcher, nqp::unbox_i(1)),
 #?endif
                         ++$seen

@@ -152,6 +152,15 @@ class RakuAST::IMPL::QASTContext {
 #?endif
     }
 
+    method is-js() {
+#?if js
+        True
+#?endif
+#?if !js
+        False
+#?endif
+    }
+
     method is-precompilation-mode() {
         $!precompilation-mode
     }
