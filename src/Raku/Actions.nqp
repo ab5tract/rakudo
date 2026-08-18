@@ -456,8 +456,13 @@ class Raku::Actions is HLL::Actions does Raku::CommonActions {
             # Globbed version needs a bit of research needs to be done first.
             if nqp::index($version,'*') >= 0 || nqp::index($version,'+') >= 0 {
                 my $Version := $RESOLVER.setting-constant('Version');
+                # hllize the bare VM strings on their way into Raku-land:
+                # Version.new's Str() coercion rejects a BOOTStr on backends
+                # whose compiled binding does not map foreign values itself.
                 my $ver-requested := $Version.new(
-                  $HLL-COMPILER.lvs.from-public-repr($version, :as-str)
+                  nqp::hllizefor(
+                    $HLL-COMPILER.lvs.from-public-repr($version, :as-str),
+                    'Raku')
                 );
                 my @can-versions := $HLL-COMPILER.can_language_versions;
                 my $can-version;
@@ -469,7 +474,8 @@ class Raku::Actions is HLL::Actions does Raku::CommonActions {
                 # Like 6.e would be a valid version in the future, but for
                 # now it has to be 6.e.PREVIEW.
                 while --$i >= 0 {
-                    $can-version := $Version.new(@can-versions[$i]);
+                    $can-version := $Version.new(
+                      nqp::hllizefor(@can-versions[$i], 'Raku'));
                     next unless $ver-requested.ACCEPTS($can-version);
 
                     # If version candidate
