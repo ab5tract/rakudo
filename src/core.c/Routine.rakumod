@@ -79,7 +79,7 @@ my class Routine { # declared in BOOTSTRAP
 
     method is-wrapped(--> False) { }
 
-#?if !moar
+#?if js
     method wrap(&wrapper) {
         my class WrapHandle {
             has $!dispatcher;
@@ -130,7 +130,7 @@ my class Routine { # declared in BOOTSTRAP
     }
 #?endif
 
-#?if moar
+#?if !js
     my role Wrapped {
         has Mu      $!wrappers;
         has Routine $!wrapper-type;
