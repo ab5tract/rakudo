@@ -5899,6 +5899,11 @@ class Perl6::World is HLL::World {
             CATCH { $ex := $_; }
         }
 
+        if nqp::atkey(nqp::getenvhash(), 'NQP_DISPATCH_DEBUG') {
+            note("[begin-time-ex] at " ~ self.current_file ~ ":" ~ self.current_line($/)
+                ~ " message: " ~ nqp::getmessage($ex));
+            note("[begin-time-ex] backtrace:\n" ~ nqp::join("\n", nqp::backtracestrings($ex)));
+        }
         my int $success := 0;
         my $coercer;
         try { $coercer := self.find_single_symbol_in_setting('&COMP_EXCEPTION'); ++$success; };

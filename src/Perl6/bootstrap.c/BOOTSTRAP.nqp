@@ -1882,8 +1882,8 @@ BEGIN {
     # Ensure Rakudo runtime support is initialized.
     nqp::p6init();
 
-#?if moar
-    # On MoarVM, to get us through the bootstrap, put the NQP dispatchers in
+#?if !js
+    # To get us through the bootstrap, put the NQP dispatchers in
     # place as the Raku ones; they will get replaced later in the bootstrap.
     nqp::sethllconfig('Raku', nqp::hash(
       'call_dispatcher',        'nqp-call',
@@ -2444,10 +2444,10 @@ BEGIN {
                     if nqp::eqaddr($type, Mu) || nqp::istype($val, $type) {
                         if $type.HOW.archetypes($type).coercive {
                             my $coercion_type := $type.HOW.wrappee($type, :coercion);
-#?if moar
+#?if !js
                             nqp::bindattr($cont, Scalar, '$!value', nqp::dispatch('raku-coercion', $coercion_type, $val));
 #?endif
-#?if !moar
+#?if js
                             nqp::bindattr($cont, Scalar, '$!value', $coercion_type.HOW.coerce($coercion_type, $val));
 #?endif
                         }
@@ -6294,12 +6294,12 @@ nqp::register('raku-hllize', -> $capture {
 # Tell parametric role groups how to create a dispatcher.
 Perl6::Metamodel::ParametricRoleGroupHOW.set_selector_creator({
     my $sel := nqp::create(Sub);
-#?if moar
+#?if !js
     my $onlystar := sub (*@pos, *%named) {
         nqp::dispatch('boot-resume', nqp::const::DISP_ONLYSTAR)
     };
 #?endif
-#?if !moar
+#?if js
     my $onlystar := sub (*@pos, *%named) {
         nqp::invokewithcapture(
             nqp::getcodeobj(nqp::curcode()).find_best_dispatchee(nqp::usecapture()),

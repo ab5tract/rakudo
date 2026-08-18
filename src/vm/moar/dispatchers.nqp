@@ -1164,9 +1164,17 @@ nqp::register('raku-meth-call', -> $capture {
         # Try to resolve the method call, report an error if there is
         # no such method.
         my $meth := nqp::decont($how.find_method($obj, $name));
-        report-method-not-found(
-          $obj, $name, nqp::getlexcaller('$?CLASS'), $how, nqp::iscont($obj)
-        ) unless nqp::isconcrete($meth);
+        unless nqp::isconcrete($meth) {
+            if nqp::atkey(nqp::getenvhash(), 'NQP_DISPATCH_DEBUG') {
+                note("[raku-meth-call] find_method '" ~ $name ~ "' on "
+                    ~ $how.name($obj) ~ " returned repr=" ~ nqp::reprname($meth)
+                    ~ " isnull=" ~ nqp::isnull($meth)
+                    ~ "; direct findmethod can=" ~ nqp::can($obj, $name));
+            }
+            report-method-not-found(
+              $obj, $name, nqp::getlexcaller('$?CLASS'), $how, nqp::iscont($obj)
+            );
+        }
 
         # Establish a guard on the invocant type and method name (however
         # the name may well be a literal, in which case this is free).
@@ -3507,7 +3515,12 @@ nqp::register('raku-invoke', -> $capture {
     guard-type-concreteness($code_arg) unless $code-constant;
 
     # If it's already a VM-level code reference, just invoke it.
+#?if moar
     if nqp::reprname($code) eq 'MVMCode' {
+#?endif
+#?if jvm
+    if nqp::reprname($code) eq 'CodeRef' {
+#?endif
         nqp::syscall('dispatcher-delegate',
             $code-constant ?? 'boot-code-constant' !! 'boot-code',
             $capture);

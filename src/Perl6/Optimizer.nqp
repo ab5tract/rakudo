@@ -2144,10 +2144,10 @@ my class SmartmatchOptimizer {
         }
 
         if nqp::isnull($result) {
-#?if !moar
+#?if js
         $result := $op;
 #?endif
-#?if moar
+#?if !js
         $result := QAST::Op.new(
             :op<dispatch>,
             QAST::SVal.new( :value<raku-smartmatch> ),
@@ -2202,10 +2202,10 @@ my class SmartmatchOptimizer {
         # duplicate call to visit_children.
         if nqp::defined($sm_accepts) {
             my $lhs := Operand.new($op[0][1][1], $!optimizer, $!symbols, :name<LHS>);
-#?if !moar
+#?if js
             my $rhs := Operand.new($sm_accepts[0][1], $!optimizer, $!symbols, :name<RHS>);
 #?endif
-#?if moar
+#?if !js
             my $rhs := Operand.new($sm_accepts[2], $!optimizer, $!symbols, :name<RHS>);
 #?endif
             my $negated := $sm_accepts.ann('smartmatch_negated');
@@ -2224,7 +2224,7 @@ my class SmartmatchOptimizer {
             note("Post-typematch attempt result is ", $result.HOW.name($result)) if $!debug;
 
             if nqp::isnull($result) && ($sm_op := self.maybe_pair($lhs, $rhs, $sm_accepts, :$negated)) {
-#?if !moar
+#?if js
                 # When maybe_pair succeeds it means the RHS is certainly not a Regex. Hence we can remove the check and
                 # replace QAST::Stmts wrapper with the binding to sm_result_<n> local.
                 # Pull out the binding op and replace stmts; not needed in case of !~~
@@ -2234,7 +2234,7 @@ my class SmartmatchOptimizer {
                 $result := $op; # No further optimizations are possible
             }
 
-#?if !moar
+#?if js
             # If we know RHS type then we can possibly simplify the actual SM op withing `locallifetime` to plain
             # .ACCEPTS(...).Bool unless RHS is or can be a Regex
             if nqp::isnull($result)
@@ -3787,9 +3787,9 @@ class Perl6::Optimizer {
             }
         }
 
-#?if moar
-        # If resolution didn't work out this way, and we're on the MoarVM
-        # backend, use a dispatcher to speed it up. Give it the package and
+#?if !js
+        # If resolution didn't work out this way, use a dispatcher to
+        # speed it up. Give it the package and
         # name ahead of the invocant, as this makes the calling far more
         # optimal.
 
@@ -3809,10 +3809,10 @@ class Perl6::Optimizer {
 
     method optimize_qual_method_call($op) {
         # Dispatch only available on MoarVM for now.
-#?if !moar
+#?if js
         $op;
 #?endif
-#?if moar
+#?if !js
         # We can only optimize if we have a compile-time-known name.
         my $name_node := $op[1];
         if nqp::istype($name_node, QAST::Want) && $name_node[1] eq 'Ss' {
@@ -3855,10 +3855,10 @@ class Perl6::Optimizer {
 
     method optimize_maybe_method_call($op) {
         # Spesh plugins only available on MoarVM.
-#?if !moar
+#?if js
         $op;
 #?endif
-#?if moar
+#?if !js
         # We can only optimize if we have a compile-time-known name.
         my $name_node := $op[1];
         if nqp::istype($name_node, QAST::Want) && $name_node[1] eq 'Ss' {

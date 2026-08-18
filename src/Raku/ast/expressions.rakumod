@@ -922,7 +922,7 @@ class RakuAST::Infix
                                  int $negate ) {
         # Handle cases of s/// or m// separately. For a non-negating smartmatch this case could've been reduced to
         # plain topic localization except that we must ensure a False returned when there is no match.
-#?if moar
+#?if !js
         if (nqp::istype($right, RakuAST::RegexThunk) || nqp::istype($right, RakuAST::Transliteration))
             && (!nqp::can($right, 'match-immediately') || $right.match-immediately)
         {

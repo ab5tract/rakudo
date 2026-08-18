@@ -4193,12 +4193,12 @@ class Perl6::Actions is HLL::Actions does STDActions {
     method routine_declarator:sym<submethod>($/) { make $<method_def>.ast; }
 
     sub decontrv_op() {
-#?if moar
+#?if !js
         nqp::getcomp('Raku').language_revision < 2
           ?? 'p6decontrv_6c'
           !! 'p6decontrv'
 #?endif
-#?if !moar
+#?if js
         'p6decontrv'
 #?endif
     }
@@ -4473,13 +4473,13 @@ class Perl6::Actions is HLL::Actions does STDActions {
         my $p_past := $world.push_lexpad($/);
         $p_past.name(~$name);
         $p_past.is_thunk(1);
-#?if moar
+#?if !js
         $p_past.push(QAST::Op.new(
             :op('dispatch'),
             QAST::SVal.new( :value('boot-resume') ),
             QAST::IVal.new( :value(nqp::const::DISP_ONLYSTAR) )));
 #?endif
-#?if !moar
+#?if js
         $p_past.push(QAST::Op.new(
             :op('invokewithcapture'),
             QAST::Op.new(
@@ -5027,13 +5027,13 @@ class Perl6::Actions is HLL::Actions does STDActions {
         }
 
         # Add dispatching code.
-#?if moar
+#?if !js
         $BLOCK.push(QAST::Op.new(
             :op('dispatch'),
             QAST::SVal.new( :value('boot-resume') ),
             QAST::IVal.new( :value(nqp::const::DISP_ONLYSTAR) )));
 #?endif
-#?if !moar
+#?if js
         $BLOCK.push(QAST::Op.new(
             :op('invokewithcapture'),
             QAST::Op.new(
@@ -6890,13 +6890,13 @@ class Perl6::Actions is HLL::Actions does STDActions {
     }
 
     method term:sym<onlystar>($/) {
-#?if moar
+#?if !js
         make QAST::Op.new(
             :op('dispatch'),
             QAST::SVal.new( :value('boot-resume') ),
             QAST::IVal.new( :value(nqp::const::DISP_ONLYSTAR) ));
 #?endif
-#?if !moar
+#?if js
         my $dc_name := QAST::Node.unique('dispatch_cap');
         my $stmts := QAST::Stmts.new(
             QAST::Op.new(
@@ -7729,7 +7729,7 @@ Did you mean a call like '"
         # regex-ish code like m//, s///, or tr/// but NOT for S/// nor TR///
         my $boolify := !($negated || $rhs.ann('regex_match_code'));
 
-#?if !moar
+#?if js
         # Call $rhs.ACCEPTS( $_ ), where $_ is $lhs.
         $sm_call := QAST::Op.new(
                         :op('callmethod'), :name('ACCEPTS'),
@@ -7772,7 +7772,7 @@ Did you mean a call like '"
             $sm_call.annotate('smartmatch_boolified', 1);
         }
 #?endif
-#?if moar
+#?if !js
         $sm_call := QAST::Op.new(
             :op<bind>,
             QAST::Var.new( :name($result_var), :scope('local'), :decl('var') ),
@@ -9505,7 +9505,7 @@ Did you mean a call like '"
         # handling.
         if $need_full_binder {
             $block.custom_args(1);
-#?if !moar
+#?if js
             $block[0].push(QAST::Op.new( :op('p6bindsig') ));
 #?endif
 #?if moar
@@ -9523,9 +9523,23 @@ Did you mean a call like '"
                 QAST::Op.new( :op('p6bindsig') )
             ));
 #?endif
+#?if jvm
+            # The same check as on MoarVM, but as a plain op: a dispatch
+            # instruction here would cost an invokedynamic in every
+            # full-binder frame's prologue.
+            $block[0].push(QAST::Op.new(
+                :op('if'),
+                QAST::Op.new( :op('p6bindwillresume') ),
+                QAST::Op.new(
+                    :op('assertparamcheck'),
+                    QAST::Op.new( :op('p6trybindsig') )
+                ),
+                QAST::Op.new( :op('p6bindsig') )
+            ));
+#?endif
         }
 
-#?if moar
+#?if !js
         if $multi {
             $block[0].push(QAST::Op.new( :op('bindcomplete') ));
         }
@@ -9951,14 +9965,14 @@ Did you mean a call like '"
                             QAST::Op.new(
                                 :op('bind'),
                                 QAST::Var.new(:name($name), :scope('local')),
-#?if moar
+#?if !js
                                 QAST::Op.new(
                                     :op<dispatch>,
                                     QAST::SVal.new(:value<raku-coercion>),
                                     QAST::Var.new(:name($low_param_type), :scope<local>),
                                     QAST::Var.new(:name($name), :scope<local>))))));
 #?endif
-#?if !moar
+#?if js
                                 QAST::Op.new(
                                     :op('callmethod'),
                                     :name('coerce'),
@@ -9986,14 +10000,14 @@ Did you mean a call like '"
                         QAST::Op.new(
                             :op('bind'),
                             QAST::Var.new( :name($name), :scope('local') ),
-#?if moar
+#?if !js
                             QAST::Op.new(
                                 :op<dispatch>,
                                 QAST::SVal.new(:value<raku-coercion>),
                                 QAST::WVal.new(:value($param_type)),
                                 QAST::Var.new(:name($name), :scope<local>)))));
 #?endif
-#?if !moar
+#?if js
                             QAST::Op.new(
                                 :op('callmethod'),
                                 :name('coerce'),
