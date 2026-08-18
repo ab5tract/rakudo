@@ -126,11 +126,11 @@ sub proceed(--> Nil) { THROW-NIL(nqp::const::CONTROL_PROCEED) }
 
 sub callwith(|c) is raw {
     $/ := nqp::getlexcaller('$/');
-#?if moar
+#?if !js
     # TODO Future mechanism to avoid having to flatten here
     nqp::dispatch('boot-resume-caller', nqp::const::DISP_CALLWITH, |c)
 #?endif
-#?if !moar
+#?if js
     nqp::stmts((my Mu $dispatcher := nqp::p6finddispatcher('callwith')),
         $dispatcher.exhausted ?? Nil !!
             $dispatcher.call_with_args(|c))
@@ -139,12 +139,12 @@ sub callwith(|c) is raw {
 
 sub nextwith(|c) is raw {
     $/ := nqp::getlexcaller('$/');
-#?if moar
+#?if !js
     # TODO Future mechanism to avoid having to flatten here
     nqp::throwpayloadlexcaller(nqp::const::CONTROL_RETURN,
         nqp::dispatch('boot-resume-caller', nqp::const::DISP_CALLWITH, |c))
 #?endif
-#?if !moar
+#?if js
     nqp::stmts((my Mu $dispatcher := nqp::p6finddispatcher('nextwith')),
         nqp::throwpayloadlexcaller(nqp::const::CONTROL_RETURN, $dispatcher.exhausted
             ?? Nil
@@ -154,10 +154,10 @@ sub nextwith(|c) is raw {
 
 sub callsame() is raw {
     $/ := nqp::getlexcaller('$/');
-#?if moar
+#?if !js
     nqp::dispatch('boot-resume-caller', nqp::const::DISP_CALLSAME)
 #?endif
-#?if !moar
+#?if js
     nqp::stmts((my Mu $dispatcher := nqp::p6finddispatcher('callsame')),
         $dispatcher.exhausted ?? Nil !!
             $dispatcher.call_with_capture(
@@ -167,11 +167,11 @@ sub callsame() is raw {
 
 sub nextsame() is raw {
     $/ := nqp::getlexcaller('$/');
-#?if moar
+#?if !js
     nqp::throwpayloadlexcaller(nqp::const::CONTROL_RETURN,
         nqp::dispatch('boot-resume-caller', nqp::const::DISP_CALLSAME))
 #?endif
-#?if !moar
+#?if js
     nqp::stmts((my Mu $dispatcher := nqp::p6finddispatcher('nextsame')),
         nqp::throwpayloadlexcaller(nqp::const::CONTROL_RETURN, $dispatcher.exhausted
             ?? Nil
@@ -180,19 +180,19 @@ sub nextsame() is raw {
 }
 
 sub lastcall(--> True) {
-#?if moar
+#?if !js
     nqp::dispatch('boot-resume-caller', nqp::const::DISP_LASTCALL)
 #?endif
-#?if !moar
+#?if js
     nqp::p6finddispatcher('lastcall').last();
 #?endif
 }
 
 sub nextcallee() {
-#?if moar
+#?if !js
     nqp::dispatch('boot-resume-caller', nqp::const::DISP_NEXTCALLEE)
 #?endif
-#?if !moar
+#?if js
     nqp::stmts((my Mu $dispatcher := nqp::p6finddispatcher('nextcallee')),
         $dispatcher.exhausted ?? Nil !! $dispatcher.shift_callee())
 #?endif
