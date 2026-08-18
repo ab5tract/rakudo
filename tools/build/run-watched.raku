@@ -2,10 +2,16 @@
 # Run a long build or test, tee its output to a log, and give up gracefully if
 # it stops producing output.
 #
-#   run-watched.raku [--log=PATH] [--stall=SECONDS] [--max=SECONDS] -- cmd args...
+#   run-watched.raku [--log=PATH] [--stall=SECONDS] [--max=SECONDS] [--show=REGEX ...] -- cmd args...
 #
 # --stall  how long a silence is allowed before we call it wedged (default 900)
 # --max    overall ceiling, 0 for none (default 0)
+# --show   echo lines matching this regex to stderr as they arrive, prefixed
+#          with elapsed seconds; repeatable. This replaces tailing the log
+#          from outside just to see progress markers.
+#
+# All the timing lives in here, as timer events on the react block, so the
+# caller just starts this and waits for it to exit; no polling on the outside.
 #
 # On a stall, on the ceiling, or on Ctrl-C, the child gets SIGINT, then SIGTERM,
 # then SIGKILL, so that whatever it spawned gets a chance to unwind first.
@@ -16,6 +22,7 @@ sub MAIN(
     Str  :$log   = 'run-watched.log',
     Int  :$stall = 900,
     Int  :$max   = 0,
+    :@show,
 ) {
     @cmd or die "nothing to run: pass the command after --\n";
 
@@ -23,52 +30,62 @@ sub MAIN(
     $fh.say: "=== { @cmd.join(' ') } ===";
     $fh.say: "=== started { DateTime.now } ===";
 
-    my $proc = Proc::Async.new(|@cmd);
-
-    # Last time the child said anything. The watchdog polls this rather than
-    # rescheduling a timer per chunk, which would pile up on chatty output.
-    my $last = now;
-    my $done = Promise.new;
-    my $verdict = 'ok';
-
-    sub emit($chunk) {
-        $last = now;
-        $fh.print: $chunk;
-        $chunk.lines.tail(0);  # keep the chunk from being retained
-    }
-    $proc.stdout(:bin).tap: -> $b { emit $b.decode('utf8-c8') };
-    $proc.stderr(:bin).tap: -> $b { emit $b.decode('utf8-c8') };
-
-    sub finish($why) {
-        return if $done;
-        $verdict = $why;
-        $done.keep(True);
-    }
-
-    # Ctrl-C should stop the child, not orphan it.
-    signal(SIGINT).tap: { note "\ninterrupted, stopping child"; finish 'interrupt' }
+    my $proc = Proc::Async.new(|@cmd, :enc<utf8-c8>);
 
     my $started = now;
-    my $exited = $proc.start;
+    my $last    = now;   # last time the child said anything, even a partial line
+    my $verdict = 'ok';
+    my $exited;
 
-    my $watchdog = start {
-        until $done {
-            sleep 5;
-            last if $done;
+    react {
+        # Log raw chunks, not lines, so a long line in progress still counts
+        # as activity for the stall check.
+        sub emit($chunk) {
+            $last = now;
+            $fh.print: $chunk;
+        }
+        whenever $proc.stdout { emit $_ }
+        whenever $proc.stderr { emit $_ }
+
+        # Progress markers straight to the terminal.
+        if @show {
+            my $lines = Supply.merge($proc.stdout.lines, $proc.stderr.lines);
+            for @show -> $pat {
+                whenever $lines.grep(/<$pat>/) -> $l {
+                    note "[{(now - $started).Int}s] $l";
+                }
+            }
+        }
+
+        sub give-up($why) {
+            $verdict = $why;
+            done;
+        }
+
+        # Ctrl-C should stop the child, not orphan it.
+        whenever signal(SIGINT) {
+            note "\ninterrupted, stopping child";
+            give-up 'interrupt';
+        }
+
+        if $max > 0 {
+            whenever Promise.in($max) {
+                note "over the {$max}s ceiling, giving up";
+                give-up 'timeout';
+            }
+        }
+
+        whenever Supply.interval(5, 5) {
             my $quiet = now - $last;
             if $quiet >= $stall {
                 note "no output for {$quiet.Int}s, giving up";
-                finish 'stall';
-            }
-            elsif $max > 0 && (now - $started) >= $max {
-                note "over the {$max}s ceiling, giving up";
-                finish 'timeout';
+                give-up 'stall';
             }
         }
-    }
 
-    # Whichever comes first: the child finishing, or us deciding to stop it.
-    await Promise.anyof($exited, $done);
+        $exited = $proc.start;
+        whenever $exited { done }
+    }
 
     my $status;
     if $exited {
@@ -78,12 +95,11 @@ sub MAIN(
         # Escalate politely. Each step gets a moment to take effect.
         for SIGINT, SIGTERM, SIGKILL -> $sig {
             $proc.kill($sig);
-            last if await Promise.anyof($exited, Promise.in(5));
+            await Promise.anyof($exited, Promise.in(5));
+            last if $exited;
         }
         $status = $exited ?? (await $exited).exitcode !! -1;
     }
-    finish 'ok';
-    await $watchdog;
 
     my $code = do given $verdict {
         when 'ok'        { $status }
