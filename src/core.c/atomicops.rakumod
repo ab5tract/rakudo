@@ -35,9 +35,8 @@ multi sub cas(Mu $target is rw, &code) {
     $updated
 }
 
-#== Native integer atomics only available on MoarVM ============================
+#== Native integer atomics =====================================================
 
-#?if !jvm
 my native atomicint is repr('P6int') is Int is ctype('atomic') { }
 
 #-- fetching a native integer value atomically
@@ -218,6 +217,5 @@ multi sub cas(atomicint $target is rw, &code) {
         $current = $seen;
     }
 }
-#?endif
 
 # vim: expandtab shiftwidth=4
