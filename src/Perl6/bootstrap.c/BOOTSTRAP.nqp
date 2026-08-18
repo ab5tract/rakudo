@@ -5757,8 +5757,13 @@ BEGIN {
     Perl6::Metamodel::ClassHOW.add_stash(ForeignCode);
     Perl6::Metamodel::ClassHOW.add_stash(Version);
 
-#?if !moar
-    # Default invocation behavior delegates off to invoke.
+#?if js
+    # Default invocation behavior delegates off to invoke. Only the legacy
+    # dispatch backend wants this: under newdisp the raku-invoke dispatcher
+    # does CALL-ME and type-object coercion itself, and a catch-all
+    # InvocationSpec on Mu makes nqp::isinvokable answer true for *every*
+    # Raku object - QRegex interpolation then invokes plain Strs (custom
+    # operator tokens interpolate their name) instead of matching literally.
     my $invoke_forwarder :=
         nqp::getstaticcode(sub ($self, *@pos, *%named) {
             if nqp::can($self, 'CALL-ME') {
@@ -6388,11 +6393,25 @@ Perl6::Metamodel::ParametricRoleGroupHOW.set_default_invoke_handler($role_invoke
 Perl6::Metamodel::ParametricRoleHOW.set_default_invoke_handler($role_invoke_handler);
 Perl6::Metamodel::CurriedRoleHOW.set_default_invoke_handler($role_invoke_handler);
 
+#?endif
+
 # Let ClassHOW and EnumHOW know about the invocation handler.
+#?if js
 Perl6::Metamodel::ClassHOW.set_default_invoke_handler(
     Mu.HOW.invocation_handler(Mu));
 Perl6::Metamodel::EnumHOW.set_default_invoke_handler(
     Mu.HOW.invocation_handler(Mu));
+#?endif
+#?if jvm
+# No catch-all handler on Mu here (see the js-only invoke forwarder above),
+# but a class that really defines CALL-ME still needs an invocation spec so
+# direct nqp-level invocation keeps working; compose_invocation only installs
+# this for types where find_method sees a CALL-ME.
+my $call_me_forwarder := nqp::getstaticcode(sub ($self, *@pos, *%named) {
+    $self.CALL-ME(|@pos, |%named)
+});
+Perl6::Metamodel::ClassHOW.set_default_invoke_handler($call_me_forwarder);
+Perl6::Metamodel::EnumHOW.set_default_invoke_handler($call_me_forwarder);
 #?endif
 
 # Configure the MOP (not persisted as it ends up in a lexical...)
