@@ -693,19 +693,19 @@ object Binder {
                     RakOps.p6capturelex(consType, tc)
                 when (flag) {
                     CallSiteDescriptor.ARG_INT.toInt() ->
-                        Ops.invokeDirect(tc, acceptsMeth,
+                        Ops.invokeMethodViaDispatch(tc, acceptsMeth,
                             ACCEPTS_i, arrayOf<Any?>(consType, argI))
                     CallSiteDescriptor.ARG_UINT.toInt() ->
-                        Ops.invokeDirect(tc, acceptsMeth,
+                        Ops.invokeMethodViaDispatch(tc, acceptsMeth,
                             ACCEPTS_u, arrayOf<Any?>(consType, argI))
                     CallSiteDescriptor.ARG_NUM.toInt() ->
-                        Ops.invokeDirect(tc, acceptsMeth,
+                        Ops.invokeMethodViaDispatch(tc, acceptsMeth,
                             ACCEPTS_n, arrayOf<Any?>(consType, argN))
                     CallSiteDescriptor.ARG_STR.toInt() ->
-                        Ops.invokeDirect(tc, acceptsMeth,
+                        Ops.invokeMethodViaDispatch(tc, acceptsMeth,
                             ACCEPTS_s, arrayOf<Any?>(consType, argS))
                     else ->
-                        Ops.invokeDirect(tc, acceptsMeth,
+                        Ops.invokeMethodViaDispatch(tc, acceptsMeth,
                             ACCEPTS_o, arrayOf<Any?>(consType, argO))
                 }
                 if (Ops.istrue(Ops.result_o(tc.curFrame!!), tc) == 0L) {
@@ -760,7 +760,7 @@ object Binder {
                         error[0] = "Could not turn argument into capture"
                     return BIND_RESULT_FAIL
                 }
-                Ops.invokeDirect(tc, meth, Ops.invocantCallSite, arrayOf<Any?>(decontValue))
+                Ops.invokeMethodViaDispatch(tc, meth, Ops.invocantCallSite, arrayOf<Any?>(decontValue))
                 capture = Ops.result_o(tc.curFrame!!)
             }
 

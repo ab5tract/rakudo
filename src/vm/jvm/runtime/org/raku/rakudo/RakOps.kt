@@ -284,6 +284,34 @@ object RakOps {
         return theCsd
     }
 
+    /* Like p6bindsig, but reports whether binding worked instead of erroring,
+     * for a frame whose bind failure the invoking dispatch will turn into a
+     * resumption. Returns 1 on success and 0 on failure; a junction counts
+     * as a failure, the same answer MoarVM's Binder.try_bind_sig gives. The
+     * (possibly flattened) callsite and arguments are left on the frame and
+     * in tc.flatArgs for the emitted code to reload its locals from. */
+    @JvmStatic
+    fun p6trybindsig(tc: ThreadContext, csd: CallSiteDescriptor, args: Array<Any?>?): Long {
+        var theCsd = csd
+        var theArgs = args
+        val cf = tc.curFrame!!
+        if (theCsd.hasFlattening) {
+            theCsd = theCsd.explodeFlattening(cf, theArgs!!)
+            theArgs = tc.flatArgs
+        }
+        cf.csd = theCsd
+        cf.args = theArgs
+        val gcx = key.getGC(tc)
+        val sig = cf.codeRef.codeObject!!
+            .get_attribute_boxed(tc, gcx.Code, "$!signature", HINT_CODE_SIG)
+        val params = sig!!
+            .get_attribute_boxed(tc, gcx.Signature, "@!params", HINT_SIG_PARAMS)
+        val ok = Binder.bind(tc, gcx, cf, params!!, theCsd, theArgs, false, null) == Binder.BIND_RESULT_OK
+        /* The binder can call code that overwrites flatArgs; restore it. */
+        tc.flatArgs = theArgs
+        return if (ok) 1 else 0
+    }
+
     /**
      * Report why binding failed, for the HLL bind_error hook. A lowered
      * parameter's check has already failed and no dispatch wanted to resume
@@ -379,6 +407,29 @@ object RakOps {
     private val storeThrower = CallSiteDescriptor(
         byteArrayOf(CallSiteDescriptor.ARG_OBJ), null)
 
+    /* Return-value decontainerization through the raku-rv-decont(-6c)
+     * dispatcher, with the dispatch site cached per routine rather than per
+     * bytecode instruction: an invokedynamic on every routine return is a
+     * large slice of the per-class indy budget, which the core setting
+     * overflows. */
+    private val rvDecontSites =
+        java.util.concurrent.ConcurrentHashMap<SixModelObject, org.raku.nqp.dispatch.DispatchCallSite>()
+    private val rvDecontSiteType = java.lang.invoke.MethodType.methodType(Void.TYPE)
+    private val rvDecontCallSite = CallSiteDescriptor(
+        byteArrayOf(CallSiteDescriptor.ARG_OBJ), null)
+
+    @JvmStatic
+    fun p6decontrv_rt(routine: SixModelObject?, value: SixModelObject?, sixc: Long,
+                      tc: ThreadContext): SixModelObject? {
+        val site = rvDecontSites.computeIfAbsent(routine!!) {
+            org.raku.nqp.dispatch.DispatchCallSite(rvDecontSiteType)
+        }
+        org.raku.nqp.dispatch.Dispatch.dispatchWithDescriptor(site,
+            if (sixc != 0L) "raku-rv-decont-6c" else "raku-rv-decont",
+            rvDecontCallSite, tc, arrayOf<Any?>(value))
+        return Ops.result_o(tc.curFrame!!)
+    }
+
     @JvmStatic
     fun p6store(cont: SixModelObject?, value: SixModelObject?, tc: ThreadContext): SixModelObject? {
         val spec = cont!!.st.ContainerSpec
@@ -388,7 +439,10 @@ object RakOps {
         else {
             val meth = Ops.findmethodNonFatal(cont, "STORE", tc)
             if (Ops.isnull(meth) == 0L) {
-                Ops.invokeDirect(tc, meth,
+                /* Through the dispatcher: STORE resolves to a multi's proto,
+                 * and a raw invocation of its {*} would resume whatever
+                 * unrelated dispatch is innermost. */
+                Ops.invokeMethodViaDispatch(tc, meth,
                     STORE, arrayOf<Any?>(cont, value))
             }
             else {
@@ -643,7 +697,8 @@ object RakOps {
         if (obj != null && Ops.isconcrete(obj, tc) != 0L) {
             val meth = Ops.findmethodNonFatal(obj, "sink", tc)
             if (Ops.isnull(meth) == 0L)
-                Ops.invokeDirect(tc, meth, invocantCallSite, arrayOf<Any?>(obj))
+                /* Through the dispatcher: sink resolves to a multi's proto. */
+                Ops.invokeMethodViaDispatch(tc, meth, invocantCallSite, arrayOf<Any?>(obj))
         }
         return obj
     }

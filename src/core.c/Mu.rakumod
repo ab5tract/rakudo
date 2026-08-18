@@ -1429,10 +1429,10 @@ my sub SETTING-ONLY-ACCEPTS(Mu \matcher) is implementation-detail {
 # callsite caching answers the setting-only question with guards rather than
 # a candidate walk on every call.
 multi sub infix:<~~>(Junction:D \topic, Mu \matcher) {
-#?if moar
+#?if !js
     nqp::dispatch('raku-smartmatch', topic, matcher, nqp::unbox_i(1))
 #?endif
-#?if !moar
+#?if js
     SETTING-ONLY-ACCEPTS(matcher)
       ?? topic.BOOLIFY-ACCEPTS(matcher)
       !! matcher.ACCEPTS(topic).Bool
@@ -1444,10 +1444,10 @@ multi sub infix:<~~>(Mu \topic, Mu \matcher) {
 
 proto sub infix:<!~~>(Mu, Mu, *%) {*}
 multi sub infix:<!~~>(Junction:D \topic, Mu \matcher) {
-#?if moar
+#?if !js
     nqp::dispatch('raku-smartmatch', topic, matcher, nqp::unbox_i(-1))
 #?endif
-#?if !moar
+#?if js
     SETTING-ONLY-ACCEPTS(matcher)
       ?? topic.BOOLIFY-ACCEPTS(matcher, 1)
       !! matcher.ACCEPTS(topic).not
