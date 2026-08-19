@@ -9,7 +9,11 @@ NQP_PREFIX  = @nqp_prefix@
 # Overridable: the BOOTSTRAP/CORE compiles OOM'd at the old hardcoded
 # -Xmx8G (make J_NQP_MAXHEAP=16G ... to raise further).
 J_NQP_MAXHEAP = 14G
-@bpv(NQP_RR)@    = $(JAVA) -Xmx$(J_NQP_MAXHEAP) -cp @q(@nfp(./blib)@@cpsep@@nop($(BLD_NQP_JARS))@@cpsep@rakudo-runtime.jar@cpsep@@nop($(SYSROOT))@@abs2rel(@nqp_classpath@)@)@ nqp
+# This starts a JVM directly rather than through the nqp runner, so it needs
+# the grammar engine spelled out: nqp.jar holds rules compiled to Truffle
+# descriptors, and without the modules on the module path and the engine on
+# the class path they cannot run at all. Empty when nqp was built without it.
+@bpv(NQP_RR)@    = $(JAVA) -Xmx$(J_NQP_MAXHEAP) @j_truffle_args@ -cp @q(@nfp(./blib)@@cpsep@@nop($(BLD_NQP_JARS))@@cpsep@rakudo-runtime.jar@cpsep@@nop($(SYSROOT))@@abs2rel(@nqp_classpath@)@@j_truffle_jar@)@ nqp
 @bpv(RUN_RAKUDO_SCRIPT)@ = rakudo-j-build
 @bpv(RUN_RAKUDO)@ = @shquot(@perl@)@ @bpm(RUN_RAKUDO_SCRIPT)@
 
