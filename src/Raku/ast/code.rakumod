@@ -376,6 +376,11 @@ class RakuAST::Code
     method IMPL-STUB-CODE(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         my $code-obj := self.meta-object;
         nqp::bindattr_s(self, RakuAST::Code, '$!cuid', QAST::Block.next-cuid());
+        if nqp::atkey(nqp::getenvhash(), 'RAKUDO_DEBUG_STUB') {
+            my $n := nqp::can(self, 'name') && self.name ?? self.name.canonicalize !! '<anon>';
+            nqp::say("[stub] " ~ self.HOW.name(self) ~ " '" ~ $n
+                ~ "' cuid=" ~ $!cuid ~ " ctx=" ~ nqp::objectid($context));
+        }
 
         # Stash it under the QAST block unique ID.
         my str $cuid := $!cuid;
@@ -451,6 +456,11 @@ class RakuAST::Code
     method IMPL-LINK-META-OBJECT(RakuAST::IMPL::QASTContext $context, Mu $block) {
         # Obtain the meta-object and connect it to the code block.
         my $code-obj := self.meta-object;
+        if nqp::atkey(nqp::getenvhash(), 'RAKUDO_DEBUG_STUB') {
+            my $n := nqp::can(self, 'name') && self.name ?? self.name.canonicalize !! '<anon>';
+            nqp::say("[link] " ~ self.HOW.name(self) ~ " '" ~ $n
+                ~ "' cuid=" ~ $!cuid ~ " ctx=" ~ nqp::objectid($context));
+        }
         $context.ensure-sc($code-obj);
 
         # Associate QAST block with code object, which will ensure it is
