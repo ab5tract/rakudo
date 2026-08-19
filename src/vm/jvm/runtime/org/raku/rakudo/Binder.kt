@@ -7,6 +7,7 @@ import org.raku.nqp.runtime.CallSiteDescriptor
 import org.raku.nqp.runtime.Ops
 import org.raku.nqp.runtime.ThreadContext
 import org.raku.nqp.sixmodel.Boxable
+import org.raku.nqp.sixmodel.BoxedPrimitive
 import org.raku.nqp.sixmodel.REPR
 import org.raku.nqp.sixmodel.STable
 import org.raku.nqp.sixmodel.SixModelObject
@@ -590,13 +591,14 @@ object Binder {
             /* Is it native? If so, just go ahead and bind it. */
             if (flag != CallSiteDescriptor.ARG_OBJ.toInt()) {
                 if (hasVarName) {
+                    val sizeSpec = nativeSizeSpec(tc, gcx, param)
                     when (flag) {
                         CallSiteDescriptor.ARG_INT.toInt() ->
-                            cf.iLex!![sci.iTryGetLexicalIdx(varName)] = argI
+                            cf.iLex!![sci.iTryGetLexicalIdx(varName)] = narrowInt(argI, sizeSpec)
                         CallSiteDescriptor.ARG_UINT.toInt() ->
-                            cf.iLex!![sci.uTryGetLexicalIdx(varName)] = argI
+                            cf.iLex!![sci.uTryGetLexicalIdx(varName)] = narrowInt(argI, sizeSpec)
                         CallSiteDescriptor.ARG_NUM.toInt() ->
-                            cf.nLex!![sci.nTryGetLexicalIdx(varName)] = argN
+                            cf.nLex!![sci.nTryGetLexicalIdx(varName)] = narrowNum(argN, sizeSpec)
                         CallSiteDescriptor.ARG_STR.toInt() ->
                             cf.sLex!![sci.sTryGetLexicalIdx(varName)] = argS
                     }
@@ -971,6 +973,39 @@ object Binder {
             }
         }
     }
+
+
+    /* MoarVM binds a sized native parameter into a sized register, so the
+     * value is truncated on the way in. Every lexical slot here is 64 bits
+     * wide whatever the declared type, so the narrowing has to be done by
+     * hand. The spec is the declared width in its low byte, +256 when the
+     * type is unsigned, and 0 when nothing needs narrowing. */
+    private fun nativeSizeSpec(tc: ThreadContext, gcx: RakOps.GlobalExt,
+                               param: SixModelObject): Int {
+        val paramType = param.get_attribute_boxed(tc, gcx.Parameter, "$!type", HINT_type)
+            ?: return 0
+        val spec = paramType.st.REPR.get_storage_spec(tc, paramType.st)
+        val bits = spec.bits.toInt()
+        if (bits <= 0 || bits >= 64)
+            return 0
+        return when (spec.boxedPrimitive) {
+            BoxedPrimitive.INT  -> bits
+            BoxedPrimitive.UINT -> 256 + bits
+            BoxedPrimitive.NUM  -> if (bits == 32) 32 else 0
+            else -> 0
+        }
+    }
+
+    private fun narrowInt(value: Long, sizeSpec: Int): Long {
+        if (sizeSpec == 0)
+            return value
+        val bits = sizeSpec and 0xFF
+        return if (sizeSpec >= 256) value and ((1L shl bits) - 1)
+               else (value shl (64 - bits)) shr (64 - bits)
+    }
+
+    private fun narrowNum(value: Double, sizeSpec: Int): Double =
+        if (sizeSpec == 32) value.toFloat().toDouble() else value
 
     /* Takes a signature along with positional and named arguments and binds them
      * into the provided callframe. Returns BIND_RESULT_OK if binding works out,
