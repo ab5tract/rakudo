@@ -919,11 +919,9 @@ class RakuAST::Class
         my $type := self.stubbed-meta-object(:$resolver, :$context);
         self.PRODUCE-META-ATTACHABLES($type, $type.HOW);
         self.IMPL-COMPOSE-TYPE($type, :$resolver, :$context);
-#?if moar
         CATCH {
             nqp::bindattr(self, RakuAST::Package, '$!compose-exception', $_)
         }
-#?endif
         $type
     }
 }
