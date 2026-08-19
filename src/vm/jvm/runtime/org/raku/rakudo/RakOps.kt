@@ -562,6 +562,28 @@ object RakOps {
         return codeObj
     }
 
+    /** Captures the closure's outer from whichever calling frame runs the
+     * static code its outer names, the way MoarVM's try-capture-lex-callers
+     * syscall does. This is what lets a phaser cloned at frame exit close
+     * over the live frames rather than whatever compile-time frames it was
+     * created under. */
+    @JvmStatic
+    fun p6capturelexwhere(codeObj: SixModelObject?, tc: ThreadContext): SixModelObject? {
+        val gcx = key.getGC(tc)
+        val closure = codeObj!!.get_attribute_boxed(tc,
+                gcx.Code, "$!do", HINT_CODE_DO) as CodeRef
+        val wantedStaticInfo = closure.staticInfo.outerStaticInfo ?: return codeObj
+        var frame = tc.curFrame
+        while (frame != null) {
+            if (frame.codeRef.staticInfo === wantedStaticInfo) {
+                closure.outer = frame
+                break
+            }
+            frame = frame.caller
+        }
+        return codeObj
+    }
+
     @JvmStatic
     fun p6getouterctx(codeObj: SixModelObject?, tc: ThreadContext): SixModelObject {
         val gcx = key.getGC(tc)
