@@ -812,8 +812,14 @@ object RakOps {
 
     @JvmStatic
     fun p6staticouter(code: SixModelObject?, tc: ThreadContext): SixModelObject? {
-        if (code is CodeRef)
-            return code.staticInfo.outerStaticInfo!!.staticCode
+        if (code is CodeRef) {
+            /* An outermost frame (a comp unit's mainline) has no static
+             * outer; answer null rather than dying, the way MoarVM does.
+             * Backtrace.nice walks outers with exactly this. */
+            val outer = code.staticInfo.outerStaticInfo
+                ?: return Ops.createNull(tc)
+            return outer.staticCode ?: Ops.createNull(tc)
+        }
         else
             throw ExceptionHandling.dieInternal(tc, "p6staticouter must be used on a CodeRef")
     }
