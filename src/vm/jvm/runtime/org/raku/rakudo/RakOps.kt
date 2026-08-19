@@ -552,13 +552,47 @@ object RakOps {
     @JvmStatic
     fun p6capturelex(codeObj: SixModelObject?, tc: ThreadContext): SixModelObject? {
         val gcx = key.getGC(tc)
-        val closure = codeObj!!.get_attribute_boxed(tc,
+        /* Only a Raku Code carries the handle to re-capture. Anything else
+         * is handed straight back, as the raku-capture-lex-callers
+         * dispatcher does on MoarVM -- an attribute's build closure, for
+         * one, reaches here as a bare code ref. */
+        if (codeObj == null || Ops.istype(codeObj, gcx.Code, tc) == 0L)
+            return codeObj
+        val closure = codeObj.get_attribute_boxed(tc,
                 gcx.Code, "$!do", HINT_CODE_DO) as CodeRef
         val wantedStaticInfo = closure.staticInfo.outerStaticInfo
         if (tc.curFrame!!.codeRef.staticInfo === wantedStaticInfo)
             closure.outer = tc.curFrame
         else if (tc.curFrame!!.outer!!.codeRef.staticInfo === wantedStaticInfo)
             closure.outer = tc.curFrame!!.outer
+        return codeObj
+    }
+
+    /** Captures the closure's outer from whichever calling frame runs the
+     * static code its outer names, the way MoarVM's try-capture-lex-callers
+     * syscall does. This is what lets a phaser cloned at frame exit close
+     * over the live frames rather than whatever compile-time frames it was
+     * created under. */
+    @JvmStatic
+    fun p6capturelexwhere(codeObj: SixModelObject?, tc: ThreadContext): SixModelObject? {
+        val gcx = key.getGC(tc)
+        /* Only a Raku Code carries the handle to re-capture. Anything else
+         * is handed straight back, as the raku-capture-lex-callers
+         * dispatcher does on MoarVM -- an attribute's build closure, for
+         * one, arrives here as a bare code ref. */
+        if (codeObj == null || Ops.istype(codeObj, gcx.Code, tc) == 0L)
+            return codeObj
+        val closure = codeObj.get_attribute_boxed(tc,
+                gcx.Code, "$!do", HINT_CODE_DO) as CodeRef
+        val wantedStaticInfo = closure.staticInfo.outerStaticInfo ?: return codeObj
+        var frame = tc.curFrame
+        while (frame != null) {
+            if (frame.codeRef.staticInfo === wantedStaticInfo) {
+                closure.outer = frame
+                break
+            }
+            frame = frame.caller
+        }
         return codeObj
     }
 
@@ -712,7 +746,11 @@ object RakOps {
      * lives here instead. Returns the sinkee, as MoarVM's p6sink does. */
     @JvmStatic
     fun p6sink(obj: SixModelObject?, tc: ThreadContext): SixModelObject? {
-        if (obj != null && Ops.isconcrete(obj, tc) != 0L) {
+        /* A value in a container is not sunk: the raku-sink dispatcher looks
+         * at the sinkee without decontainerizing, so a Scalar an is-rw
+         * routine returned keeps its contents unsunk. Scalar itself has no
+         * sink method worth calling. */
+        if (obj != null && obj.st.ContainerSpec == null && Ops.isconcrete(obj, tc) != 0L) {
             val meth = Ops.findmethodNonFatal(obj, "sink", tc)
             if (Ops.isnull(meth) == 0L)
                 /* Through the dispatcher: sink resolves to a multi's proto. */
