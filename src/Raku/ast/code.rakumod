@@ -3198,48 +3198,69 @@ class RakuAST::Routine
         # The node budget bounds that growth: a routine whose body walk
         # exceeds it keeps the call, and the amount of code any single
         # call site can splice stays small.
-        # A native-returning routine's return typecheck can never fail:
-        # the final value is statically of the declared native kind, and
-        # boxing it for the check only to unbox at the call site loses
-        # the native typing the splice exists to preserve (an Int box,
-        # for one, cannot unbox to num where the context wants one).
-        # Record the tree without the check so the spliced code stays
-        # natively typed end to end.
+        # Neither wrapper a native-returning routine puts around its result
+        # says anything about that result. The typecheck cannot fail, since
+        # the value is statically of the declared native kind, and a native
+        # is never in a container for the decont to take it out of. Both
+        # only box the value for a call site that then has to unbox it,
+        # losing the native typing the splice exists to preserve -- an Int
+        # box cannot unbox to num where the context wants one. Record the
+        # tree without them, so the spliced code stays natively typed end
+        # to end.
         my $tree := $block.list[2];
         my $rv := nqp::getattr($signature, Signature, '$!returns');
         if !nqp::isnull($rv) && !nqp::isconcrete($rv) && nqp::objprimspec($rv) {
-            $tree := self.IMPL-STRIP-NATIVE-RV-CHECK($tree) // $tree;
+            my int $stripped := 1;
+            while $stripped {
+                my $inner := self.IMPL-STRIP-NATIVE-RV-WRAPPER($tree);
+                if nqp::isnull($inner) {
+                    $stripped := 0;
+                }
+                else {
+                    $tree := $inner;
+                }
+            }
         }
 
         my $info;
         my int $walked := 0;
+        my $why;
         my @budget := [64];
         try {
             $info := self.IMPL-INLINE-INFO-NODE($tree, %placeholders, @budget);
             $walked := 1;
+            CATCH { $why := $_; }
         }
         if $walked && nqp::istype($info, QAST::Node) {
             RakuAST::IMPL::VarLowering.IMPL-NOTE("INLINE-INFO " ~ self.name.canonicalize)
                 if nqp::existskey(nqp::getenvhash(), 'RAKUDO_INLINE_DEBUG');
             nqp::bindattr($code, Routine, '$!inline_info', $info);
         }
+        elsif nqp::existskey(nqp::getenvhash(), 'RAKUDO_INLINE_DEBUG') {
+            RakuAST::IMPL::VarLowering.IMPL-NOTE("INLINE-SKIP " ~ self.name.canonicalize
+                ~ ($walked ?? " walk gave no node" !! " walk threw: "
+                    ~ (nqp::isconcrete($why) ?? (try ~$why) // '?' !! '?')));
+        }
         Nil
     }
 
-    # The node with a top-level p6typecheckrv unwrapped, when one wraps
-    # the result position; null when nothing needed stripping. Mirrors
-    # IMPL-STRIP-BOOL-CONDITION's walk through statement wrappers.
-    method IMPL-STRIP-NATIVE-RV-CHECK(Mu $node) {
+    # The node with one result-position return wrapper unwrapped, when one
+    # is there; null when nothing needed stripping. p6typecheckrv holds the
+    # value first, p6decontrv holds the routine first and the value second.
+    # Mirrors IMPL-STRIP-BOOL-CONDITION's walk through statement wrappers.
+    method IMPL-STRIP-NATIVE-RV-WRAPPER(Mu $node) {
         if nqp::istype($node, QAST::Op) {
             return nqp::atpos($node.list, 0)
                 if $node.op eq 'p6typecheckrv';
+            return nqp::atpos($node.list, 1)
+                if $node.op eq 'p6decontrv' || $node.op eq 'p6decontrv_6c';
         }
         elsif nqp::istype($node, QAST::Stmts) || nqp::istype($node, QAST::Stmt) {
             my int $n := nqp::elems($node.list);
             if $n {
                 my $rc := $node.resultchild;
                 my int $idx := nqp::defined($rc) ?? $rc !! $n - 1;
-                my $inner := self.IMPL-STRIP-NATIVE-RV-CHECK(nqp::atpos($node.list, $idx));
+                my $inner := self.IMPL-STRIP-NATIVE-RV-WRAPPER(nqp::atpos($node.list, $idx));
                 unless nqp::isnull($inner) {
                     my $replacement := $node.shallow_clone;
                     nqp::bindpos($replacement.list, $idx, $inner);
