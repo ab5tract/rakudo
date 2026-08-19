@@ -2310,12 +2310,7 @@ BEGIN {
         }
 
         nqp::bindattr($ins, Attribute, '$!container_initializer',
-#?if !jvm
           nqp::p6capturelexwhere($ci.clone)
-#?endif
-#?if jvm
-          $ci.clone
-#?endif
         ) if nqp::isconcrete($ci);
 
         my $cd_ins := $cd;
@@ -2379,12 +2374,7 @@ BEGIN {
             );
         }
         nqp::bindattr($ins, Attribute, '$!build_closure',
-#?if !jvm
           nqp::p6capturelexwhere($bc.clone)
-#?endif
-#?if jvm
-          $bc.clone
-#?endif
         ) if nqp::defined($bc);
 
         $ins
@@ -3185,10 +3175,8 @@ BEGIN {
               nqp::bindattr($cloned, Code, '$!do', $cldo),
               $cloned
             );
-#?if !jvm
             my $phasers := nqp::getattr($cloned, Block, '$!phasers');
             $self."!clone_phasers"($cloned, $phasers) if nqp::ishash($phasers);
-#?endif
 
             my $compstuff := nqp::getattr($cloned, Code, '@!compstuff');
             nqp::atpos($compstuff, 2)($do, $cloned)
@@ -3207,7 +3195,6 @@ BEGIN {
 
     Block.HOW.add_method(Block, '!clone_phasers',
       nqp::getstaticcode(sub ($self, $cloned, $phasers) {
-#?if !jvm
 
         # Helper sub for phasers that require innerlex capturing
         my $cl_phasers := nqp::null;
@@ -3260,7 +3247,6 @@ BEGIN {
 
         nqp::bindattr($cloned, Block, '$!phasers', $cl_phasers)
           unless nqp::isnull($cl_phasers);
-#?endif
     }));
 
     Block.HOW.add_method(Block, '!capture_phasers', nqp::getstaticcode(sub ($self) {
