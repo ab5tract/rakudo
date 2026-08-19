@@ -708,6 +708,10 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
             mv.visitLdcInsn(Type.getType(what))
             mv.visitMethodInsn(Opcodes.INVOKESTATIC, "org/raku/rakudo/RakudoJavaInterop", "marshalOutRecursive",
                 Type.getMethodDescriptor(Type.getType(Object::class.java), TYPE_SMO, TYPE_TC, Type.getType(Class::class.java)))
+            /* The helper returns Object; the value feeds a parameter of the
+             * marshalled type, and without the cast the verifier rejects the
+             * adaptor ("Object not assignable to [Ljava/lang/Object;"). */
+            mv.visitTypeInsn(Opcodes.CHECKCAST, Type.getInternalName(what))
         }
 
         else {
