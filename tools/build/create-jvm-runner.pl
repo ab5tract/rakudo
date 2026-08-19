@@ -159,13 +159,44 @@ sub install {
     chmod 0755, $install_to if $^O ne 'MSWin32';
 }
 
-my $classpath = join($cpsep, ($rakudo_jars, $jardir, $libdir, $nqplibdir));
+# The grammar engine. nqp.jar carries rules compiled to Truffle descriptors,
+# and a JVM that loads it without these cannot run them at all: the modules
+# have to be on the MODULE path (Truffle binds to the JDK's compiler only as
+# modules) and the engine on the class path (the boot loader cannot see the
+# module path). An nqp built without the engine has no truffle directory and
+# the flags stay empty, which is the old behaviour exactly.
+my $truffle_opts = '';
+my $engine_cp    = '';
+if (-d File::Spec->catfile($nqp_home, 'truffle')) {
+    my $mp = $^O eq 'MSWin32' ? File::Spec->catfile($static_nqp_home, 'truffle')
+                              : '${NQP_HOME}/truffle';
+    my $en = $^O eq 'MSWin32'
+           ? File::Spec->catfile($static_nqp_home, 'runtime', 'nqp-truffle.jar')
+           : '${NQP_HOME}/runtime/nqp-truffle.jar';
+    # --enable-native-access names the MODULE: Truffle is a named module, so
+    # the ALL-UNNAMED grant below does not reach it and the JVM says so on
+    # every run. Repeating the flag accumulates rather than replaces.
+    #
+    # --sun-misc-unsafe-memory-access: truffle-runtime calls the terminally
+    # deprecated Unsafe::objectFieldOffset. Nothing here can fix that, and
+    # the noise is not harmless -- these lines land on stderr ahead of a
+    # compiler's own output, which broke a test asserting on the first line
+    # of it (nqp's t/nqp/114-pod-panic.t).
+    $truffle_opts = " --module-path $mp"
+                  . " --add-modules org.graalvm.truffle,org.graalvm.truffle.runtime"
+                  . " --enable-native-access=org.graalvm.truffle"
+                  . " --sun-misc-unsafe-memory-access=allow";
+    $engine_cp    = $cpsep . $en;
+}
+
+my $classpath = join($cpsep, ($rakudo_jars, $jardir, $libdir, $nqplibdir)) . $engine_cp;
 # The RakuAST frontend walks deeply nested ASTs (VarLowering's
 # IMPL-WALK recurses once per node), and the JVM's default main-thread
 # stack overflows on a file the size of the core setting. MoarVM grows
 # its stack on demand; here it has to be asked for up front.
 # Do not add -noverify back: it has been a no-op since JDK 13, and warns.
 my $jopts = '-Xms100m -Xss512m --enable-native-access=ALL-UNNAMED'
+          . $truffle_opts
           . ' -cp ' . ($^O eq 'MSWin32' ? '"%CLASSPATH%";' : '$CLASSPATH:') . $classpath
           . ' -Dperl6.prefix=' . ($type eq 'install' && $^O ne 'MSWin32' ? '$DIR/..' : $prefix)
           . ' -Dnqp.library.path=' . $sharedir
