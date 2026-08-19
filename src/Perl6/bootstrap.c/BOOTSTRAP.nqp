@@ -6112,6 +6112,7 @@ nqp::sethllconfig('Raku', nqp::hash(
             nqp::die("Internal error: inconsistent bind result");
         }
     },
+#?endif
 
     'method_not_found_error', -> $obj, str $name, *@pos, *%named {
         my $class := nqp::getlexcaller('$?CLASS');
@@ -6135,7 +6136,6 @@ nqp::sethllconfig('Raku', nqp::hash(
                )
              );
     },
-#?endif
 
     'lexical_handler_not_found_error', -> $cat, $out_of_dyn_scope {
         if $cat == nqp::const::CONTROL_RETURN {
