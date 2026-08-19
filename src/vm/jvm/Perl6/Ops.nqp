@@ -146,6 +146,8 @@ sub decontrv_op($version) {
 $ops.add_hll_op('Raku', 'p6decontrv',    :!inlinable, decontrv_op(''));
 $ops.add_hll_op('Raku', 'p6decontrv_6c', :!inlinable, decontrv_op('6c'));
 $ops.map_classlib_hll_op('Raku', 'p6capturelex', $TYPE_P6OPS, 'p6capturelex', [$RT_OBJ], $RT_OBJ, :tc, :!inlinable);
+$ops.map_classlib_hll_op('Raku', 'p6capturelexwhere', $TYPE_P6OPS, 'p6capturelexwhere', [$RT_OBJ], $RT_OBJ, :tc, :!inlinable);
+$ops.map_classlib_hll_op('nqp', 'p6capturelexwhere', $TYPE_P6OPS, 'p6capturelexwhere', [$RT_OBJ], $RT_OBJ, :tc, :!inlinable);
 $ops.map_classlib_hll_op('Raku', 'p6bindassert', $TYPE_P6OPS, 'p6bindassert', [$RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6stateinit', $TYPE_P6OPS, 'p6stateinit', [], $RT_INT, :tc, :!inlinable);
 $ops.map_classlib_hll_op('Raku', 'p6setpre', $TYPE_P6OPS, 'p6setpre', [], $RT_OBJ, :tc);
