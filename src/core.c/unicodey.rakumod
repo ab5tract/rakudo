@@ -23,8 +23,9 @@ my class Rakudo::Unicodey is implementation-detail {
         NYI('unimatch').throw;
     }
 
-    method uniprop-general(int) is hidden-from-backtrace {
-        NYI('uniprop').throw;
+    my constant $gcprop = nqp::unipropcode("General_Category");
+    method uniprop-general(int $code) {
+        nqp::getuniprop_str($code,$gcprop)
     }
     method uniprop(int, str) is hidden-from-backtrace {
         NYI('uniprop').throw;
