@@ -3667,9 +3667,10 @@ nqp::bindcurhllsym('P6EX', nqp::hash(
       X::TypeCheck::Binding.new(:$got, :$expected, :$symbol).throw;
   },
   'X::TypeCheck::Binding::Parameter',
-  -> Mu $got is raw, Mu $expected is raw, $symbol is raw, $parameter is raw, $is-constraint? is raw {
+  -> Mu $got is raw, Mu $expected is raw, $symbol is raw, $parameter is raw, $is-constraint? is raw, $is-omitted? is raw {
       my $constraint = $is-constraint ?? True !! False;
-      X::TypeCheck::Binding::Parameter.new(:$got, :$expected, :$symbol, :$parameter, :$constraint).throw;
+      my $omitted = $is-omitted ?? True !! False;
+      X::TypeCheck::Binding::Parameter.new(:$got, :$expected, :$symbol, :$parameter, :$constraint, :$omitted).throw;
   },
   'X::TypeCheck::Assignment',
   -> Mu $symbol is raw, Mu $got is raw, Mu $expected is raw {

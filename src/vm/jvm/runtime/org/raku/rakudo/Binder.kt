@@ -242,6 +242,13 @@ object Binder {
             CallSiteDescriptor.ARG_STR, CallSiteDescriptor.ARG_OBJ,
             CallSiteDescriptor.ARG_INT
         ), null)
+    /* As bindParamThrower, with the omitted flag: the failing value was the
+     * implicit default of an optional parameter nothing was passed for. */
+    private val bindParamOmittedThrower = CallSiteDescriptor(
+        byteArrayOf(CallSiteDescriptor.ARG_OBJ, CallSiteDescriptor.ARG_OBJ,
+            CallSiteDescriptor.ARG_STR, CallSiteDescriptor.ARG_OBJ,
+            CallSiteDescriptor.ARG_INT, CallSiteDescriptor.ARG_INT
+        ), null)
     private val bindConcreteThrower = CallSiteDescriptor(
         byteArrayOf(CallSiteDescriptor.ARG_STR, CallSiteDescriptor.ARG_STR,
             CallSiteDescriptor.ARG_STR, CallSiteDescriptor.ARG_STR,
@@ -251,7 +258,8 @@ object Binder {
         byteArrayOf(CallSiteDescriptor.ARG_OBJ, CallSiteDescriptor.ARG_STR), null)
 
     private fun bindOneParam(tc: ThreadContext, gcx: RakOps.GlobalExt, cf: CallFrame, param: SixModelObject,
-            origArg: Any?, origFlag: Byte, noNomTypeCheck: Boolean, isSlurpyNamed: Boolean, error: Array<Any?>?): Int {
+            origArg: Any?, origFlag: Byte, noNomTypeCheck: Boolean, isSlurpyNamed: Boolean, error: Array<Any?>?,
+            implicitDefault: Boolean = false): Int {
         /* Get parameter flags and variable name. */
         param.get_attribute_native(tc, gcx.Parameter, "$!flags", HINT_flags)
         val paramFlags = tc.nativeI.toInt()
@@ -736,9 +744,10 @@ object Binder {
                         val thrower = RakOps.getThrower(tc, "X::TypeCheck::Binding::Parameter")
                         if (thrower != null) {
                             error[0] = thrower
-                            error[1] = bindParamThrower
+                            error[1] = bindParamOmittedThrower
                             error[2] = arrayOf<Any?>(origArg as SixModelObject?,
-                                consType!!.st.WHAT, varName, param, 1L)
+                                consType!!.st.WHAT, varName, param, 1L,
+                                if (implicitDefault) 1L else 0L)
                         }
                         else {
                             error[0] = String.format(
@@ -1126,7 +1135,10 @@ object Binder {
                         if ((flags and SIG_ELEM_IS_OPTIONAL) != 0) {
                             bindFail = bindOneParam(tc, gcx, cf, param,
                                 handleOptional(tc, gcx, flags, param, cf),
-                                CallSiteDescriptor.ARG_OBJ, false, false, error)
+                                CallSiteDescriptor.ARG_OBJ, false, false, error,
+                                implicitDefault = param.get_attribute_boxed(tc, gcx.Parameter,
+                                        "$!default_value", HINT_default_value) == null
+                                    && (flags and SIG_ELEM_DEFAULT_FROM_OUTER) == 0)
                             if (bindFail != 0)
                                 return bindFail
                         }
@@ -1161,7 +1173,10 @@ object Binder {
                     if ((flags and SIG_ELEM_IS_OPTIONAL) != 0) {
                         bindFail = bindOneParam(tc, gcx, cf, param,
                             handleOptional(tc, gcx, flags, param, cf),
-                            CallSiteDescriptor.ARG_OBJ, false, false, error)
+                            CallSiteDescriptor.ARG_OBJ, false, false, error,
+                            implicitDefault = param.get_attribute_boxed(tc, gcx.Parameter,
+                                    "$!default_value", HINT_default_value) == null
+                                && (flags and SIG_ELEM_DEFAULT_FROM_OUTER) == 0)
                     }
                     else if (!suppressArityFail) {
                         if (error != null) {
