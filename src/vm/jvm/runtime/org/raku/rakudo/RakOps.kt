@@ -461,6 +461,8 @@ object RakOps {
         byteArrayOf(CallSiteDescriptor.ARG_OBJ, CallSiteDescriptor.ARG_OBJ, CallSiteDescriptor.ARG_OBJ), null)
     private val rvThrower = CallSiteDescriptor(
         byteArrayOf(CallSiteDescriptor.ARG_OBJ, CallSiteDescriptor.ARG_OBJ), null)
+    private val targetTypeSite = CallSiteDescriptor(
+        byteArrayOf(CallSiteDescriptor.ARG_OBJ, CallSiteDescriptor.ARG_OBJ), null)
 
     @JvmStatic
     fun p6typecheckrv(rv: SixModelObject?, routine: SixModelObject?, bypassType: SixModelObject?, tc: ThreadContext): SixModelObject? {
@@ -472,9 +474,10 @@ object RakOps {
              * to call instantiate_generic before doing the type check. */
             val HOW = rtype.st.HOW
             val archetypesMeth = Ops.findmethod(HOW, "archetypes", tc)
-            /* NOTE: two args against the one-arg invocantCallSite, as in the
-             * Java original. */
-            Ops.invokeDirect(tc, archetypesMeth, Ops.invocantCallSite, arrayOf<Any?>(HOW, rtype))
+            /* The type must ride along: DefiniteHOW's nullary archetypes()
+             * answers its non-generic default, which under the dispatch
+             * binder is exactly what a dropped extra argument produced. */
+            Ops.invokeDirect(tc, archetypesMeth, targetTypeSite, arrayOf<Any?>(HOW, rtype))
             val Archetypes = Ops.result_o(tc.curFrame!!)
             val genericMeth = Ops.findmethodNonFatal(Archetypes, "generic", tc)
             if (genericMeth != null) {
@@ -486,6 +489,21 @@ object RakOps {
                     (cc as ContextRefInstance).context = tc.curFrame!!
                     Ops.invokeDirect(tc, ig, genIns, arrayOf<Any?>(HOW, rtype, cc))
                     rtype = Ops.result_o(tc.curFrame!!)
+                    /* A generic that instantiated to a native type checks
+                     * against its box: the routine body produces boxed
+                     * values. Same mapping the raku-rv-typecheck-generic
+                     * dispatcher applies on MoarVM. */
+                    val ni = Ops.gethllsym("Raku", "NativeInstantiation", tc)
+                    if (ni != null && Ops.isnull(ni) == 0L) {
+                        val boxMeth = Ops.findmethodNonFatal(ni, "box", tc)
+                        if (boxMeth != null) {
+                            Ops.invokeDirect(tc, boxMeth, targetTypeSite,
+                                arrayOf<Any?>(ni, rtype))
+                            val boxed = Ops.result_o(tc.curFrame!!)
+                            if (boxed != null && Ops.isnull(boxed) == 0L)
+                                rtype = boxed
+                        }
+                    }
                 }
             }
 

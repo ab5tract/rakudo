@@ -553,7 +553,7 @@ object Binder {
         /* Do a coercion, if one is needed. */
         HOW = paramType!!.st.HOW
         val archetypesMeth = Ops.findmethod(HOW, "archetypes", tc)
-        Ops.invokeDirect(tc, archetypesMeth, Ops.invocantCallSite, arrayOf<Any?>(HOW))
+        Ops.invokeDirect(tc, archetypesMeth, targetType, arrayOf<Any?>(HOW, paramType))
         val Archetypes = Ops.result_o(tc.curFrame!!)
         val coerciveMeth = Ops.findmethodNonFatal(Archetypes, "coercive", tc)
         if (coerciveMeth != null) {
@@ -659,8 +659,30 @@ object Binder {
                         if (wrap || varName == "\$_") {
                             val stScalar = gcx.Scalar!!.st
                             val newCont = stScalar.REPR.allocate(tc, stScalar)
-                            val desc = param.get_attribute_boxed(tc, gcx.Parameter,
+                            var desc = param.get_attribute_boxed(tc, gcx.Parameter,
                                 "$!container_descriptor", HINT_container_descriptor)
+                            /* A generic descriptor still carries the unresolved
+                             * type variable and would reject (or wrongly coerce)
+                             * every assignment into the container. Resolve it
+                             * against the binding frame, the same way the
+                             * nominal type instantiation above does. */
+                            if ((paramFlags and SIG_ELEM_TYPE_GENERIC) != 0 && desc != null
+                                    && Ops.isconcrete(desc, tc) == 1L) {
+                                val isGenericMeth = Ops.findmethodNonFatal(desc, "is_generic", tc)
+                                if (isGenericMeth != null) {
+                                    Ops.invokeDirect(tc, isGenericMeth,
+                                        Ops.invocantCallSite, arrayOf<Any?>(desc))
+                                    if (Ops.istrue(Ops.result_o(tc.curFrame!!), tc) == 1L) {
+                                        val instMeth = Ops.findmethod(desc, "instantiate_generic", tc)
+                                        val ctxRefType = tc.gc.ContextRef!!
+                                        val ctxRef = ctxRefType.st.REPR.allocate(tc, ctxRefType.st)
+                                        (ctxRef as ContextRefInstance).context = cf
+                                        Ops.invokeDirect(tc, instMeth, targetType,
+                                            arrayOf<Any?>(desc, ctxRef))
+                                        desc = Ops.result_o(tc.curFrame!!)
+                                    }
+                                }
+                            }
                             newCont.bind_attribute_boxed(tc, gcx.Scalar, "$!descriptor",
                                 RakudoContainerSpec.HINT_descriptor.toLong(), desc)
                             newCont.bind_attribute_boxed(tc, gcx.Scalar, "$!value",
@@ -923,7 +945,7 @@ object Binder {
                         val paramType = param.get_attribute_boxed(tc, gcx.Parameter, "$!type", HINT_type)
                         val HOW = paramType!!.st.HOW
                         val archetypesMeth = Ops.findmethod(HOW, "archetypes", tc)
-                        Ops.invokeDirect(tc, archetypesMeth, Ops.invocantCallSite, arrayOf<Any?>(HOW))
+                        Ops.invokeDirect(tc, archetypesMeth, targetType, arrayOf<Any?>(HOW, paramType))
                         val Archetypes = Ops.result_o(tc.curFrame!!)
                         val coerciveMeth = Ops.findmethodNonFatal(Archetypes, "coercive", tc)
                         if (coerciveMeth != null) {
