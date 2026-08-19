@@ -712,7 +712,11 @@ object RakOps {
      * lives here instead. Returns the sinkee, as MoarVM's p6sink does. */
     @JvmStatic
     fun p6sink(obj: SixModelObject?, tc: ThreadContext): SixModelObject? {
-        if (obj != null && Ops.isconcrete(obj, tc) != 0L) {
+        /* A value in a container is not sunk: the raku-sink dispatcher looks
+         * at the sinkee without decontainerizing, so a Scalar an is-rw
+         * routine returned keeps its contents unsunk. Scalar itself has no
+         * sink method worth calling. */
+        if (obj != null && obj.st.ContainerSpec == null && Ops.isconcrete(obj, tc) != 0L) {
             val meth = Ops.findmethodNonFatal(obj, "sink", tc)
             if (Ops.isnull(meth) == 0L)
                 /* Through the dispatcher: sink resolves to a multi's proto. */
