@@ -555,6 +555,15 @@ my class Binder {
                 return nqp::const::BIND_RESULT_FAIL;
             }
 
+            # A generic coercion type (T() with T from a type capture) may
+            # reach here uninstantiated: the nominal instantiation above
+            # lives inside the type-check branch, which a coercive
+            # parameter can skip. Resolve it against the lexpad, which by
+            # now holds the captured types.
+            if $flags +& nqp::const::SIG_ELEM_TYPE_GENERIC
+              && $param_type.HOW.archetypes($param_type).generic {
+                $param_type := $param_type.HOW.instantiate_generic($param_type, $lexpad);
+            }
             my $coercion_type := $param_type.HOW.wrappee($param_type,:coercion);
             $oval := $coercion_type.HOW.coerce($coercion_type, $oval);
         }
