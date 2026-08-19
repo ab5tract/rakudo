@@ -246,7 +246,18 @@ my class ThreadPoolScheduler does Scheduler {
         method !run-one(\task --> Nil) {
             $!working = 1;
             if nqp::istype(task, ContinuationWrapper) {
+#?if jvm
+                # Resuming a continuation must reinstate the delimiting
+                # prompt: without it a second suspension of the same task
+                # (a hyper batch that awaits twice, say) has no reset to
+                # stop at and escapes the worker. MoarVM's
+                # continuationinvoke reinstates the barrier natively; the
+                # JVM resumes through continuationreset, which does.
+                nqp::continuationreset(THREAD_POOL_PROMPT, task.cont);
+#?endif
+#?if !jvm
                 nqp::continuationinvoke(task.cont, nqp::null());
+#?endif
             }
             else {
                 nqp::continuationreset(THREAD_POOL_PROMPT, nqp::getattr({
