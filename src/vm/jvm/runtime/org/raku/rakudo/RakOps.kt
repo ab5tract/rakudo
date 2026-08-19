@@ -552,7 +552,13 @@ object RakOps {
     @JvmStatic
     fun p6capturelex(codeObj: SixModelObject?, tc: ThreadContext): SixModelObject? {
         val gcx = key.getGC(tc)
-        val closure = codeObj!!.get_attribute_boxed(tc,
+        /* Only a Raku Code carries the handle to re-capture. Anything else
+         * is handed straight back, as the raku-capture-lex-callers
+         * dispatcher does on MoarVM -- an attribute's build closure, for
+         * one, reaches here as a bare code ref. */
+        if (codeObj == null || Ops.istype(codeObj, gcx.Code, tc) == 0L)
+            return codeObj
+        val closure = codeObj.get_attribute_boxed(tc,
                 gcx.Code, "$!do", HINT_CODE_DO) as CodeRef
         val wantedStaticInfo = closure.staticInfo.outerStaticInfo
         if (tc.curFrame!!.codeRef.staticInfo === wantedStaticInfo)
@@ -570,7 +576,13 @@ object RakOps {
     @JvmStatic
     fun p6capturelexwhere(codeObj: SixModelObject?, tc: ThreadContext): SixModelObject? {
         val gcx = key.getGC(tc)
-        val closure = codeObj!!.get_attribute_boxed(tc,
+        /* Only a Raku Code carries the handle to re-capture. Anything else
+         * is handed straight back, as the raku-capture-lex-callers
+         * dispatcher does on MoarVM -- an attribute's build closure, for
+         * one, arrives here as a bare code ref. */
+        if (codeObj == null || Ops.istype(codeObj, gcx.Code, tc) == 0L)
+            return codeObj
+        val closure = codeObj.get_attribute_boxed(tc,
                 gcx.Code, "$!do", HINT_CODE_DO) as CodeRef
         val wantedStaticInfo = closure.staticInfo.outerStaticInfo ?: return codeObj
         var frame = tc.curFrame
