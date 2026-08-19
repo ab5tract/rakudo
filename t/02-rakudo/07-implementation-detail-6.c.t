@@ -43,14 +43,6 @@ my @lower = <<
 
 my @lower-not-implemented = ();
 
-if $*VM.name eq 'jvm' {
-  @lower-not-implemented = <
-    atomic-fetch-inc atomic-dec-fetch atomic-fetch-sub atomic-fetch-add
-    atomic-add-fetch full-barrier atomic-fetch-dec atomic-inc-fetch
-    atomic-sub-fetch
-  >;
-}
-
 is-deeply
   non-implementation(CORE::, /^ "&" <[A..Z]> /) (^) @UPPER,
   set(),
