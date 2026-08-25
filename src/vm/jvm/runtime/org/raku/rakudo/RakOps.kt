@@ -414,6 +414,14 @@ object RakOps {
      * overflows. */
     private val rvDecontSites =
         java.util.concurrent.ConcurrentHashMap<SixModelObject, org.raku.nqp.dispatch.DispatchCallSite>()
+
+    /* The map's keys are routine objects, and a routine holds its whole
+     * serialization-context graph. In a process that runs programs in turn --
+     * the eval server -- entries from a finished run pin that run's entire
+     * type universe, so the map must go cold with the dispatch caches. */
+    init {
+        org.raku.nqp.dispatch.DispatchBootstrap.registerResettable { rvDecontSites.clear() }
+    }
     private val rvDecontSiteType = java.lang.invoke.MethodType.methodType(Void.TYPE)
     private val rvDecontCallSite = CallSiteDescriptor(
         byteArrayOf(CallSiteDescriptor.ARG_OBJ), null)
