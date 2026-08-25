@@ -145,7 +145,19 @@ if ($jvm && $evalserver) {
     no warnings 'once';
     # leak the filehandle; it will be closed at exit, robustly telling the server to terminate
     open JVMSERVER, "| .${slash}rakudo-eval-server -bind-stdin -cookie TESTTOKEN -app .${slash}rakudo.jar" or die "cannot fork eval server: $!\n";
-    sleep 1;
+
+    # The server boots a JVM and loads rakudo.jar before it writes the token,
+    # which takes rather longer than a second. Sleeping a fixed amount raced:
+    # the first test file ran while the token was still absent, its client had
+    # nothing to connect to, and the file was reported as "No plan found in TAP
+    # output" -- a passing test looking like a broken one. Wait for the token to
+    # actually be there and parseable instead.
+    my $waited = 0;
+    until (-s "TESTTOKEN" && do { open my $t, '<', "TESTTOKEN"; local $/; <$t> } =~ /\d+ \S+/) {
+        die "eval server did not write TESTTOKEN within 120s\n" if $waited >= 120;
+        select undef, undef, undef, 0.25;
+        $waited += 0.25;
+    }
 }
 
 if (eval "require $tap_harness_class;") {
