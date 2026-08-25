@@ -214,8 +214,13 @@ else {
     install "perl6-j", "java $jopts perl6";
     install "rakudo-jdb-server", "java $jdbopts $jopts perl6";
     install "perl6-jdb-server", "java $jdbopts $jopts perl6";
-    install "rakudo-eval-server", "java -Xmx3000m $jopts org.raku.nqp.tools.EvalServer";
-    install "perl6-eval-server", "java -Xmx3000m $jopts org.raku.nqp.tools.EvalServer";
+    # The server keeps one JVM for many runs, and each run builds a whole
+    # GlobalContext with its own copy of the setting. Several of those are live
+    # at once before the collector catches up, so 3000m runs out after a
+    # handful of runs -- as an OutOfMemoryError from whichever run happened to
+    # be unlucky, which reads as a broken test rather than a full heap.
+    install "rakudo-eval-server", "java -Xmx8g $jopts org.raku.nqp.tools.EvalServer";
+    install "perl6-eval-server", "java -Xmx8g $jopts org.raku.nqp.tools.EvalServer";
 }
 
 # vim: expandtab sw=4
