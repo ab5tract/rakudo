@@ -73,7 +73,11 @@ sub MAIN(
                        $harness, '--jvm', '--evalserver', '--jobs=1', |@batch,
                        :out, :err,
                        :env(%*ENV, RAKUDO_EVALSERVER_TOKEN => $token,
-                                   RAKUDO_EVALSERVER_HEAP  => "{$h}g");
+                                   RAKUDO_EVALSERVER_HEAP  => "{$h}g",
+                                   # This branch is RakuAST-only; a shell that
+                                   # forgot the export must not silently sweep
+                                   # the legacy frontend instead.
+                                   RAKUDO_RAKUAST          => '1');
         my $out = $proc.out.slurp(:close) ~ $proc.err.slurp(:close);
         unlink $token if $token.IO.e;
         note "[{ (now - $started).Int }s] chunk { ++$done }/{ +@chunks }: "
