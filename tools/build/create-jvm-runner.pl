@@ -219,8 +219,12 @@ else {
     # at once before the collector catches up, so 3000m runs out after a
     # handful of runs -- as an OutOfMemoryError from whichever run happened to
     # be unlucky, which reads as a broken test rather than a full heap.
-    install "rakudo-eval-server", "java -Xmx8g $jopts org.raku.nqp.tools.EvalServer";
-    install "perl6-eval-server", "java -Xmx8g $jopts org.raku.nqp.tools.EvalServer";
+    # The ceiling stays overridable: a pool of servers must divide the
+    # machine's memory between them, and only the pool runner knows how many
+    # of them there are.
+    my $esheap = $^O eq 'MSWin32' ? '8g' : '${RAKUDO_EVALSERVER_HEAP:=8g}';
+    install "rakudo-eval-server", "java -Xmx$esheap $jopts org.raku.nqp.tools.EvalServer";
+    install "perl6-eval-server", "java -Xmx$esheap $jopts org.raku.nqp.tools.EvalServer";
 }
 
 # vim: expandtab sw=4
