@@ -98,16 +98,29 @@ state between eval-server runs.
   coerces differently. Error text also differs cosmetically.
 
   Second audit result (intify/numify): same MethodCache-vs-find_method
-  divergence, plus one ordering divergence left in place and documented:
-  the JVM unboxes a num BEFORE looking for an Int method where the
-  dispatcher prefers the method, so a num-boxed object with an Int
-  method truncates on the JVM and method-calls on MoarVM. Two hazards
-  were fixed on the spot: `smart_intify` invoked a found Int method
-  raw (`invokeDirect`) instead of through the dispatcher -- the
-  onlystar-proto resumption hazard `invokeMethodViaDispatch`'s own
-  comment warns about -- and both intify and numify dereferenced
-  `MethodCache!!` where a cacheless type NPEs (stringify already
-  guarded).
+  divergence, plus case-ordering drift that had no design behind it --
+  the JVM unboxed int/num before looking for the coercion method, and
+  ordered elems/str/num differently from the dispatcher. Both
+  `smart_intify` and `smart_numify` now follow their dispatcher's case
+  order exactly (null, concrete same-kind unbox, coercion method, type
+  object, elems, boxed str, boxed other-kind), with the same
+  concreteness guard on the unbox. Two hazards also fixed:
+  `smart_intify` invoked a found Int method raw (`invokeDirect`)
+  instead of through the dispatcher -- the onlystar-proto resumption
+  hazard `invokeMethodViaDispatch`'s own comment warns about -- and
+  both intify and numify dereferenced `MethodCache!!` where a cacheless
+  type NPEs (stringify already guarded).
+
+  Third audit result (method resolution): `findmethodNonFatal` already
+  implements the full 6model contract -- published-cache fast path,
+  authoritative-miss means no method, anything else delegates to
+  `HOW.find_method`. The smart coercions simply bypassed it with raw
+  `st.MethodCache` pokes; they now resolve through the helper and apply
+  the dispatcher's concreteness test to what they find. With that, the
+  stringify/intify/numify parity audit is closed: case order,
+  resolution, and guards all match the dispatcher programs. What the
+  direct ops still lack is only what the dispatch layer would add for
+  free -- per-callsite guarded caching of the decision.
 
 ## Plan
 
@@ -125,11 +138,25 @@ state between eval-server runs.
   whether findmethod/istype/isinvokable gain anything from dispatch
   routing on the JVM (each is a guarded cache the JVM already has by
   other means).
-- **Phase 4 -- frame/container unification** (pre-newdisp bug): give the
-  JVM MoarVM's autoclose semantics end to end (bind
-  serialization-context originals in auto-closed frames AND make the
-  runtime invocation of a BEGIN-reached block agree), which unfudges
-  t/02-rakudo/22-traited-variable-by-name.t.
+- **Phase 4 -- static-code identity unification** (pre-newdisp bug,
+  root-caused 2026-08-27 and bigger than first thought). The failure in
+  t/02-rakudo/22-traited-variable-by-name.t is NOT autoclose semantics:
+  tracing shows no autoclose is involved at all. A block reached at
+  BEGIN time is compiled dynamically; the final unit emission then
+  RE-FORMS and re-emits it (IMPL-REBUILD-BEGIN-TIME-CACHED-BLOCK's
+  graft), producing a second class and so a second StaticCodeInfo. The
+  begin-created closures anchor their outer chains in the first
+  universe; runtime executes the second; lexical containers split.
+  MoarVM avoids this by assembling nested units' frames into the
+  enclosing bytecode (one identity), and the JVM already has the
+  matching machinery for blocks that are NOT re-formed --
+  jvm-class-of-cuid claims the begin-compiled class into the final
+  unit's coderef table. The work item: give re-formed cuids the same
+  unification (either claim-and-patch instead of re-emit, or migrate
+  the begin universe's frames onto the emitted one at load). Until
+  then the traited-variable test stays red. (An autoclose-adoption
+  experiment matching MoarVM frame.c's fake-frame semantics was built,
+  traced, shown irrelevant to this bug, and reverted.)
 - **Phase 5 -- upstream**: reduce and report the shared `callwith`
   in-multi-sub and `nextwith` RakuAST resumption bugs; they reproduce on
   MoarVM and belong to the frontend.
