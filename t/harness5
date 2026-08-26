@@ -138,13 +138,21 @@ if ($archive) {
     if $ENV{SMOLDER_SUBMITTER};
 }
 
+# The token file names one server. Several sweeps can then run at once, each
+# with its own server, which is the only way the eval server beats a cold run
+# over a whole suite: a server takes its runs one at a time, so the per-file
+# win it gives back is exactly the parallelism the cold harness already had.
+my $token = $ENV{RAKUDO_EVALSERVER_TOKEN} // "TESTTOKEN";
+
+my $raku = $ENV{RAKUDO_HOST_RAKU} // 'raku';
+
 if ($jvm && $evalserver) {
-    unlink("TESTTOKEN");
-    $ENV{HARNESS_PERL} = "$^X .${slash}eval-client.pl TESTTOKEN run";
+    unlink($token);
+    $ENV{HARNESS_PERL} = "$raku tools${slash}build${slash}eval-client.raku $token run";
 
     no warnings 'once';
     # leak the filehandle; it will be closed at exit, robustly telling the server to terminate
-    open JVMSERVER, "| .${slash}rakudo-eval-server -bind-stdin -cookie TESTTOKEN -app .${slash}rakudo.jar" or die "cannot fork eval server: $!\n";
+    open JVMSERVER, "| .${slash}rakudo-eval-server -bind-stdin -cookie $token -app .${slash}rakudo.jar" or die "cannot fork eval server: $!\n";
 
     # The server boots a JVM and loads rakudo.jar before it writes the token,
     # which takes rather longer than a second. Sleeping a fixed amount raced:
@@ -153,8 +161,8 @@ if ($jvm && $evalserver) {
     # output" -- a passing test looking like a broken one. Wait for the token to
     # actually be there and parseable instead.
     my $waited = 0;
-    until (-s "TESTTOKEN" && do { open my $t, '<', "TESTTOKEN"; local $/; <$t> } =~ /\d+ \S+/) {
-        die "eval server did not write TESTTOKEN within 120s\n" if $waited >= 120;
+    until (-s $token && do { open my $t, '<', $token; local $/; <$t> } =~ /\d+ \S+/) {
+        die "eval server did not write $token within 120s\n" if $waited >= 120;
         select undef, undef, undef, 0.25;
         $waited += 0.25;
     }
@@ -163,7 +171,7 @@ if ($jvm && $evalserver) {
 if (eval "require $tap_harness_class;") {
     my $run_with_perl = $precompile ? [$ENV{HARNESS_PERL}, 't/precompileandrun'] : [$ENV{HARNESS_PERL}];
     my %harness_options = (
-        exec        => $jvm && $evalserver ? [$^X, "./eval-client.pl", "TESTTOKEN", "run"] : $run_with_perl,
+        exec        => $jvm && $evalserver ? [$raku, "tools/build/eval-client.raku", $token, "run"] : $run_with_perl,
         verbosity   => 0+$Test::Harness::verbose,
         jobs        => $jobs,
         ignore_exit => 1,
