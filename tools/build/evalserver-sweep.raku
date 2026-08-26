@@ -36,6 +36,9 @@ sub MAIN(
     Bool :$force,              #= run a jobs x heap combination that exceeds the memory budget
 ) {
     $*OUT.out-buffer = False;
+    # Progress notes go to stderr, which block-buffers into a pipe -- a
+    # backgrounded sweep then looks silent until exit.
+    $*ERR.out-buffer = False;
 
     # MemAvailable is what the kernel could hand out right now without
     # swapping; a quarter of it stays back for the clients, the harness, and
