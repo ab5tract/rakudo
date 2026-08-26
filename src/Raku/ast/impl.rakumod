@@ -17,6 +17,9 @@ class RakuAST::IMPL::QASTContext {
     # would close over is also compiled), but rather are clones for
     # things like proto method derivation.
     has Hash $!sub-id-to-cloned-code-objects;
+    # Cuids whose code objects a BEGIN-time dynamic compilation bound to the
+    # nested unit's code refs; the enclosing unit re-points them at load.
+    has Mu $!dynamically-bound-cuids;
 
     # Mapping of sub IDs to SC indexes of code stubs.
     has Hash $!sub-id-to-sc-idx;
@@ -84,6 +87,7 @@ class RakuAST::IMPL::QASTContext {
         nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!code-ref-blocks', []);
         nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!sub-id-to-code-object', {});
         nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!sub-id-to-cloned-code-objects', {});
+        nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!dynamically-bound-cuids', nqp::hash());
         nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!sub-id-to-sc-idx', {});
         nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!cleanup-tasks', []);
         nqp::bindattr_i($obj, RakuAST::IMPL::QASTContext, '$!is-nested', 0);
@@ -266,6 +270,10 @@ class RakuAST::IMPL::QASTContext {
         $!sub-id-to-cloned-code-objects
     }
 
+    method dynamically-bound-cuids() {
+        $!dynamically-bound-cuids
+    }
+
     method add-cleanup-task($task) {
         nqp::push($!cleanup-tasks, $task)
     }
@@ -303,6 +311,18 @@ class RakuAST::IMPL::QASTContext {
         while $i < $n {
             my $coderef := nqp::atpos($coderefs, $i);
             my $subid := nqp::getcodecuid($coderef);
+#?if jvm
+            # This eager binding ties the code objects to THIS (nested)
+            # unit's code refs. The enclosing unit will emit the same cuids
+            # again as new code refs -- on this backend nested frames do not
+            # assemble into the enclosing bytecode -- so note the cuid for
+            # the enclosing unit's load-time re-pointing.
+            if $drain-compstuff-fixups
+                && (nqp::existskey($!sub-id-to-code-object, $subid)
+                    || nqp::existskey($!sub-id-to-cloned-code-objects, $subid)) {
+                nqp::bindkey($!dynamically-bound-cuids, $subid, 1);
+            }
+#?endif
 
             if nqp::existskey($!sub-id-to-code-object, $subid) {
                 my $code-obj := $!sub-id-to-code-object{$subid};
