@@ -686,7 +686,7 @@ object RakOps {
         while (curFrame != null) {
             val found = curFrame.codeRef.staticInfo.oTryGetLexicalIdx(name)
             if (found != -1)
-                return curFrame.oLex!![found]
+                return curFrame.oLexOrVivify(found)
             curFrame = curFrame.outer
         }
         return null
@@ -780,7 +780,7 @@ object RakOps {
             val sci = ctx.codeRef.staticInfo
             val dispLexIdx = sci.oTryGetLexicalIdx("\$*DISPATCHER")
             if (dispLexIdx != -1) {
-                val maybeDispatcher = ctx.oLex!![dispLexIdx]
+                val maybeDispatcher = ctx.oLexOrVivify(dispLexIdx)
                 if (maybeDispatcher != null) {
                     dispatcher = maybeDispatcher
                     if (dispatcher is TypeObject) {
@@ -834,7 +834,7 @@ object RakOps {
             val sci = ctx.codeRef.staticInfo
             val dispLexIdx = sci.oTryGetLexicalIdx("\$*DISPATCHER")
             if (dispLexIdx != -1) {
-                val maybeDispatcher = ctx.oLex!![dispLexIdx]
+                val maybeDispatcher = ctx.oLexOrVivify(dispLexIdx)
                 if (maybeDispatcher === disp) {
                     /* Found; grab args. */
                     val CallCapture = tc.gc.CallCapture!!
