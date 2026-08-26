@@ -101,12 +101,20 @@ is-deeply ([min] (1, 1.0)), 1.0, '[min] on a sole List of a pair applies the ope
 
 # A Slip is spread however many values are alongside it, so more of them than
 # an argument list carries reports that rather than counting the Slip as one.
+# The JVM backend's argument lists have no such limit, so there the spread
+# simply happens.
 {
     my @big[70000];
     @big = 1..70000;
     @big[500] = (99999, 4).Slip;
-    dies-ok { [max] @big },
-      '[max] on more values than an argument list holds spreads a Slip among them';
+    if $*VM.name eq 'jvm' {
+        is ([max] @big), 99999,
+          '[max] on more values than an argument list holds spreads a Slip among them';
+    }
+    else {
+        dies-ok { [max] @big },
+          '[max] on more values than an argument list holds spreads a Slip among them';
+    }
 }
 {
     my @slipped = 1, 2, 3;
@@ -187,10 +195,19 @@ is ([max] my @long = ^100000), 99999, '[max] on more values than an argument lis
 is ([min] 1..100000), 1, '[min] on more values than an argument list holds works';
 is ([max] 1..100000), 100000, '[max] on more values than an argument list holds works';
 is ([min] my @big = ^100000), 0, '[min] on a long Array works';
-dies-ok { [min] (1..70000).Seq },
-  '[min] on more values than an argument list holds pulled one at a time reports that limit';
-dies-ok { [max] (1..70000).Seq },
-  '[max] on more values than an argument list holds pulled one at a time reports that limit';
+if $*VM.name eq 'jvm' {
+    # No 16-bit argument list limit on the JVM: the pulled values all fit.
+    is ([min] (1..70000).Seq), 1,
+      '[min] on more values than an argument list holds pulled one at a time works';
+    is ([max] (1..70000).Seq), 70000,
+      '[max] on more values than an argument list holds pulled one at a time works';
+}
+else {
+    dies-ok { [min] (1..70000).Seq },
+      '[min] on more values than an argument list holds pulled one at a time reports that limit';
+    dies-ok { [max] (1..70000).Seq },
+      '[max] on more values than an argument list holds pulled one at a time reports that limit';
+}
 is ([min] (3, 1, 2).lazy), 1, '[min] on a lazy list works';
 is ([max] (3, 1, 2).lazy), 3, '[max] on a lazy list works';
 
