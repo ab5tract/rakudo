@@ -22,6 +22,11 @@
 # "No subtests run", a passing file looking broken. A chunk is one server's
 # whole life, so it must stay well inside the heap: at 8g, 15 files left room
 # and 20 did not, and the default scales down from there with the heap.
+
+# Without this, an option after the first target lands in the slurpy and is
+# silently taken for a test file name.
+my %*SUB-MAIN-OPTS = :named-anywhere;
+
 sub MAIN(
     *@targets,
     Int  :$heap,               #= GB of heap per server (default 6, less on a tight box)
