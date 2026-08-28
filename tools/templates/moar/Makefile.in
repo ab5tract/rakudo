@@ -107,6 +107,10 @@ MOAR        = @nfpq(@moar::bindir@/moar@moar::exe@)@
 
 @bsv(SPECIFIC_TEST_DIRS)@ = @nfp(t/09-moar)@ @nfp(t/12-rakuast)@
 
+# The directory the Raku-facing VM support code lives under; still the
+# legacy Perl6/ name on this backend (jvm has migrated to Raku/).
+@bpv(RAKU_VM_DIR)@ = Perl6
+
 @include(Makefile-backend-common)@
 
 @bpm(RAKUDO_OPS_DLL)@: @bpm(RAKUDO_OPS_DLL_SRC)@
