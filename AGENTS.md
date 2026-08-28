@@ -14,8 +14,18 @@ Session-start facts that keep getting relearned the hard way:
   buffering fixes — it already handles piped-handle buffering.
 
       raku tools/build/watched-run.raku --log=build.log \
-          --show='Compiling|Generating' -- make
+          --show='Compiling|Generating' -- sh tools/build/jvm-build.sh jars
       raku tools/build/watched-run.raku -t=t/02-rakudo --jobs=5 -- ./rakudo-j
+
+- **Do NOT run `make` (2026-08-28, user instruction).** The rakudo build
+  runs through `tools/build/jvm-build.sh` — every command make would have
+  run, written down: `gen` refreshes gen/jvm after frontend edits, `jars`
+  rebuilds every jar and runner after an nqp rebuild, no argument does
+  both. The nqp side builds with `cd nqp && ./gradlew buildJvm` (add
+  `clean` first when `src/vm/jvm/QAST/*.nqp` changed — the stage graph
+  misses that edge). If the harness keeps stopping a heavy build task,
+  run it detached (`setsid nohup sh tools/build/jvm-build.sh jars
+  > build.log 2>&1 &`) and watch the log.
 
 - **JVM test runs use the eval server** (`t/harness5 --jvm --evalserver`,
   ~20x faster than cold). Whole-suite sweeps:
@@ -24,15 +34,12 @@ Session-start facts that keep getting relearned the hard way:
   without doing the `N x Xmx` vs free-RAM arithmetic.
 - **`java` must be Oracle GraalVM 25.2.4** (a plain JDK voids all perf
   numbers).
-- **`make` rebuilds both runtime jars, order-only.** Edits under
-  `nqp/src/vm/jvm/runtime/` regenerate
-  `nqp/build/jvm/share/runtime/nqp-runtime.jar` via the nested Gradle
-  wrapper (~5s) without cascading into a setting recompile — the jar is
-  an order-only prerequisite because bytecode does not depend on the
-  runtime that executes it. Standalone:
-  `cd nqp && ./gradlew :nqp-runtime:jar syncRuntimeJars`, or
-  `make rakudo-runtime.jar` for rakudo's own layer. Either way, restart
-  any eval servers afterwards — they keep the old jar loaded.
+- **Runtime jars rebuild in seconds, without a setting recompile.** Edits
+  under `nqp/src/vm/jvm/runtime/` or `nqp/nqp-truffle/`:
+  `cd nqp && ./gradlew :nqp-runtime:jar :nqp-truffle:jar syncRuntimeJars`
+  (~5s) — bytecode does not depend on the runtime that executes it, so
+  nothing cascades. Either way, restart any eval servers afterwards —
+  they keep the old jar loaded.
 - Long-form docs: `docs/jvm-eval-server.md` (server, sweep, memory
   post-mortem), `docs/jvm-newdisp-port.md` (dispatch port status, plan,
   timings).
