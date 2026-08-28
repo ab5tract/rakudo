@@ -188,13 +188,35 @@ state between eval-server runs.
   create_context_only's resolve-from-SC patch loop) remains a latent
   divergence, unexercised by this test.
 - **Phase 5 -- upstream**: reduce and report three RakuAST frontend
-  bugs. All reproduce on MoarVM with `RAKUDO_RAKUAST=1`; none is a port
-  gap.
+  bugs. Outcome (2026-08-28, verified against upstream main 1386f7bbd
+  built for MoarVM in a worktree, both frontends, plus the rebased
+  branch JVM build):
   1. `callwith` in a multi *sub* returns Nil on the JVM and lets an
      escaped exception through on Moar (multi *methods* are fine).
-  2. `nextwith` continuation semantics diverge from the legacy
-     frontend (found in the same dispatcher-resumption sweep).
-  3. Mainline/phaser container sharing is first-toucher-order
+     NO LONGER REPRODUCES. A 24-shape matrix (no-next-candidate,
+     sibling/narrowing targets, nested blocks, named args, where
+     chains, wrap interplay, operators, capture args, class-body
+     multis) is identical across legacy, RakuAST-on-Moar (2026.07,
+     upstream main), and the branch JVM. Fixed somewhere in the
+     Phase 2-4 branch work and/or the 10 post-rebase upstream
+     commits; the original probe scripts died with the 2026-08-28
+     laptop restart, so the exact shape is unrecoverable -- but every
+     reconstruction passes everywhere. Nothing to file.
+  2. `nextwith` continuation semantics: same verdict, same matrix.
+     Nothing to file.
+  3. Filed as rakudo/rakudo#6600 (the order-dependence below,
+     reproduced on upstream main, both frontends). Two adjacent
+     findings while reducing it: (a) on 2026.07 RakuAST the same
+     program instead prints `[Rakudo::Internals::LoweredAwayLexical]`
+     -- already fixed on main by var-lowering's `'trait'` decline, so
+     nothing to file; (b) the branch's lex2local hardening
+     6ee685e16 (poison flatten-candidate frames whose signature
+     needs the binder) is latent-but-real upstream and went up as a
+     cherry-picked PR, rakudo/rakudo#6601 (verified on a moar build
+     of main + the pick: t/02-rakudo 265/266, the one failure an
+     uninstalled-tree artifact).
+     For the record, the reported bug: mainline/phaser container
+     sharing is first-toucher-order
      dependent: a mainline lexical captured by BEGIN-run code (the
      traited-variable pattern) is shared with the phaser only if
      nothing reads it before the traited call, because the sharing
