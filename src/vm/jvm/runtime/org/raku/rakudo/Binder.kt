@@ -174,7 +174,7 @@ object Binder {
             }
         }
         else {
-            self = cf.oLex!![selfIdx]
+            self = cf.oLexOrVivify(selfIdx)
         }
 
         /* If it's private, just need to fetch the attribute. */
@@ -859,7 +859,7 @@ object Binder {
             while (curOuter != null) {
                 val idx = curOuter.codeRef.staticInfo.oTryGetLexicalIdx(varName!!)
                 if (idx != -1)
-                    return curOuter.oLex!![idx]
+                    return curOuter.oLexOrVivify(idx)
                 curOuter = curOuter.outer
             }
             return null

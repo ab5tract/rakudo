@@ -151,15 +151,50 @@ state between eval-server runs.
   enclosing bytecode (one identity), and the JVM already has the
   matching machinery for blocks that are NOT re-formed --
   jvm-class-of-cuid claims the begin-compiled class into the final
-  unit's coderef table. The work item: give re-formed cuids the same
-  unification (either claim-and-patch instead of re-emit, or migrate
-  the begin universe's frames onto the emitted one at load). Until
-  then the traited-variable test stays red. (An autoclose-adoption
-  experiment matching MoarVM frame.c's fake-frame semantics was built,
-  traced, shown irrelevant to this bug, and reverted.)
+  unit's coderef table. RESOLVED 2026-08-27, in two parts. Part one:
+  the enclosing unit now notes cuids whose code objects a BEGIN-time
+  dynamic compilation bound to the nested unit's refs (impl.rakumod)
+  and re-points them at its own emission of those cuids from a
+  load-time fixup (compunit.rakumod emitting the new
+  jvm-repoint-dynamic-code syscall, Syscalls.kt). With that, the
+  begin-created phaser reads and writes the SC master container. Part
+  two, found by bisection: the mainline still read a different
+  container, because the JVM cloned contvar lexicals eagerly at frame
+  entry while MoarVM vivifies object lexicals lazily on first read
+  (MVM_frame_vivify_lexical) -- and the lazy timing is semantics, not
+  an optimization. A P6opaque clone is shallow, so a mainline whose
+  first read happens after the phaser's first push through the master
+  clones a container that shares the master's storage; an entry-time
+  clone of the still-empty master shares nothing. CallFrame now fills
+  clone-flagged slots with an UNVIVIFIED sentinel at entry and clones
+  in oLexOrVivify, which every oLex reader (getlex family, ContextRef,
+  the Binder and RakOps walkers, context serialization) goes through;
+  binds overwrite the sentinel without knowing it exists. The sentinel
+  is not decoration: a first cut used null for "not yet vivified" and
+  broke every TypeEnv-cached generic instantiation (array[T] in a
+  parametric role came out Mu), because TypeEnv.cache binds a cache
+  miss -- a Java null -- into `my Mu $ins`, and the next read then
+  resurrected the static clone instead of the bound null, defeating
+  the isnull guard. MoarVM cannot express that ambiguity (its null is
+  a real MVMNull object, never an empty env slot). The test is green.
+  Two notes:
+  (a) the sharing is first-toucher-order-dependent even on MoarVM --
+  any executed read of the array before the traited call makes MoarVM
+  fail the same way (reduced in scratchpad bisect4/6/9); that wart
+  belongs on the Phase 5 upstream list. (b) An earlier `#?if !jvm`
+  drain experiment and the null-oLexStatic autoclose theory it
+  exposed were both superseded by the repoint approach; the
+  auto-close's as-is `oLexStatic` copy (vs frame.c
+  create_context_only's resolve-from-SC patch loop) remains a latent
+  divergence, unexercised by this test.
 - **Phase 5 -- upstream**: reduce and report the shared `callwith`
   in-multi-sub and `nextwith` RakuAST resumption bugs; they reproduce on
-  MoarVM and belong to the frontend.
+  MoarVM and belong to the frontend. Add to the list: a mainline lexical
+  captured by BEGIN-run code (the traited-variable pattern) is shared
+  with the phaser only if nothing reads it before the traited call --
+  one executed read first and the phaser's pushes go invisible, on
+  MoarVM as much as on the JVM, because the sharing rides on a lazy
+  shallow clone of the still-materializing master container.
 
 ## Timings
 
