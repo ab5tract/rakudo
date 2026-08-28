@@ -187,14 +187,40 @@ state between eval-server runs.
   auto-close's as-is `oLexStatic` copy (vs frame.c
   create_context_only's resolve-from-SC patch loop) remains a latent
   divergence, unexercised by this test.
-- **Phase 5 -- upstream**: reduce and report the shared `callwith`
-  in-multi-sub and `nextwith` RakuAST resumption bugs; they reproduce on
-  MoarVM and belong to the frontend. Add to the list: a mainline lexical
-  captured by BEGIN-run code (the traited-variable pattern) is shared
-  with the phaser only if nothing reads it before the traited call --
-  one executed read first and the phaser's pushes go invisible, on
-  MoarVM as much as on the JVM, because the sharing rides on a lazy
-  shallow clone of the still-materializing master container.
+- **Phase 5 -- upstream**: reduce and report three RakuAST frontend
+  bugs. All reproduce on MoarVM with `RAKUDO_RAKUAST=1`; none is a port
+  gap.
+  1. `callwith` in a multi *sub* returns Nil on the JVM and lets an
+     escaped exception through on Moar (multi *methods* are fine).
+  2. `nextwith` continuation semantics diverge from the legacy
+     frontend (found in the same dispatcher-resumption sweep).
+  3. Mainline/phaser container sharing is first-toucher-order
+     dependent: a mainline lexical captured by BEGIN-run code (the
+     traited-variable pattern) is shared with the phaser only if
+     nothing reads it before the traited call, because the sharing
+     rides on a lazy shallow clone of the still-materializing master
+     container. Verified repro (fails: prints `[]`; delete the
+     marked line and it prints `[42]`):
+
+         my constant obs = class {};
+         my @seen;
+         multi sub trait_mod:<does>(Variable:D $v, obs) {
+             $v.block.add_phaser: 'LEAVE',
+                 $v.willdo: -> \var { @seen.push(var) };
+         }
+         sub f() { my $fh does obs = 42; }
+         my @x := @seen;   # any executed read here breaks the sharing
+         f();
+         say @seen.raku;
+
+     The read's form does not matter (interpolation, binding, a read
+     from a nested sub all fail identically); a read compiled in but
+     never executed is fine, and once the phaser pushes first, later
+     reads stay coherent (`[42]`, then `[42, 42]` after a second
+     call). Reduced 2026-08-27 from
+     t/02-rakudo/22-traited-variable-by-name.t via bisecting probe
+     scripts; the mechanism analysis lives in the Phase 4 entry
+     above.
 
 ## Timings
 
