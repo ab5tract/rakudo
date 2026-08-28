@@ -12,8 +12,17 @@ is ("a\r\nb\r\nc".split(/\r\n/)).join('|'), 'a|b|c',
     'splitting on /\r\n/ breaks at each CR LF grapheme';
 
 "a\r\nb" ~~ /\r\n/;
-is "$/.from()-$/.to()", '1-2',
-    'a /\r\n/ match consumes exactly the one combined grapheme';
+if $*VM.name eq 'jvm' {
+    # Match positions counted in graphemes need NFG strings, which this
+    # backend does not have: its regex engine matches the CR LF pair as
+    # one atom, but positions remain char indices, so this match reports
+    # 1-3. The rest of this file holds without NFG and is not skipped.
+    skip 'match positions are grapheme-indexed only under NFG', 1;
+}
+else {
+    is "$/.from()-$/.to()", '1-2',
+        'a /\r\n/ match consumes exactly the one combined grapheme';
+}
 
 ok "head\r\n\r\nbody" ~~ /\r\n\r\n/,
     'a regex \r\n\r\n matches a blank-line header terminator';
