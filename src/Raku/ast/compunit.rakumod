@@ -703,6 +703,45 @@ class RakuAST::CompUnit
 
         $context.cleanup-orphan-stubs();
 
+#?if jvm
+        # Code objects (and clones) that a BEGIN-time dynamic compilation
+        # bound to its nested unit's code refs anchor their outer chains in
+        # frames this unit's runtime never enters: nested frames do not
+        # assemble into the enclosing bytecode here, so this unit emits the
+        # same cuids as NEW code refs. Re-point them at load. A precompiled
+        # unit needs none of this: deserialization already binds $!do to
+        # this unit's code refs.
+        unless $!precompilation-mode {
+            my %dyn := $context.dynamically-bound-cuids();
+            if %dyn {
+                my %code-objects := $context.sub-id-to-code-object();
+                my %clones := $context.sub-id-to-cloned-code-objects();
+                my %registry := nqp::hash();
+                for %dyn {
+                    my str $cuid := nqp::iterkey_s($_);
+                    my @entries := nqp::list();
+                    nqp::push(@entries, nqp::existskey(%code-objects, $cuid)
+                        ?? %code-objects{$cuid} !! nqp::null());
+                    if nqp::existskey(%clones, $cuid) {
+                        for %clones{$cuid} -> $clone {
+                            nqp::push(@entries, $clone);
+                        }
+                    }
+                    nqp::bindkey(%registry, $cuid, @entries);
+                }
+                $context.ensure-sc(%registry);
+                $context.add-fixup-task(-> {
+                    QAST::Op.new(
+                        :op('syscall'),
+                        QAST::SVal.new( :value('jvm-repoint-dynamic-code') ),
+                        QAST::WVal.new( :value(%registry) ),
+                        QAST::WVal.new( :value(Code) )
+                    )
+                });
+            }
+        }
+#?endif
+
         QAST::CompUnit.new:
             $outermost,
             :hll('Raku'),
