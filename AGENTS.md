@@ -23,9 +23,18 @@ Session-start facts that keep getting relearned the hard way:
   `jobs x heap` against MemAvailable itself; never launch N servers
   without doing the `N x Xmx` vs free-RAM arithmetic.
 - **`java` must be Oracle GraalVM 25.2.4** (a plain JDK voids all perf
-  numbers). The host `raku` comes from rakubrew and is NOT on
-  non-interactive PATHs: prefix commands with
+  numbers).
+- **`raku` is not on non-interactive PATHs.** The host `raku` comes from
+  rakubrew; every tool-shell command that needs it must start with
   `eval "$(~/.rakubrew/bin/rakubrew init Zsh)"`.
+- **Rakudo's `make` does NOT rebuild the nqp JVM runtime.** Edits under
+  `nqp/src/vm/jvm/runtime/` silently keep the stale
+  `nqp/build/jvm/share/runtime/nqp-runtime.jar`; rebuild it with
+  `cd nqp && ./gradlew :nqp-runtime:jar syncRuntimeJars` (~5s). Rakudo's
+  own runtime does rebuild via `make rakudo-runtime.jar`. Check the jar
+  mtime moved, then restart any eval servers — they keep the old jar
+  loaded. TODO: teach the rakudo Makefile templates to run the gradlew
+  step themselves so `make` can't build against a stale runtime.
 - Long-form docs: `docs/jvm-eval-server.md` (server, sweep, memory
   post-mortem), `docs/jvm-newdisp-port.md` (dispatch port status, plan,
   timings).
