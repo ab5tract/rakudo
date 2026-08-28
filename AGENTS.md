@@ -36,3 +36,8 @@ Session-start facts that keep getting relearned the hard way:
 - Long-form docs: `docs/jvm-eval-server.md` (server, sweep, memory
   post-mortem), `docs/jvm-newdisp-port.md` (dispatch port status, plan,
   timings).
+- **Debug prints in NQP/Rakudo sources are env-gated, always**:
+  `nqp::say(...) if nqp::getenvhash()<AN_ENVVAR>;` — never a bare say.
+  A bare print bakes into the stage jars, leaks into build output and
+  TAP, and forces a rebuild to silence; the gated form ships harmlessly
+  and turns on with the envvar when the hunt resumes.
