@@ -28,6 +28,16 @@ RUNTIME_JAR = rakudo-runtime.jar
 # rakudo-runtime/ and runs on the nested nqp checkout's Gradle wrapper.
 GRADLEW = @nfp(nqp/gradlew)@
 
+# The nqp runtime jar every JVM in this build runs on. make must know how
+# to rebuild it: editing nqp/src/vm/jvm/runtime/ and running make used to
+# build and test against the stale jar in nqp/build/jvm/share, silently.
+# $(wildcard) rather than bare globs: a pattern with no matches (there is
+# no depth-two .java today) must expand to nothing, not become a literal
+# prerequisite make has no rule for. GNU make syntax, like the order-only
+# prerequisites below.
+NQP_RUNTIME_SOURCES = $(wildcard @nfp(nqp/src/vm/jvm/runtime/org/raku/nqp/*/*.java)@ @nfp(nqp/src/vm/jvm/runtime/org/raku/nqp/*/*.kt)@ @nfp(nqp/src/vm/jvm/runtime/org/raku/nqp/*/*/*.java)@ @nfp(nqp/src/vm/jvm/runtime/org/raku/nqp/*/*/*.kt)@)
+NQP_RUNTIME_JAR = @nfp(nqp/build/jvm/share/runtime/nqp-runtime.jar)@
+
 @bpv(BAT)@    = @runner_suffix@
 
 # This is addition to J_ALL_METAMODEL_SOURCES
@@ -47,7 +57,11 @@ GRADLEW = @nfp(nqp/gradlew)@
   perl6-debug-j
 
 @bpv(ML_EXTRA)@ = @nfp(src/vm/jvm/Perl6/JavaModuleLoader.nqp)@
-@bpv(RAKUDO_DEPS_EXTRA)@ = $(RUNTIME_JAR)
+# NQP_RUNTIME_JAR sits after the | : order-only, GNU make syntax. The jar
+# must be fresh before any build JVM runs on it, but its rebuild (seconds)
+# must not timestamp-cascade into a full setting recompile (many minutes)
+# -- compiled bytecode does not depend on the runtime that executes it.
+@bpv(RAKUDO_DEPS_EXTRA)@ = $(RUNTIME_JAR) | $(NQP_RUNTIME_JAR)
 
 @bpv(NQP_FLAGS_EXTRA)@ = --javaclass=perl6
 
@@ -57,9 +71,17 @@ GRADLEW = @nfp(nqp/gradlew)@
 
 @include(Makefile-backend-common)@
 
-$(RUNTIME_JAR): $(RUNTIME_SOURCES) @nfp(rakudo-runtime/build.gradle.kts)@
+$(NQP_RUNTIME_JAR): $(NQP_RUNTIME_SOURCES) @nfp(nqp/nqp-runtime/build.gradle.kts)@
 	@echo(+++ Generating	$@ (Gradle))@
-	$(NOECHO)cd @nfp(rakudo-runtime)@ && @nfp(../nqp/gradlew)@ --console=plain -q jar
+	$(NOECHO)cd @nfp(nqp)@ && @nfp(../nqp/gradlew)@ --console=plain :nqp-runtime:jar syncRuntimeJars
+	@# Gradle leaves the jar untouched when the change was content-neutral
+	@# (a bare touch, a comment); bump it so make sees the rule as done
+	@# instead of re-running Gradle on every subsequent invocation.
+	$(NOECHO)touch $(NQP_RUNTIME_JAR)
+
+$(RUNTIME_JAR): $(RUNTIME_SOURCES) @nfp(rakudo-runtime/build.gradle.kts)@ | $(NQP_RUNTIME_JAR)
+	@echo(+++ Generating	$@ (Gradle))@
+	$(NOECHO)cd @nfp(rakudo-runtime)@ && @nfp(../nqp/gradlew)@ --console=plain jar
 	$(NOECHO)$(CP) @nfp(rakudo-runtime/build/libs/rakudo-runtime.jar)@ $(RUNTIME_JAR)
 
 @bpm(RUN_RAKUDO_SCRIPT)@: @@nfp(@template(@backend_subdir@/rakudo-j-build.in)@)@@
