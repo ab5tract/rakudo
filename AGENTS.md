@@ -24,9 +24,6 @@ Session-start facts that keep getting relearned the hard way:
   without doing the `N x Xmx` vs free-RAM arithmetic.
 - **`java` must be Oracle GraalVM 25.2.4** (a plain JDK voids all perf
   numbers).
-- **`raku` is not on non-interactive PATHs.** The host `raku` comes from
-  rakubrew; every tool-shell command that needs it must start with
-  `eval "$(~/.rakubrew/bin/rakubrew init Zsh)"`.
 - **`make` rebuilds both runtime jars, order-only.** Edits under
   `nqp/src/vm/jvm/runtime/` regenerate
   `nqp/build/jvm/share/runtime/nqp-runtime.jar` via the nested Gradle
