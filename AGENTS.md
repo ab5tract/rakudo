@@ -48,3 +48,7 @@ Session-start facts that keep getting relearned the hard way:
   A bare print bakes into the stage jars, leaks into build output and
   TAP, and forces a rebuild to silence; the gated form ships harmlessly
   and turns on with the envvar when the hunt resumes.
+- **The in-tree runners have no installed module repo**: anything with a
+  `use` (Test included) needs `-Ilib` — `./rakudo-j -Ilib t/02-.../x.t`.
+  A "Bind check failed … INDIRECT_NAME_LOOKUP … not-found" cascade on a
+  file whose regexes are innocent is THIS, not a regex regression.
