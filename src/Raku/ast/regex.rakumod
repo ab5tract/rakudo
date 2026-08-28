@@ -389,6 +389,12 @@ class RakuAST::Regex::Sequence
     # fuse the pair into one literal. As separate atoms neither half matches the
     # combined grapheme. Mirrors the legacy frontend's handling in
     # QRegex::P6Regex::Actions.termish.
+    # The `\n` may arrive wrapped in WithWhitespace -- the wrapper records
+    # trailing whitespace, `/ \r\n /`, and under :s stands for the <.ws>
+    # AFTER the atom -- so it does not break the pair's source adjacency,
+    # and the fused literal keeps the wrapper so that <.ws> stays where it
+    # was. A WRAPPED `\r`, by contrast, is `\r \n` with the whitespace
+    # between the metachars, and stays unfused.
     method IMPL-FUSE-CRLF($terms) {
         my @fused;
         my int $i := 0;
@@ -398,17 +404,21 @@ class RakuAST::Regex::Sequence
             if $i + 1 < $n
               && nqp::istype($term, RakuAST::Regex::CharClass::CarriageReturn)
               && !$term.negated
-              && nqp::istype((my $next := nqp::atpos($terms, $i + 1)),
-                   RakuAST::Regex::CharClass::Newline)
-              && !$next.negated
             {
-                @fused.push(RakuAST::Regex::Literal.new("\r\n"));
-                $i := $i + 2;
+                my $next := nqp::atpos($terms, $i + 1);
+                my int $wrapped := nqp::istype($next, RakuAST::Regex::WithWhitespace);
+                my $atom := $wrapped ?? $next.regex !! $next;
+                if nqp::istype($atom, RakuAST::Regex::CharClass::Newline)
+                  && !$atom.negated
+                {
+                    my $lit := RakuAST::Regex::Literal.new("\r\n");
+                    @fused.push($wrapped ?? RakuAST::Regex::WithWhitespace.new($lit) !! $lit);
+                    $i := $i + 2;
+                    next;
+                }
             }
-            else {
-                @fused.push($term);
-                $i := $i + 1;
-            }
+            @fused.push($term);
+            $i := $i + 1;
         }
         @fused
     }
