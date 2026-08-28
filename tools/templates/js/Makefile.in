@@ -26,6 +26,10 @@
 
 @bsv(SPECIFIC_TEST_DIRS)@ = @nfp(t/11-js)@
 
+# The directory the Raku-facing VM support code lives under; still the
+# legacy Perl6/ name on this backend (jvm has migrated to Raku/).
+@bpv(RAKU_VM_DIR)@ = Perl6
+
 @include(Makefile-backend-common)@
 
 # files we create

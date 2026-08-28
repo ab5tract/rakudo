@@ -40,8 +40,12 @@ NQP_RUNTIME_JAR = @nfp(nqp/build/jvm/share/runtime/nqp-runtime.jar)@
 
 @bpv(BAT)@    = @runner_suffix@
 
+# The directory the Raku-facing VM support code lives under; this backend
+# has migrated it from the legacy Perl6/ name.
+@bpv(RAKU_VM_DIR)@ = Raku
+
 # This is addition to J_ALL_METAMODEL_SOURCES
-@bsv(METAMODEL_SOURCES)@ = @nfp(src/vm/jvm/Perl6/Metamodel/JavaHOW.nqp)@
+@bsv(METAMODEL_SOURCES)@ = @nfp(src/vm/jvm/Raku/Metamodel/JavaHOW.nqp)@
 
 @bpv(ALL_TARGETS)@ = eval-client.pl @bpm(DEBUG_RUNNER)@
 
@@ -56,7 +60,7 @@ NQP_RUNTIME_JAR = @nfp(nqp/build/jvm/share/runtime/nqp-runtime.jar)@
   perl6-j \
   perl6-debug-j
 
-@bpv(ML_EXTRA)@ = @nfp(src/vm/jvm/Perl6/JavaModuleLoader.nqp)@
+@bpv(ML_EXTRA)@ = @nfp(src/vm/jvm/Raku/JavaModuleLoader.nqp)@
 # NQP_RUNTIME_JAR sits after the | : order-only, GNU make syntax. The jar
 # must be fresh before any build JVM runs on it, but its rebuild (seconds)
 # must not timestamp-cascade into a full setting recompile (many minutes)
