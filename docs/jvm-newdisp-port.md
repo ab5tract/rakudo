@@ -187,14 +187,62 @@ state between eval-server runs.
   auto-close's as-is `oLexStatic` copy (vs frame.c
   create_context_only's resolve-from-SC patch loop) remains a latent
   divergence, unexercised by this test.
-- **Phase 5 -- upstream**: reduce and report the shared `callwith`
-  in-multi-sub and `nextwith` RakuAST resumption bugs; they reproduce on
-  MoarVM and belong to the frontend. Add to the list: a mainline lexical
-  captured by BEGIN-run code (the traited-variable pattern) is shared
-  with the phaser only if nothing reads it before the traited call --
-  one executed read first and the phaser's pushes go invisible, on
-  MoarVM as much as on the JVM, because the sharing rides on a lazy
-  shallow clone of the still-materializing master container.
+- **Phase 5 -- upstream**: reduce and report three RakuAST frontend
+  bugs. Outcome (2026-08-28, verified against upstream main 1386f7bbd
+  built for MoarVM in a worktree, both frontends, plus the rebased
+  branch JVM build):
+  1. `callwith` in a multi *sub* returns Nil on the JVM and lets an
+     escaped exception through on Moar (multi *methods* are fine).
+     NO LONGER REPRODUCES. A 24-shape matrix (no-next-candidate,
+     sibling/narrowing targets, nested blocks, named args, where
+     chains, wrap interplay, operators, capture args, class-body
+     multis) is identical across legacy, RakuAST-on-Moar (2026.07,
+     upstream main), and the branch JVM. Fixed somewhere in the
+     Phase 2-4 branch work and/or the 10 post-rebase upstream
+     commits; the original probe scripts died with the 2026-08-28
+     laptop restart, so the exact shape is unrecoverable -- but every
+     reconstruction passes everywhere. Nothing to file.
+  2. `nextwith` continuation semantics: same verdict, same matrix.
+     Nothing to file.
+  3. Filed as rakudo/rakudo#6600 (the order-dependence below,
+     reproduced on upstream main, both frontends). Two adjacent
+     findings while reducing it: (a) on 2026.07 RakuAST the same
+     program instead prints `[Rakudo::Internals::LoweredAwayLexical]`
+     -- already fixed on main by var-lowering's `'trait'` decline, so
+     nothing to file; (b) the branch's lex2local hardening
+     6ee685e16 (poison flatten-candidate frames whose signature
+     needs the binder) is latent-but-real upstream and went up as a
+     cherry-picked PR, rakudo/rakudo#6601 (verified on a moar build
+     of main + the pick: t/02-rakudo 265/266, the one failure an
+     uninstalled-tree artifact).
+     For the record, the reported bug: mainline/phaser container
+     sharing is first-toucher-order
+     dependent: a mainline lexical captured by BEGIN-run code (the
+     traited-variable pattern) is shared with the phaser only if
+     nothing reads it before the traited call, because the sharing
+     rides on a lazy shallow clone of the still-materializing master
+     container. Verified repro (fails: prints `[]`; delete the
+     marked line and it prints `[42]`):
+
+         my constant obs = class {};
+         my @seen;
+         multi sub trait_mod:<does>(Variable:D $v, obs) {
+             $v.block.add_phaser: 'LEAVE',
+                 $v.willdo: -> \var { @seen.push(var) };
+         }
+         sub f() { my $fh does obs = 42; }
+         my @x := @seen;   # any executed read here breaks the sharing
+         f();
+         say @seen.raku;
+
+     The read's form does not matter (interpolation, binding, a read
+     from a nested sub all fail identically); a read compiled in but
+     never executed is fine, and once the phaser pushes first, later
+     reads stay coherent (`[42]`, then `[42, 42]` after a second
+     call). Reduced 2026-08-27 from
+     t/02-rakudo/22-traited-variable-by-name.t via bisecting probe
+     scripts; the mechanism analysis lives in the Phase 4 entry
+     above.
 
 ## Timings
 
