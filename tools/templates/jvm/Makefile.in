@@ -2,6 +2,13 @@ JAVA    = java
 JAVAC   = javac
 JAR     = jar
 
+# The RakuAST frontend is the only supported one on this branch, and
+# src/main.nqp silently falls back to the legacy frontend when the switch
+# is missing from the environment. Export it so a bare `make` builds the
+# right compiler no matter how it was invoked. GNU make syntax, like the
+# rest of this backend's rules.
+export RAKUDO_RAKUAST = 1
+
 NQP_PREFIX  = @nqp_prefix@
 @bpv(NQP)@       = @shquot(@j_nqp@)@
 @bpv(NQP_BIN)@       = @nfp(@j_nqp@)@
