@@ -27,14 +27,15 @@ Session-start facts that keep getting relearned the hard way:
 - **`raku` is not on non-interactive PATHs.** The host `raku` comes from
   rakubrew; every tool-shell command that needs it must start with
   `eval "$(~/.rakubrew/bin/rakubrew init Zsh)"`.
-- **Rakudo's `make` does NOT rebuild the nqp JVM runtime.** Edits under
-  `nqp/src/vm/jvm/runtime/` silently keep the stale
-  `nqp/build/jvm/share/runtime/nqp-runtime.jar`; rebuild it with
-  `cd nqp && ./gradlew :nqp-runtime:jar syncRuntimeJars` (~5s). Rakudo's
-  own runtime does rebuild via `make rakudo-runtime.jar`. Check the jar
-  mtime moved, then restart any eval servers — they keep the old jar
-  loaded. TODO: teach the rakudo Makefile templates to run the gradlew
-  step themselves so `make` can't build against a stale runtime.
+- **`make` rebuilds both runtime jars, order-only.** Edits under
+  `nqp/src/vm/jvm/runtime/` regenerate
+  `nqp/build/jvm/share/runtime/nqp-runtime.jar` via the nested Gradle
+  wrapper (~5s) without cascading into a setting recompile — the jar is
+  an order-only prerequisite because bytecode does not depend on the
+  runtime that executes it. Standalone:
+  `cd nqp && ./gradlew :nqp-runtime:jar syncRuntimeJars`, or
+  `make rakudo-runtime.jar` for rakudo's own layer. Either way, restart
+  any eval servers afterwards — they keep the old jar loaded.
 - Long-form docs: `docs/jvm-eval-server.md` (server, sweep, memory
   post-mortem), `docs/jvm-newdisp-port.md` (dispatch port status, plan,
   timings).
