@@ -783,6 +783,42 @@ sub gen_nqp {
 
     return unless defined($gen_nqp) || defined($gen_moar);
 
+    # java-to-kotlin prototype: the jvm backend builds from the nested nqp
+    # checkout via Gradle (stage0 -> stage1 -> stage2, runtime, runner),
+    # never through the legacy clone + Configure.pl + make path below --
+    # an upstream nqp has no Truffle grammar engine and this branch cannot
+    # run on it. The checkout is a working tree on its own branch, so it
+    # must also never be moved to $nqp_want by git_checkout below.
+    if ( $need{jvm} ) {
+        my $nqp_dir = File::Spec->catdir( $startdir, 'nqp' );
+        my $gradlew = File::Spec->catfile( $nqp_dir, 'gradlew' );
+        $self->sorry( "The jvm backend needs the nested nqp checkout at"
+              . " $nqp_dir (with its Gradle wrapper), and $gradlew is not"
+              . " executable. An upstream nqp cannot replace it: it has no"
+              . " Truffle grammar engine." )
+          unless -x $gradlew;
+        my @gradle = ( $gradlew, '--console=plain' );
+        push @gradle, 'clean' if $force_rebuild;
+        push @gradle, 'buildJvm';
+        $self->msg(
+            "Building the nested nqp checkout (gradlew buildJvm) ...\n");
+        chdir($nqp_dir);
+        system_or_die(@gradle);
+        chdir($pwd);
+        my $bin =
+          File::Spec->catfile( $nqp_dir, 'nqp-j-gradle' . $config->{bat} );
+        my %c = read_config($bin);
+        $self->sorry( "gradlew buildJvm finished but $bin did not"
+              . " produce a usable configuration" )
+          unless %c;
+        $self->msg("Using the freshly built $bin\n");
+        $impls->{jvm}{bin} = $bin;
+        $self->backend_config( jvm => \%c );
+        $impls->{jvm}{ok} = 1;
+        delete $need{jvm};
+        return unless %need;
+    }
+
     {
         my $user = $options->{'github-user'} // 'Raku';
 
