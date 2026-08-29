@@ -2,9 +2,10 @@
 
 Session-start facts that keep getting relearned the hard way:
 
-- **`RAKUDO_RAKUAST=1` on every build, test, and run.** Nothing sets it for
-  you (not the Makefile, not the harness), and `src/main.nqp` silently falls
-  back to the legacy frontend without it. The legacy frontend
+- **`RAKUDO_RAKUAST=1` on every build, test, and run.** The generated
+  Makefile exports it into its own recipes (2026-08-29), but nothing sets
+  it for your own runs and test invocations, and `src/main.nqp` silently
+  falls back to the legacy frontend without it. The legacy frontend
   (`src/Perl6/`) is off limits — don't read it, reason from it, or measure
   against it.
 - **Long builds and test runs go through `tools/build/watched-run.raku`.**
@@ -17,15 +18,18 @@ Session-start facts that keep getting relearned the hard way:
           --show='Compiling|Generating' -- sh tools/build/jvm-build.sh jars
       raku tools/build/watched-run.raku -t=t/02-rakudo --jobs=5 -- ./rakudo-j
 
-- **Do NOT run `make` (2026-08-28, user instruction).** The rakudo build
-  runs through `tools/build/jvm-build.sh` — every command make would have
-  run, written down: `gen` refreshes gen/jvm after frontend edits, `jars`
-  rebuilds every jar and runner after an nqp rebuild, no argument does
-  both. The nqp side builds with `cd nqp && ./gradlew buildJvm` (add
-  `clean` first when `src/vm/jvm/QAST/*.nqp` changed — the stage graph
-  misses that edge). If the harness keeps stopping a heavy build task,
-  run it detached (`setsid nohup sh tools/build/jvm-build.sh jars
-  > build.log 2>&1 &`) and watch the log.
+- **`make` builds everything, nqp bootstrap included.**
+  `perl Configure.pl --backends=jvm --gen-nqp` builds the nested nqp
+  checkout in place via `gradlew buildJvm` (never git-moving it, never
+  cloning upstream — upstream nqp has no Truffle engine) and writes the
+  Makefile; a bare `make` then builds through to `rakudo-j`, exporting
+  RAKUDO_RAKUAST=1 into its recipes itself. `tools/build/jvm-build.sh`
+  stays as the same commands written down (`gen` / `jars` / both). The
+  nqp side alone: `cd nqp && ./gradlew buildJvm` (add `clean` first
+  when `src/vm/jvm/QAST/*.nqp` changed — the stage graph misses that
+  edge). If the harness keeps stopping a heavy build task, run it
+  detached (`setsid nohup raku tools/build/watched-run.raku
+  --log=build.log -- make > /dev/null 2>&1 &`) and watch the log.
 
 - **JVM test runs use the eval server** (`t/harness5 --jvm --evalserver`,
   ~20x faster than cold). Whole-suite sweeps:
