@@ -78,15 +78,26 @@ class RakuAST::Nqp
         # know which are which, but if we're writing out an `nqp::op`
         # just assume that they should all be unboxed; most situations
         # will see the dispatch op generated anyway.
+        #
+        # nqp::cas is the exception: it compares its expected argument
+        # against the container's contents by OBJECT IDENTITY, so the boxed
+        # constant is the semantics. Unboxing a literal here hands the
+        # backend a native value it re-boxes into a fresh box that can
+        # never be identical to anything stored, leaving the CAS dead --
+        # which turned ParallelSequence's consumed-guard into a hang on
+        # the JVM (second .iterator blocked in the pipeline instead of
+        # throwing X::Seq::Consumed).
         my int $i;
         my int $n := nqp::elems($call.list);
-        while $i < $n {
-            my $arg := $call[$i];
-            if nqp::istype($arg, QAST::Want)
-              && ($arg[1] eq 'Ss' || $arg[1] eq 'Ii') {
-                $call[$i] := $arg[2];
+        unless $!op eq 'cas' {
+            while $i < $n {
+                my $arg := $call[$i];
+                if nqp::istype($arg, QAST::Want)
+                  && ($arg[1] eq 'Ss' || $arg[1] eq 'Ii') {
+                    $call[$i] := $arg[2];
+                }
+                ++$i;
             }
-            ++$i;
         }
 
         if $!op eq 'handle' {
