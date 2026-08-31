@@ -107,3 +107,36 @@ full GC): 2.87GB → 455MB; SerializationContexts 436 → 59; a further 15
 files add ~15MB total. Residual growth is ~1MB/run, so the old
 ~30-file-per-server ceiling — and the sweep's aggressive
 chunk-replacement — are no longer load-bearing.
+
+## Post-mortem: two more ~200MB pins (fixed 2026-08-31, nqp 249159ecb)
+
+A single-server `make j-spectest` OOM'd its 8g heap 38 files in — the
+same shape as the shutdown-hook leak, chased the same way, except with
+`tools/build/hprof_extract.py` + `hprof_paths.py` (a jcmd heap dump,
+reference-graph extraction with weak referents excluded, backward BFS
+to GC roots) standing in for MAT. Two holders:
+
+- **`VMNullInstance`** — the process-wide null singleton borrowed its
+  STable from the first run's `gc.VMNull` type, pinning run 1's whole
+  universe in a static forever. It now builds a self-contained STable;
+  nothing looks through the null's STable (serializer and `isnull()`
+  go by identity).
+- **`TruffleGrammarEngine.STATES`** — weak keys, but the EngineState
+  values strongly hold pending captures, and a WeakHashMap only
+  expunges on access; between runs each finished run stayed reachable.
+  Cleared per run via `registerResettable`, like every other cache.
+
+`tools/build/evalserver-leak-check.sh` re-measures in one command: a
+healthy server holds exactly 2 GlobalContexts (its own + the last
+run's, released by the next run's resetAll) with live heap flat as
+rounds are added. After the fixes, the full 1306-file spectest runs on
+one 8g server — 73,273 tests, ~2h20m, RSS sawtoothing under the
+ceiling.
+
+The follow-up stall was not a leak: `nqp::cas` compares by object
+identity, and the RakuAST frontend was unboxing literal nqp-op
+arguments into fresh boxes, so ParallelSequence's consumed-guard never
+fired and a second `.iterator` hung in the hyper pipeline holding
+RUN_LOCK — one wedged file freezing the whole serialized suite. Fixed
+in the frontend (cas exempted from literal unboxing) and the setting
+(the guard now uses Bool singletons + eqaddr).
