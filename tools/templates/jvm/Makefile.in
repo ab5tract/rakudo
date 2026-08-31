@@ -78,6 +78,15 @@ NQP_RUNTIME_JAR = @nfp(nqp/build/jvm/share/runtime/nqp-runtime.jar)@
 
 @bpv(HARNESS_TYPE)@ = 5
 
+# One warm JVM for the whole harness run: --evalserver starts a single
+# rakudo-eval-server (8g heap by default, RAKUDO_EVALSERVER_HEAP to
+# override), routes every test file through eval-client, and keeps the
+# server alive until the harness exits -- no JVM boot and no re-JIT
+# between files, so Truffle compilation actually accumulates over a
+# spectest run. Runs serialize on the one server by design; parallel
+# pools are tools/build/evalserver-sweep.raku's business.
+@bpv(HARNESS5)@ = $(PERL5) @nfp(t/harness5)@ --@backend@ --evalserver
+
 @bsv(SPECIFIC_TEST_DIRS)@ = @nfp(t/03-jvm)@
 
 @include(Makefile-backend-common)@
