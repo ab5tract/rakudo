@@ -332,7 +332,16 @@ object RakOps {
          * binder reports is phrased against it. */
         val frame = tc.curFrame!!.caller ?: tc.curFrame!!
         val error = arrayOfNulls<Any>(3)
-        Binder.bind(tc, gcx, frame, params!!, capture.descriptor!!, capture.args, false, error)
+        val bindResult = Binder.bind(tc, gcx, frame, params!!, capture.descriptor!!, capture.args, false, error)
+        /* A Junction argument is not an error: the call autothreads, exactly
+         * as p6bindsig does for full-binder frames. Returning the result
+         * (rather than throwing) tells BindFailure.reportToHLL to make it
+         * the failed call's result. */
+        if (bindResult == Binder.BIND_RESULT_JUNCTION && gcx.AutoThreader != null) {
+            val csd = capture.descriptor!!.injectInvokee(tc, capture.args!!, code)
+            Ops.invokeDirect(tc, gcx.AutoThreader, csd, tc.flatArgs!!)
+            return Ops.result_o(tc.curFrame!!)
+        }
         if (error[0] is String)
             throw ExceptionHandling.dieInternal(tc, error[0] as String)
         if (error[0] != null)
