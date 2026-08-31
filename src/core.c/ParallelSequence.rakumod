@@ -11,7 +11,12 @@ my role ParallelSequence[::Joiner] does Iterable does Sequence {
 
 
     submethod BUILD(:$!configuration!, :$!work-stage-head!) {
+#?if moar
         $!has-iterator = 0;
+#?endif
+#?if !moar
+        $!has-iterator = False;
+#?endif
     }
 
     method iterator(::?CLASS:D: --> Iterator) {
@@ -20,7 +25,13 @@ my role ParallelSequence[::Joiner] does Iterable does Sequence {
             if nqp::cas_i($!has-iterator, 0, 1);
 #?endif
 #?if !moar
-            if nqp::cas($!has-iterator, 0, 1);
+            # nqp::cas compares by object identity, so the witnesses must
+            # be singletons the compiler cannot re-box: the Bool enum
+            # values are; a bare integer literal is whichever box the
+            # frontend chose to emit. With boxed 0 this guard sat dead and
+            # a second .iterator hung in the hyper pipeline instead of
+            # throwing (t/spec/S03-metaops/hyper.t, on the JVM).
+            if nqp::eqaddr(nqp::cas($!has-iterator, False, True), True);
 #?endif
         my $joiner := Joiner.new:
                         source => $!work-stage-head;
