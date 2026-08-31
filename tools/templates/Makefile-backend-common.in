@@ -121,7 +121,9 @@
   @bpm(NQP_VERSION_FILE)@ \
   @bpm(CLEANUPS)@
 
+@make_pp_pfx@ifndef @bpv(HARNESS5)@
 @bpv(HARNESS5)@ = $(PERL5) @nfp(t/harness5)@ --@backend@
+@make_pp_pfx@endif
 @bpv(HARNESS5_WITH_FUDGE)@ = @bpm(HARNESS5)@ --fudge --keep-exit-code
 @make_pp_pfx@ifndef @bpv(HARNESS_TYPE)@
 @bpv(HARNESS_TYPE)@ = $(HARNESS_TYPE)
