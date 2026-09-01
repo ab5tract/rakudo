@@ -31,6 +31,18 @@ Session-start facts that keep getting relearned the hard way:
   detached (`setsid nohup raku tools/build/watched-run.raku
   --log=build.log -- make > /dev/null 2>&1 &`) and watch the log.
 
+- **A Java heap OOM is a symptom, never a heap-size request.** Raising
+  `-Xmx` past what MemAvailable backs summons the kernel OOM killer,
+  which shoots the terminal's whole cgroup — session included (this
+  killed a session on 2026-09-01: a 24G heap on the 30G swapless box).
+  Find what actually grew (`-XX:+HeapDumpOnOutOfMemoryError`, then
+  `tools/build/hprof_extract.py`); if a bigger heap is genuinely needed,
+  cage the build in its own cgroup first:
+  `systemd-run --user --scope -p MemoryMax=<n>G -- <build command>` —
+  then the kernel kills the build, not the session. The 2026-09-01 case
+  was the RakuAST tree compiled as ONE ~500k-instruction BEGIN mainline
+  (AutosplitMethodWriter and ASM both keep per-instruction frame
+  tables); `tools/build/raku-ast-compiler.nqp` now chunks it.
 - **JVM test runs use the eval server** (`t/harness5 --jvm --evalserver`,
   ~20x faster than cold). Whole-suite sweeps:
   `raku tools/build/evalserver-sweep.raku t/01-sanity ...` — it budgets
