@@ -145,7 +145,12 @@ else {
 my $postamble = $^O eq 'MSWin32' ? ' %*' : ' "$@"';
 
 sub install {
-    my ($name, $command) = @_;
+    my ($name, $command, $guard) = @_;
+
+    # A guard is shell that runs before the exec (Unix only; the Windows
+    # preamble is a bare '@' and has nothing to guard with).
+    my $pre = $preamble;
+    $pre =~ s/exec $/$guard\nexec / if defined $guard && $^O ne 'MSWin32';
 
     my $install_to = $destdir
         ? File::Spec->catfile($destdir, $bindir, "$name$bat")
@@ -153,7 +158,7 @@ sub install {
 
     #print "Creating '$install_to'\n";
     open my $fh, ">", $install_to or die "open: $!";
-    print $fh $preamble, $command, $postamble, "\n" or die "print: $!";
+    print $fh $pre, $command, $postamble, "\n" or die "print: $!";
     close $fh or die "close: $!";
 
     chmod 0755, $install_to if $^O ne 'MSWin32';
@@ -223,8 +228,59 @@ else {
     # machine's memory between them, and only the pool runner knows how many
     # of them there are.
     my $esheap = $^O eq 'MSWin32' ? '8g' : '${RAKUDO_EVALSERVER_HEAP:=8g}';
-    install "rakudo-eval-server", "java -Xmx$esheap $jopts org.raku.nqp.tools.EvalServer";
-    install "perl6-eval-server", "java -Xmx$esheap $jopts org.raku.nqp.tools.EvalServer";
+
+    # The memory guard. Several servers at once have twice taken this
+    # machine down (2026-08-31, 2026-09-02): the kernel OOM killer fires
+    # late on a swapless box, picks the biggest JVM, and the terminal's
+    # whole cgroup goes with it. Advice in docs did not prevent the second
+    # time, so the arithmetic lives here, where every launcher passes:
+    #
+    #  - refuse to start when this server's ceiling plus the room every
+    #    live server can still grow into does not fit in MemAvailable;
+    #  - run the JVM in its own systemd scope capped at that ceiling, so a
+    #    runaway is killed by itself and nothing else is.
+    #
+    # A server's ceiling is its heap plus ~2g the JVM keeps outside it
+    # (512m thread stacks, metaspace, Truffle code cache): the server shot
+    # on 2026-09-02 held 8.7g against an 8g heap. systemd-run --scope
+    # execs the command in place, so the pid a caller gets is java's own
+    # and pipes/kills behave exactly as before.
+    my $guard = <<'GUARD';
+
+# Memory guard: see the comment above the eval-server runners in
+# tools/build/create-jvm-runner.pl. Do not bypass it -- lower
+# RAKUDO_EVALSERVER_HEAP or stop a server instead.
+heap="${RAKUDO_EVALSERVER_HEAP:=8g}"
+mb_of() { case "$1" in *[gG]) echo $(( ${1%[gG]} * 1024 )) ;; *[mM]) echo "${1%[mM]}" ;; *[kK]) echo $(( ${1%[kK]} / 1024 )) ;; *) echo $(( $1 / 1048576 )) ;; esac; }
+OVERHEAD_MB=2048
+need=$(( $(mb_of "$heap") + OVERHEAD_MB ))
+if [ -r /proc/meminfo ]; then
+    avail=$(awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo)
+    live=0; grow=0
+    for pid in $(pgrep -f 'org\.raku\.nqp\.tools\.EvalServer' 2>/dev/null); do
+        xmx=$(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null | sed -n 's/.*-Xmx\([0-9]*[gGmMkK]\{0,1\}\) .*/\1/p')
+        [ -n "$xmx" ] || continue
+        rss=$(awk '/^VmRSS:/ { print int($2 / 1024) }' /proc/$pid/status 2>/dev/null)
+        room=$(( $(mb_of "$xmx") + OVERHEAD_MB - ${rss:-0} ))
+        [ "$room" -gt 0 ] && grow=$(( grow + room ))
+        live=$(( live + 1 ))
+    done
+    if [ $(( need + grow )) -gt "$avail" ]; then
+        echo "rakudo-eval-server: REFUSING to start." >&2
+        echo "  this server may grow to ${need}m (heap $heap + ${OVERHEAD_MB}m off-heap)," >&2
+        echo "  the $live live server(s) may still grow by ${grow}m, MemAvailable is ${avail}m." >&2
+        echo "  Stop a server or set RAKUDO_EVALSERVER_HEAP lower. Do not work around this check." >&2
+        exit 75
+    fi
+fi
+cage=""
+if command -v systemd-run >/dev/null 2>&1 && systemd-run --user --scope --quiet -- true >/dev/null 2>&1; then
+    cage="systemd-run --user --scope --quiet -p MemoryMax=${need}M --"
+fi
+GUARD
+    my $caged = $^O eq 'MSWin32' ? '' : '$cage ';
+    install "rakudo-eval-server", "${caged}java -Xmx$esheap $jopts org.raku.nqp.tools.EvalServer", $guard;
+    install "perl6-eval-server", "${caged}java -Xmx$esheap $jopts org.raku.nqp.tools.EvalServer", $guard;
 }
 
 # vim: expandtab sw=4
