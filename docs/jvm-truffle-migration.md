@@ -132,6 +132,43 @@ bytecode; cold `-e` regression bounded (<2x).
 `ControlFlowException`s; continuations/`resume` on materialized
 frames. Gate: S17/S04 roast sections green on Truffle.
 
+Design (2026-09-01, after surveying both worlds — note the rx engine
+turned out to carry NO ControlFlowException precedent; its backtracking
+is explicit data (choice-point stacks), and the plan's earlier claim was
+design intent, not code):
+
+- *Handlers/unwind (part A).* Reuse the bytecode world's machinery
+  wholesale rather than inventing an engine-private protocol: an engine
+  block's `handle`/`handlepayload` registers the same
+  `[id, outer, category, kind(, lexidx)]` rows in
+  `StaticCodeInfo.handlers` (the engine's `CallFrame` is fully live as
+  frame arg `ARG_CF`, so `ExceptionHandling.handlerDynamic`'s walk works
+  unmodified), delimits regions by setting `cf.curHandler` from new
+  engine ops, and catches `UnwindException` with the Bytecode DSL's
+  `beginTryCatch`, checking `unwindTarget == cf` and honoring
+  `exitAfterUnwind` exactly as `Compiler.nqp`'s emitted catch does.
+  A callee's `last` then finds the engine frame's NEXT/REDO/LAST rows
+  through the same dynamic walk, and the UnwindException propagates
+  through the dispatch's Java frames into the engine's TryCatch. Loops
+  with handlers stop bailing at that point.
+- *Continuations (part B).* `enableYield = true` on the DSL spec. Every
+  dispatch site becomes a suspension point: `DispatchOp` catches
+  `SaveStackException` and returns a suspend token; the program yields
+  the token; `codeRun`'s wrapper sees the `ContinuationResult`, does
+  `sse.pushFrame(resume-handle, [continuation, cf, callsite-type], cf)`
+  and rethrows — the engine frame now participates in the standard
+  `ResumeStatus` chain. On resume, the handle re-enters: run
+  `resumeNextSave()` (deeper frames first, per the bytecode saver
+  contract; a re-suspension there pushes our frame again), read the
+  callee's result off the `CallFrame` return register by the site's
+  static type, and `continuation.resume(result)` — the yield expression
+  evaluates to the dispatch result and the program continues. The LOUD
+  refusal in `NqpCodeEngine.run` is then replaced by this participation.
+  `continuationreset/control/invoke` themselves stay bytecode-side
+  (blocks containing them keep bailing); what must participate is the
+  frame *between* reset and control, which is exactly the gather-body
+  mainline shape that refuses today.
+
 **Phase 4 — Precompiled modules, then the setting.** Serialize
 programs into jars beside (then instead of) bytecode; the setting
 last, leaf modules first. Gate at each step: full spectest on one warm
@@ -223,6 +260,21 @@ regenerated for the first time since the engine went feature-complete.
 Fixed in nqp 9202acdd2 with an init-time opcode-distinctness check;
 `.DELETE_ON_ERROR` added to the Makefile so a failed recipe cannot
 leave a fresh-looking partial target again.
+
+Found by the first post-rebase build (2026-09-01): upstream's RakuAST
+growth pushed gen/jvm/ast.nqp's single whole-tree BEGIN block to a
+~500k-instruction mainline, and compiling it OOM'd a 14GB heap —
+AutosplitMethodWriter keeps a Frame (a String[] of nlocal+stack slots)
+per instruction, and ASM's COMPUTE_FRAMES adds its own per-label
+tables; the heap dump showed ~513k autosplit Frames, 1.76M asm Edges,
+1M Labels. Fixed in tools/build/raku-ast-compiler.nqp: one BEGIN block
+per 16 packages (identical semantics — BEGIN blocks run in parse
+order, the prologue subs are lexical to each block), dropping the
+compile to ~1.6GB RSS. One more entry for Phase 5's ledger: the whole
+failure class is jast2bc-sized, and Truffle programs are data. (The
+sibling lesson — the retry with a 24G heap on the 30G swapless box got
+the SESSION shot by the kernel OOM killer — is written into AGENTS.md:
+cage heavy builds with systemd-run --scope -p MemoryMax.)
 
 ## Lessons already paid for (write them into the code)
 
