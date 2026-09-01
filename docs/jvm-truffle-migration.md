@@ -1,7 +1,7 @@
 # Migrating general code from JVM bytecode to Truffle
 
-Status: DRAFT, execution begun 2026-09-01 (Phase 0 baselines recorded,
-Phase 1 op census below). The grammar engine already made this journey
+Status: Phase 1 DONE 2026-09-01 (skeleton live, survey landed, coverage
+measured -- results below). The grammar engine already made this journey
 for regexes; this plan generalizes that playbook to all code.
 
 ## Why, and why we believe it
@@ -66,16 +66,25 @@ below is a measurement for exactly this reason.
 **Phase 0 — Baselines (DONE, this doc).** See table below. Every
 later gate is "beats or holds these".
 
-**Phase 1 — Encoder + interpreter skeleton.** Bytecode-DSL root node
-with the op set from the census below (~40 ops covers typical user
-code); encoder with bail-reasons; coverage REPORTING before coverage
-(a probe that says what % of each compile would encode, and the top
-bail reasons). Gate: coverage numbers over roast + CORE, no behavior
-change (nothing runs on Truffle yet).
+**Phase 1 — Encoder + interpreter skeleton. DONE 2026-09-01.**
+Bytecode-DSL root node with the op set from the census below (~40 ops
+covers typical user code); encoder with bail-reasons; coverage
+REPORTING before coverage (a probe that says what % of each compile
+would encode, and the top bail reasons). Gate: coverage numbers over
+roast + CORE, no behavior change (nothing runs on Truffle yet).
+  - Delivered as: `QtLanguage`/`QtRootNode`/`QtCheck` in nqp-truffle
+    (nqp d316956ff -- `gradlew qtcheck` proves both tiers and a
+    serialize/deserialize round trip on the Oracle GraalVM runtime),
+    and `QAST::QtEncoder` at the CompUnit decision point (nqp
+    76b87c2d2 -- `NQP_QT_REPORT`/`NQP_QT_SURVEY` report,
+    `NQP_QT_ALSO`/`NQP_QT_NO` re-measure per run). Results in the
+    "Phase 1 results" section below.
   - NOTE (scheduling): touching `src/vm/jvm/QAST/*.nqp` rebuilds
     stage2, which invalidates every rakudo jar ("Missing or wrong
     version of dependency"); each iteration costs
-    `gradlew buildJvm` + `make j-clean && make` (~12 min). Batch the
+    `gradlew clean buildJvm` + `make j-clean && make` (~12 min; the
+    `clean` is not optional -- NQPP5QRegex only rebuilds via its own
+    task and goes stale against a fresh NQPHLL without it). Batch the
     encoder work accordingly.
 
 **Phase 2 — Runtime-compiled code first.** EVAL, `-e`, REPL blocks run
@@ -129,6 +138,56 @@ Node kinds: Op 7125, Var 4277, WVal 3786, Stmts 1761, SVal 1431,
 Want 1225, Stmt 1153, IVal 552, BVal 348, Block 342, Regex 98.
 Regenerate: `rakudo-j --target=qast FILE | grep -oE 'QAST::Op\([a-z0-9_]+'
 | sort | uniq -c | sort -rn`.
+
+## Phase 1 results (2026-09-01)
+
+Coverage of the committed first-tranche op set (the census heads plus
+the structural/primitive/rakudo ops that travel with them; the list
+lives in `QAST::QtEncoder`), measured with `NQP_QT_REPORT=1`:
+
+- **CORE.c, whole compile**: 490 CUs, 22,044 blocks, **7,496 (34.0%)
+  encodable**; 1,141,862 nodes, 12.8% in encodable blocks. The
+  mainline unit alone: 19,343 blocks, 34.1%.
+- **Spec-test corpus** (compile of the file's own code): mixhash.t
+  24.6% of 150 blocks, for.t 38.8% of 126, split.t 74.8% of 211 and
+  52.4% of 82.
+
+Top bail tags over CORE.c (blocks blocked / blocked by this alone):
+
+    10466/632  node:QAST::ParamTypeCheck    3244/1  op:getcodeobj
+     8666/63   op:p6decontrv                3239/0  op:curcode
+     5394/50   op:bindcomplete              2785/0  op:p6typecheckrv
+     1840/190  op:dispatch                  1809/181 var:lexicalref
+     1389/0    op:assign_i                   816/17  op:stmts
+      770/52   var:attributeref              701/215 op:p6callmethodhow
+      681/0    op:handlepayload              680/0   op:lastexpayload
+
+The reading: **the routine calling convention is the whole game.** The
+six head tags are one family -- signature binding (ParamTypeCheck,
+bindcomplete), return conventions (p6decontrv, p6typecheckrv), and the
+prelude (getcodeobj, curcode) -- and their low "sole" counts mean they
+cluster in the same blocks: covering any one buys little, covering the
+family buys the block. Measured directly (`NQP_QT_ALSO` with the family
+plus op:dispatch and op:stmts): coverage goes 34.0% -> **67.8%**
+of CORE.c blocks (nodes in encodable blocks 12.8% -> 50.2%). That family is therefore Phase 2's op set, and it is
+also the semantically deep end -- binding and return checking sit
+exactly where the ControlFlowException design (Phase 3) and the Binder
+interop shim meet. The exception family (handle/handlepayload/
+lastexpayload/exception, ~700 blocks each) is Phase 3 as planned.
+op:time and op:stmts are freebies for the committed list.
+
+The survey's own cost is noise: CORE.c parse 159.8s with the knob on
+vs the 161.2s Phase 0 baseline, and the walk only runs when a knob
+asks for it.
+
+Found by this phase's first `make j-clean` build (recorded here
+because the migration inherits the acceptance test): the rx engine's
+LOOP_SPLIT opcode collided with POS_EQ_REG (both 30), breaking every
+conjunction and `<?before>` -- invisible until gen/jvm/ast.nqp was
+regenerated for the first time since the engine went feature-complete.
+Fixed in nqp 9202acdd2 with an init-time opcode-distinctness check;
+`.DELETE_ON_ERROR` added to the Makefile so a failed recipe cannot
+leave a fresh-looking partial target again.
 
 ## Lessons already paid for (write them into the code)
 
