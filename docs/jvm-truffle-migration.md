@@ -132,6 +132,39 @@ bytecode; cold `-e` regression bounded (<2x).
 `ControlFlowException`s; continuations/`resume` on materialized
 frames. Gate: S17/S04 roast sections green on Truffle.
 
+**Status: COMPLETE 2026-09-01** (nqp 026ecccb5, 9946a5fce, 4359fc76a).
+All three pillars landed the same day:
+
+- *Loops + control* (026ecccb5): while/until with last/next/redo
+  handlers and the `control` op run on-engine, riding the bytecode
+  world's own rows/curHandler/UnwindException machinery through the
+  DSL's TryCatch (NqpUnwind carries the host unwind past the dispatch
+  loop's host-exception rethrow; REDO is a flag-driven inner loop).
+- *handle/handlepayload* (9946a5fce): try/CATCH/CONTROL and the RETURN
+  road encode; the encoder synthesizes the bytecode path's dispatcher
+  closure verbatim and mirrors its region nesting, host-error
+  conversion (NqpHostError → dieInternal), exitAfterUnwind included.
+  The deep fix underneath: engine lexical ops anchor at the program's
+  own CallFrame, never tc.curFrame — the postlude-dieInternal wart
+  leaves tc.curFrame stale in ways bytecode never observes.
+- *Continuations* (4359fc76a): the LOUD refusal became participation.
+  Every dispatch and table-op site yields a suspend token on
+  SaveStackException (enableYield); codeRun turns the yield into a
+  ResumeStatus.Frame; the resume handle follows the bytecode saver
+  contract (deeper frames first, typed result off the return registers,
+  exceptions injected through the yield so handler regions see them at
+  the suspension point).
+
+Gate results: the FULL nqp suite green on-engine (12,069 tests,
+t/nqp/112-continuations.t included). t/01+t/02 match the bytecode
+baseline except one documented backtrace-line assertion
+(try-statement-backtrace-frame.t — per-node source sections are future
+work). S04+S17 roast (the 170 curated spectest files): 137 files /
+2,854 tests run on-engine with the only failing file
+(S04-phasers/enter-leave, test 35) failing identically engine-off —
+parity, not regression. Warm 3M int-loop: engine ~1ms once PE folds the
+loop vs bytecode's steady ~12ms; cold -e at parity.
+
 Design (2026-09-01, after surveying both worlds — note the rx engine
 turned out to carry NO ControlFlowException precedent; its backtracking
 is explicit data (choice-point stacks), and the plan's earlier claim was
