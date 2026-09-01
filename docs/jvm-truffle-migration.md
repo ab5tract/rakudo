@@ -1,8 +1,9 @@
 # Migrating general code from JVM bytecode to Truffle
 
-Status: Phase 1 DONE 2026-09-01 (skeleton live, survey landed, coverage
-measured -- results below). The grammar engine already made this journey
-for regexes; this plan generalizes that playbook to all code.
+Status: Phase 2 landed 2026-09-01 -- runtime-compiled blocks run on the
+engine behind NQP_CODE_RUN=1; gates and the two documented exclusions
+below. The grammar engine already made this journey for regexes; this
+plan generalizes that playbook to all code.
 
 ## Why, and why we believe it
 
@@ -87,11 +88,45 @@ roast + CORE, no behavior change (nothing runs on Truffle yet).
     task and goes stale against a fresh NQPHLL without it). Batch the
     encoder work accordingly.
 
-**Phase 2 — Runtime-compiled code first.** EVAL, `-e`, REPL blocks run
-on Truffle when fully encodable; everything else stays bytecode. No
-serialization needed, trivial A/B (`NQP_CODE_ONLY`). Gate: t/01-sanity +
-t/02-rakudo green both ways; warm micro-suite ≥ bytecode; cold `-e`
-regression bounded (<2x).
+**Phase 2 — Runtime-compiled code first. LANDED 2026-09-01.** EVAL,
+`-e`, REPL blocks run on Truffle when fully encodable; everything else
+stays bytecode. No serialization needed, trivial A/B (`NQP_CODE_ONLY`).
+Gate: t/01-sanity + t/02-rakudo green both ways; warm micro-suite ≥
+bytecode; cold `-e` regression bounded (<2x).
+  - Delivered: `QAST::TruffleEncoder.encode_block` at the block decision
+    point (runtime units only), emitting the nqpp wire form NqpWire.java
+    mirrors; the emitted method body is one `CodeEngines.codeRun` call
+    (the GrammarEngine classloader bridge, reused); NqpProgramBuilder
+    drives the Bytecode DSL builder; params (arity, optionals, slurpies,
+    named rejection, param tasks) bind in-program; calls take
+    lang-call/lang-meth-call through `Dispatch.dispatchUncached` with
+    naturally-typed, positionals-first captures; results return typed.
+    Knobs: NQP_CODE_RUN (master), ENCODED/BAIL, SKIP/SKIP_ANON/ONLY,
+    LEAF, NQP_CODE_TRACE at run time.
+  - Gate results: t/01-sanity 303/303 both ways. t/02-rakudo: engine-on
+    matches the engine-off baseline except two documented classes:
+    (1) files whose closures are captured in continuations
+    (gather/take, lazy sequences) die to the engine's LOUD refusal --
+    an engine frame has no resume machinery, and a silent replay would
+    drop the block's work; Phase 3's materialized-frame/enableYield work
+    owns this, and the refusal names the block so NQP_CODE_SKIP can
+    bisect. (2) backtrace line numbers inside an engine-run block
+    report the block, not the statement (no per-node source sections
+    yet) -- try-statement-backtrace-frame.t asserts exact lines.
+    Cold `-e`: 4206ms engine vs 4244ms bytecode -- no regression at
+    all, gate bound was 2x. Warm 3M-iteration int-loop micro: 26ms
+    engine vs 28ms bytecode -- the engine BEATS the bytecode path once
+    Want selection picks the native variants; every gate holds. (The
+    first measurement was 69ms: the typed-want fix that repaired enum
+    composition also unboxed the loop.)
+  - Semantics mirrored the hard way (each was a wrong answer first):
+    resultchild on Stmt/Stmts (topicalization restores $_ after the
+    real result); void-context variable reads compile to NOTHING
+    (an emitted read clones a contvar early and severs lazyviv
+    first-toucher sharing); param declarations carry emit_param_tasks
+    children; loops without :nohandler stay on bytecode (an engine
+    frame registers no unwind handlers, and a callee's `last` would
+    silently target an outer loop).
 
 **Phase 3 — Control flow + resume.** Unwind/labels/handlers as
 `ControlFlowException`s; continuations/`resume` on materialized
