@@ -45,8 +45,8 @@ below is a measurement for exactly this reason.
   per code object, at the same decision point in
   `src/vm/jvm/QAST/Compiler.nqp`. Coverage is a compile-time decision
   with a loud `bail()` reason, exactly like `QAST::RxDescriptor`, plus
-  the same bisection knobs (`NQP_QT_SKIP`, `NQP_QT_SKIP_ANON`,
-  `NQP_QT_ONLY`, `NQP_QT_ENCODED`) — those knobs found real engine
+  the same bisection knobs (`NQP_CODE_SKIP`, `NQP_CODE_SKIP_ANON`,
+  `NQP_CODE_ONLY`, `NQP_CODE_ENCODED`) — those knobs found real engine
   bugs and will again.
 - **Frames**: lexicals map to Truffle `FrameDescriptor` slots;
   `CallFrame` stays as a materialized shim for interop (the
@@ -72,12 +72,12 @@ covers typical user code); encoder with bail-reasons; coverage
 REPORTING before coverage (a probe that says what % of each compile
 would encode, and the top bail reasons). Gate: coverage numbers over
 roast + CORE, no behavior change (nothing runs on Truffle yet).
-  - Delivered as: `QtLanguage`/`QtRootNode`/`QtCheck` in nqp-truffle
-    (nqp d316956ff -- `gradlew qtcheck` proves both tiers and a
+  - Delivered as: `NqpLanguage`/`NqpRootNode`/`NqpCheck` in nqp-truffle
+    (nqp d316956ff -- `gradlew nqpcheck` proves both tiers and a
     serialize/deserialize round trip on the Oracle GraalVM runtime),
-    and `QAST::QtEncoder` at the CompUnit decision point (nqp
-    76b87c2d2 -- `NQP_QT_REPORT`/`NQP_QT_SURVEY` report,
-    `NQP_QT_ALSO`/`NQP_QT_NO` re-measure per run). Results in the
+    and `QAST::TruffleEncoder` at the CompUnit decision point (nqp
+    76b87c2d2 -- `NQP_CODE_REPORT`/`NQP_CODE_SURVEY` report,
+    `NQP_CODE_ALSO`/`NQP_CODE_NO` re-measure per run). Results in the
     "Phase 1 results" section below.
   - NOTE (scheduling): touching `src/vm/jvm/QAST/*.nqp` rebuilds
     stage2, which invalidates every rakudo jar ("Missing or wrong
@@ -89,7 +89,7 @@ roast + CORE, no behavior change (nothing runs on Truffle yet).
 
 **Phase 2 — Runtime-compiled code first.** EVAL, `-e`, REPL blocks run
 on Truffle when fully encodable; everything else stays bytecode. No
-serialization needed, trivial A/B (`NQP_QT_ONLY`). Gate: t/01-sanity +
+serialization needed, trivial A/B (`NQP_CODE_ONLY`). Gate: t/01-sanity +
 t/02-rakudo green both ways; warm micro-suite ≥ bytecode; cold `-e`
 regression bounded (<2x).
 
@@ -143,7 +143,7 @@ Regenerate: `rakudo-j --target=qast FILE | grep -oE 'QAST::Op\([a-z0-9_]+'
 
 Coverage of the committed first-tranche op set (the census heads plus
 the structural/primitive/rakudo ops that travel with them; the list
-lives in `QAST::QtEncoder`), measured with `NQP_QT_REPORT=1`:
+lives in `QAST::TruffleEncoder`), measured with `NQP_CODE_REPORT=1`:
 
 - **CORE.c, whole compile**: 490 CUs, 22,044 blocks, **7,496 (34.0%)
   encodable**; 1,141,862 nodes, 12.8% in encodable blocks. The
@@ -167,7 +167,7 @@ six head tags are one family -- signature binding (ParamTypeCheck,
 bindcomplete), return conventions (p6decontrv, p6typecheckrv), and the
 prelude (getcodeobj, curcode) -- and their low "sole" counts mean they
 cluster in the same blocks: covering any one buys little, covering the
-family buys the block. Measured directly (`NQP_QT_ALSO` with the family
+family buys the block. Measured directly (`NQP_CODE_ALSO` with the family
 plus op:dispatch and op:stmts): coverage goes 34.0% -> **67.8%**
 of CORE.c blocks (nodes in encodable blocks 12.8% -> 50.2%). That family is therefore Phase 2's op set, and it is
 also the semantically deep end -- binding and return checking sit
