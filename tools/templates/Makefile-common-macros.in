@@ -1,5 +1,12 @@
 # Copyright (C) 2015 The Perl Foundation
 
+# A recipe that dies must not leave its target behind looking fresh:
+# several recipes build via shell redirection (`... > $@`), and a
+# failure leaves a partial or empty file that the next run trusts
+# (a 0-byte gen/jvm/ast.nqp turned into "Cannot find RakuAST nodes"
+# three targets later).
+.DELETE_ON_ERROR:
+
 @if(silent_build==on @make_pp_pfx@ifdef VERBOSE_BUILD
 NOECHO = 
 VERBOSE = -v
