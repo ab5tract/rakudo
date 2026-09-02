@@ -1,0 +1,8 @@
+S32-io/out-buffering.t
+S17-procasync/bind-handles.t
+S17-procasync/basic.t
+S17-procasync/kill.t
+S17-procasync/exit.t
+S17-procasync/print.t
+S17-procasync/stress.t
+S17-procasync/many-processes-no-close-stdin.t
