@@ -209,6 +209,125 @@ server, wall time and the leak signature (2 live GlobalContexts after
 GC — the eval-server discipline applies to every Truffle cache: no
 static may hold run-owned objects, thrice-learned).
 
+**Status: landed 2026-09-02** (nqp 7364c91e1, 32e29b60a, 3accf527f).
+The serialization story turned out to be the rx descriptor's, almost
+verbatim — the audit found the wire format already stable across a jar
+round trip (WVals as (SC handle, index) resolved through Ops.wval at
+run time; nested blocks as qbids against the frame's own CompilationUnit;
+static lexical values riding %*BLOCK_LEX_VALUES identically either way) —
+so the phase was one gate plus what turning it loose exposed:
+
+- *The gate* (7364c91e1): with `NQP_CODE_PRECOMP=1` at compile time
+  (NQP_CODE_RUN=1 still the master; default builds unchanged),
+  comp-mode units take the same codeRun road as runtime units, and the
+  jar runs its encoded blocks with no knob set at run time. The build
+  applies the knobs selectively: the ten compiler modules
+  (SysConfig/ModuleLoader/Ops/Metamodel/World/Pod/Compiler/Optimizer,
+  Raku Grammar/Actions), the three BOOTSTRAP jars, the three settings.
+- *Thread access* (7364c91e1): the first threaded test over
+  engine-carrying precompiled modules found that neither Truffle
+  language overrode isThreadAccessAllowed — programs compile lazily on
+  whichever thread first runs a block, routinely a worker thread once
+  modules are precompiled. Both languages allow shared access now (no
+  mutable context state; matcher call targets were always shared).
+- *Typed value slots* (32e29b60a): the first engine-carrying BOOTSTRAP
+  broke a three-line shape the whole nqp suite never exercises — a
+  block mixing `return` with a native-int fall-through result. The
+  handle/handlepayload encodings demanded T_OBJ through encode_node,
+  which never coerces; StoreRet then cast the raw long. encode_child
+  boxes on the way in — and fixing that exposed encode_child's own
+  latent bug: its coercion splice moved recorded nested-block qbid
+  slots without shifting them (patch_params always shifted for its
+  splice; now both do).
+- *The sidecar* (3accf527f): CORE.c with the knobs on overflowed the
+  classfile constant pool — 71,010 entries against 65,535 — the wall
+  the HTML-entity table had already mapped. Engine programs of a
+  jar-bound unit now travel as one `<class>.codeprograms.lz4` sidecar
+  beside `.serialized.lz4` (joined length-prefixed, lengths in Java
+  chars, which nqp::chars agrees with on this backend); emitted bodies
+  push an index and call CodeEngines.codeRunIdx, which reads the table
+  lazily off the CompilationUnit — strings only, nothing run-owned to
+  pin. Runtime-compiled units keep the string road.
+
+Operational lesson re-paid during the climb: after stage/BOOTSTRAP
+rebuilds, stale `lib/.precomp` entries deserialize into NPEs and
+what look like brand-new engine bugs (two t/02 files "regressed" that
+way); rm -rf the .precomp dirs before believing a failure.
+
+**What the first race/hyper workload over an engine-carrying setting
+found (2026-09-02, nqp f7ba5ab73, 9467d57b3):** four distinct defects,
+peeled in order of visibility, each masked by the one above it:
+
+1. *Descriptor skew.* `Dispatch.descriptorFor` trusted tc.curFrame to
+   name the unit whose callsite table csIdx indexes; the frame register
+   is stale after the dieInternal-in-the-catch-arm wart and around
+   continuation traffic. Descriptor tables now resolve from the
+   emitting class (indy bootstrap curries its lookup class; dispatchWide
+   grew a trailing-Class overload; a ClassValue caches the per-class
+   table -- CallSiteDescriptor is pure shape, nothing run-owned).
+2. *Frames left in continuations.* resumeEngine dropped tc.curFrame on
+   both re-suspension paths where a bytecode frame leaves through its
+   postlude; it leaves now.
+3. *Recording on every engine dispatch.* Engine DISPATCH instructions
+   were dispatchUncached -- a recording per call, where bytecode replays
+   settled per-instruction programs. The per-instruction constant now
+   carries a DispatchCallSite beside the descriptor (NqpOps.EngineSite),
+   registered for the per-run reset; a capture that crosses a live
+   recording is refused loudly instead of corrupting dispatcher
+   syscalls far away.
+4. *The root cause: resumed frames kept the suspending thread's tc.*
+   The DSL's continueWith re-enters the program with its original frame
+   arguments, so a continuation resumed on another thread ran every op
+   against the first thread's ThreadContext -- dispatch records pushed
+   onto the wrong thread's list, curFrame written across threads, and
+   capture/tracked validation dying in dispatcher syscalls. The
+   bytecode resume road has reloaded tc from the resume status since
+   forever ("restored separately since we can change threads");
+   resumeEngine now writes the resuming tc into the materialized
+   frame's ARG_TC before re-entering. With this, the race repro and
+   t/02's hyper files behave identically to the all-bytecode baseline.
+
+Also landed alongside (9d940560d): nqp threads are virtual by default
+(daemon/app-lifetime ones; non-daemon threads must hold the JVM open
+and stay platform; NQP_JVM_PLATFORM_THREADS=1 is the kill switch).
+Truffle 25 runs guest code on virtual threads, with an experimental
+warning and carrier pinning during execution.
+
+**Gate policy from here on (user decision, 2026-09-02): the engine
+build is the only build.** Spectest results are recorded against the
+previous engine run, not re-measured against a knobs-off bytecode
+rebuild — there is no going back to a non-Truffle configuration, so
+bytecode A/B comparisons are reserved for debugging individual
+divergences, not for gates. For the record, the post-rebase tree
+carries ~45 spectest files failing for reasons independent of the
+engine (verified on an all-bytecode build and against the moar
+worktree; goal-spectest5.log is the last such measurement), plus
+S32-io/out-buffering.t which hangs any single-server sweep, and a
+tail of unimplemented-on-JVM feature gaps (Blob.read-int16 and kin)
+in sections no recent run had reached.
+
+**Phase 4 final gates (2026-09-02, engine build: ten compiler modules
++ BOOTSTRAP v6c/d/e + CORE.c/d/e all carrying engine programs; nqp
+threads virtual):**
+
+- *Spectest*: 1430 files / ~104k tests over three passes on warm 8g
+  servers; **123 files failing**, recorded per-file in
+  `docs/jvm-spectest-known-failing.txt` — the reference every later
+  engine run diffs against. Of these, ~45 are the pre-rebase-verified
+  baseline failures, the bulk of the rest are unimplemented-JVM
+  feature gaps and uninstalled-tree spawn artifacts in sections no
+  recent run had reached, and the engine-attributable divergences
+  are small and named: S32-exceptions/misc2 (2/266),
+  S32-temporal/DateTime (6/86), S32-io/io-path (dies at 36/43), the
+  documented backtrace-line class, and the S17-procasync +
+  out-buffering hang family (hangs identically on platform threads).
+  Eleven files that failed at baseline PASS on the engine build.
+- *Leak signature*: exactly 2 live GlobalContexts after every round,
+  live heap flat (305.8 → 309.0 MB across three added rounds) — no
+  engine cache pins anything run-owned.
+- *Sanity*: t/01 303/303; t/02 matches its baseline except the three
+  pre-existing files; the full nqp suite on-engine 9187/9187.
+
 **Phase 5 — Deletion.** At 100% coverage per tier, delete jast2bc,
 AutosplitMethodWriter, the indy budget, and the JAST layer for that
 tier. This is the payoff beyond speed: three of the five bugs fixed in
