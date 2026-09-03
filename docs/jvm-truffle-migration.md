@@ -392,14 +392,40 @@ blocks) and they are blocked on a bug that is now localised, not mysterious:
     `Ops.hlllist`/`Ops.hllhash` do; that is a real discrepancy and is fixed
     in NqpOps.java, but fixing it did not change the symptom.
 
-The open question is whether the fault is in the `hash` encoding itself or
-in some OTHER encoder bug that `hash` merely unmasks -- with `hash`
-encodable, blocks that used to bail now encode, and one of the `new`
-blocks among them is miscompiled. Note that BOOTSTRAP's own
-`ContainerDescriptor.new` contains no hash at all, which favours the
-second reading. Reproducer: `perl rakudo-j-build --setting=NULL.c
---target=jar --output=/tmp/x.jar <a file with a `my constant` hash-of-
-hashes in a method>`, ~30s per iteration once the jars are built.
+Bisected the rest of the way (2026-09-03) after teaching `NQP_CODE_SKIP`
+to match a **cuid** as well as a name -- 190 blocks in v6c are called
+`new`, so a name was not selective enough. The culprit is exactly one
+block: **cuid 1262, `OperatorProperties`'s own `new`** (generated
+BOOTSTRAP line ~21957, from `src/Raku/ast/operator-properties.rakumod`),
+the very method the error names. `NQP_CODE_SKIP=1262` alone fixes it.
+
+**It is an interaction, not one broken thing.** Both of these are needed:
+
+  1. the `hash` constructor encoded (the caller's `PROPERTIES` hash is
+     then built by the engine), and
+  2. that callee block encoded.
+
+Skipping *either* makes the failure vanish. The callee contains no hash
+of its own -- the five hash-emitting `new` blocks (cuids 328, 345, 377,
+3447, 4452) were skipped as a set and the failure persisted -- and it is
+a twelve-optional-named-parameter routine whose body is `bindattr_s` /
+`bindattr_i` / `getattr_*` / `//`, all of which have been encodable and
+gated since the 23-op batch. **Committed HEAD is clean: the reproducer
+passes there**, so this is not a latent bug in shipped work; it needs the
+uncommitted constructor to appear at all.
+
+So the suspicion now falls on the *engine-built hash meeting an
+engine-bound named-parameter prologue*: each is fine against a bytecode
+counterpart, and only the pair fails. The next probe is the flattening
+step (`explodeFlattening` on the caller's callsite) with an engine-built
+hash, versus the parameter prologue `patch_params` emits for many
+optional nameds.
+
+Reproducer, ~30s once the jars exist: compile a small `.raku` holding a
+`my constant` hash-of-hashes inside a method with
+`perl rakudo-j-build --setting=NULL.c --target=jar --output=/tmp/x.jar FILE`.
+The experiment itself (hash desugar + the cuid-matching skip knob) is in
+an nqp `git stash`.
 
 *Still not encodable, the next batch:* `list`/`list_i`/`list_n`/
 `list_s`/`list_b` and `hash` (variadic, so they need shape handling
