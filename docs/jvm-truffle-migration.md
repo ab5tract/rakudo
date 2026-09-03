@@ -427,6 +427,36 @@ Reproducer, ~30s once the jars exist: compile a small `.raku` holding a
 The experiment itself (hash desugar + the cuid-matching skip knob) is in
 an nqp `git stash`.
 
+*The op-desugar wall, and a way through it (2026-09-03).* The two biggest
+unblocked-looking levers left, `op:p6callmethodhow` (366 sole) and
+`op:p6attrinited` (224 sole), are both `register_op_desugar` entries in
+`src/Perl6/Actions.nqp` -- the legacy frontend this branch does not read.
+That is ~590 sole-blocked blocks walled off by policy, and more behind
+them.
+
+They need not stay walled off. `register_op_desugar` itself lives in
+`src/vm/jvm/Raku/Ops.nqp`, which is fair game, and it currently buries the
+desugar inside the closure it hands to `add_hll_op`:
+
+    sub register_op_desugar($name, $desugar, ...) {
+        nqp::getcomp('QAST').operations.add_hll_op($compiler, $name, ...,
+            -> $qastcomp, $op { $qastcomp.as_jast($desugar($op)) });
+    }
+
+If it also recorded `$desugar` in a table the encoder can consult, then on
+meeting an unknown op the encoder could apply the registered desugar and
+encode the RESULT -- reproducing no logic and reading no forbidden file,
+since the desugar is applied blindly as a value. Anything it produces that
+is still unencodable bails as usual.
+
+**The hazard to design around first:** a desugar may MUTATE the node it is
+given rather than return a fresh tree -- nqp's own `assign_i` desugar does
+exactly that (`$op.op('bind'); $target.scope(...)`), which is why the typed
+assigns are excluded from the encoder. An encoder that ran a mutating
+desugar and then bailed would hand the bytecode path a rewritten tree. So
+this wants either a clone before applying, or a registry that marks which
+desugars are pure.
+
 *Still not encodable, the next batch:* `list`/`list_i`/`list_n`/
 `list_s`/`list_b` and `hash` (variadic, so they need shape handling
 rather than a table row), and the `for`/`repeat_while`/`repeat_until`
