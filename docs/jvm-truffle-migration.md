@@ -347,6 +347,25 @@ encoding, not that every use of it encodes -- arity and shape still
 bail -- so the survey remains an upper bound and the honest yield of a
 tag group still wants an `NQP_CODE_ALSO` run.
 
+*Coverage, measured on the whole CORE.c mainline (19141 blocks) with
+`NQP_CODE_REPORT=1`.* This is the number the deletion gate waits on, so
+it gets measured after every batch, never estimated:
+
+| after                          | blocks         | nodes in encodable blocks |
+|--------------------------------|----------------|---------------------------|
+| Phase 1 baseline (2026-09-01)  | 6512  (34.0%)  | 126120  (12.8%)           |
+| survey fix + calling convention| 13534 (70.7%)  | 516299  (52.3%)           |
+| first sole-blocker batch       | 14054 (73.4%)  | 556526  (56.4%)           |
+| second sole-blocker batch      | 14221 (74.2%)  | 568197  (57.6%)           |
+
+Batches are chosen by **sole-blocker count** -- how many blocks a tag
+blocks *alone* -- which the report prints for free. What is left, in that
+order: `op:list_s` (423) and its `list`/`list_i` siblings, blocked on the
+binder bug; `op:p6callmethodhow` (366); `op:p6attrinited` (224), blocked
+because it is desugared in the off-limits legacy frontend;
+`var:attributeref` (197); `regex` (171), the rx engine's by design;
+`var:lexicalref` (155); `op:exception` (87).
+
 *Coverage landed this round.* The routine calling-convention family
 (ops 112-115: assertparamcheck, bindcomplete, p6typecheckrv,
 p6decontrv_rt, plus QAST::ParamTypeCheck as a param task) -- the family
