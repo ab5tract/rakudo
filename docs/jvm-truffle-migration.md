@@ -360,12 +360,34 @@ atpos/bindpos/atkey/bindkey accessors, and iscont_i/_n/_s.
 rather than a table row), and the `for`/`repeat_while`/`repeat_until`
 loop forms.
 
-*Gate for this phase (user decision, 2026-09-02): no full spectest
-runs.* Spot-check with `tools/build/dice-spectest.raku`, which runs the
-steady set of every file that has ever failed here plus a random roll
-through one warm eval server, aborts loudly on a slow or hung file, and
-appends new failures to the steady set. Compare against
-`docs/jvm-spectest-known-failing.txt`.
+*Gate for this phase (user decision, 2026-09-02/03): no full spectest
+runs; **`t/` is the gate**.*
+
+    raku tools/build/watched-run.raku -t=t/01-sanity -t=t/02-rakudo \
+        --jobs=4 --log-dir=sweep-logs --max=900 -- ./rakudo-j -Ilib
+
+309 files, cold runner per file, ~42 min. `--max` must stay above 600:
+t/02-rakudo/15-gh_1202.t spawns 50 JVMs under its own 600s budget and a
+tighter ceiling kills it. **Standing result: 307/309.** The two failures
+are pre-existing and NOT engine-related -- both reproduce identically on
+a fully engine-free build, and both fail at compile time:
+
+  - `constant-anon-var-value.t` -- "Cannot call method 'is_composed' on a
+    null object"; minimally `sub f($x = (my uint32 $ = 9)) { $x }`.
+  - `parse-target-match-tree.t` -- "This type does not support positional
+    operations".
+
+Note that `t/` normally runs through the eval server
+(`t/harness5 --jvm --evalserver`, what the Makefile's HARNESS5 uses); the
+cold-runner form above is deliberate for now, because **the eval server
+dies after ~43 files** and every run past that returns instantly with no
+TAP, which a harness scores as failure. That regression is unexplained
+and is the reason the earlier dice-roll gate reported 40 bogus new
+failures. Fix it before trusting any warm-server sweep again.
+
+`tools/build/dice-spectest.raku` remains for spectest spot checks: steady
+set plus a random roll through one warm server, aborting loudly on a slow
+or hung file. It inherits the server-death problem above.
 
 ## Phase 0 baselines (2026-09-01, GraalVM 25.2.4, one warm 8g server)
 
