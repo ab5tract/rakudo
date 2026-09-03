@@ -359,6 +359,7 @@ it gets measured after every batch, never estimated:
 | second sole-blocker batch      | 14221 (74.2%)  | 568197  (57.6%)           |
 | via 2 registered desugars      | 14811 (77.3%)  | 621174  (63.0%)           |
 | via all 19 registered desugars | 14893 (77.8%)  | 627256  (63.6%)           |
+| + the list constructors        | 15441 (80.6%)  | 670378  (68.0%)           |
 
 Batches are chosen by **sole-blocker count** -- how many blocks a tag
 blocks *alone* -- which the report prints for free. What is left, in that
@@ -380,7 +381,9 @@ atpos/bindpos/atkey/bindkey accessors, and iscont_i/_n/_s.
 These are the largest remaining win (`op:list_s` alone is 423 sole-blocked
 blocks) and they are blocked on a bug that is now localised, not mysterious:
 
-  - `hash` ALONE reproduces it; the list family is not implicated.
+  - `hash` ALONE reproduces it; the list family is not implicated -- and
+    that is now load-bearing, not a footnote: list/list_i/list_n/list_s
+    are IN (nqp, 80.6%), hash stays out, and the reproducer is clean.
   - The locus is **BOOTSTRAP v6c**: rebuilding just that jar engine-free
     makes the failure vanish while everything else stays engine-built.
   - Within v6c, `NQP_CODE_SKIP` bisection over the 856 encoded block names
