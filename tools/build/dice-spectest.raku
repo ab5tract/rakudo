@@ -32,10 +32,16 @@ sub MAIN(
     # silently compile them with the legacy frontend.
     %*ENV<RAKUDO_RAKUAST> = '1';
 
-    my @never = $never.IO.e ?? $never.IO.lines.grep(*.chars) !! ();
+    my @never = $never.IO.e
+        ?? $never.IO.lines.grep({ .chars && !.starts-with('#') }) !! ();
     my %never = @never.map(* => 1);
 
-    my @steady = $steady.IO.e ?? $steady.IO.lines.grep(*.chars).unique !! ();
+    # never-run means never: the steady set is filtered by it too, not just
+    # the roll. A file that can only hang or burn minutes tells the gate
+    # nothing it does not already know.
+    my @steady = $steady.IO.e
+        ?? $steady.IO.lines.grep({ .chars && !.starts-with('#') && !%never{$_} }).unique
+        !! ();
     my @pool = 't/spec/spectest.data'.IO.lines
         .grep({ .chars && !.starts-with('#') })
         .map({ .words[0] })
@@ -66,7 +72,9 @@ sub MAIN(
         '-cookie', $TOKEN, '-app', './rakudo.jar');
     my $server-err = '';
     $server.stderr.tap({ $server-err ~= $_ });
-    my $sp = $server.start(ENV => { |%*ENV, RAKUDO_EVALSERVER_HEAP => $heap });
+    my %server-env = %*ENV;
+    %server-env<RAKUDO_EVALSERVER_HEAP> = $heap;
+    my $sp = $server.start(ENV => %server-env);
     my $waited = 0;
     until $TOKEN.IO.e && $TOKEN.IO.s {
         if $sp.status != Planned {
@@ -133,7 +141,15 @@ sub MAIN(
         }
     }
 
-    run($*EXECUTABLE, 'tools/build/eval-client.raku', $TOKEN, 'exit', :out, :err);
+    # Shutting the server down is best-effort: sinking a failed Proc
+    # throws, and an abort that dies in its own cleanup reports the
+    # cleanup instead of the finding it aborted on (seen 2026-09-02,
+    # where a SLOW abort surfaced as a spawn failure).
+    try {
+        my $bye = run($*EXECUTABLE, 'tools/build/eval-client.raku',
+                      $TOKEN, 'exit', :out, :err);
+        $bye.out.close; $bye.err.close;
+    }
     try await Promise.anyof($sp, Promise.in(10));
 
     # New failures join the steady set for every future roll.

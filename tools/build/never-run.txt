@@ -1,3 +1,7 @@
+# Files the dice gate never runs. The first family hangs a
+# single-server sweep outright; the rest cost minutes and can
+# report nothing new, being already in
+# docs/jvm-spectest-known-failing.txt.
 S32-io/out-buffering.t
 S17-procasync/bind-handles.t
 S17-procasync/basic.t
@@ -6,3 +10,4 @@ S17-procasync/exit.t
 S17-procasync/print.t
 S17-procasync/stress.t
 S17-procasync/many-processes-no-close-stdin.t
+S10-packages/precompilation.t
