@@ -374,6 +374,33 @@ Phase 1's census named as the biggest single lever, measured then at
 claimed: getattr/bindattr in all four types, the typed
 atpos/bindpos/atkey/bindkey accessors, and iscont_i/_n/_s.
 
+*The `hash`/`list` constructors and the binder bug (bisected 2026-09-03).*
+These are the largest remaining win (`op:list_s` alone is 423 sole-blocked
+blocks) and they are blocked on a bug that is now localised, not mysterious:
+
+  - `hash` ALONE reproduces it; the list family is not implicated.
+  - The locus is **BOOTSTRAP v6c**: rebuilding just that jar engine-free
+    makes the failure vanish while everything else stays engine-built.
+  - Within v6c, `NQP_CODE_SKIP` bisection over the 856 encoded block names
+    lands on exactly one: **`new`**. `NQP_CODE_SKIP=new` alone is enough to
+    make the failure disappear with the desugar fully active.
+  - It needs the real Raku signature binder: an nqp-level equivalent (a
+    class whose `new` takes named parameters, builds a hash, and is called
+    with `|%args`) behaves identically engine-on and engine-off.
+  - The type source was NOT the cause. `hlllist`/`hllhash` were reading
+    `cu.hllConfig` instead of the running frame's config the way
+    `Ops.hlllist`/`Ops.hllhash` do; that is a real discrepancy and is fixed
+    in NqpOps.java, but fixing it did not change the symptom.
+
+The open question is whether the fault is in the `hash` encoding itself or
+in some OTHER encoder bug that `hash` merely unmasks -- with `hash`
+encodable, blocks that used to bail now encode, and one of the `new`
+blocks among them is miscompiled. Note that BOOTSTRAP's own
+`ContainerDescriptor.new` contains no hash at all, which favours the
+second reading. Reproducer: `perl rakudo-j-build --setting=NULL.c
+--target=jar --output=/tmp/x.jar <a file with a `my constant` hash-of-
+hashes in a method>`, ~30s per iteration once the jars are built.
+
 *Still not encodable, the next batch:* `list`/`list_i`/`list_n`/
 `list_s`/`list_b` and `hash` (variadic, so they need shape handling
 rather than a table row), and the `for`/`repeat_while`/`repeat_until`
