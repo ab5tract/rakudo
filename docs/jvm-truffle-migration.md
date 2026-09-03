@@ -328,10 +328,44 @@ threads virtual):**
 - *Sanity*: t/01 303/303; t/02 matches its baseline except the three
   pre-existing files; the full nqp suite on-engine 9187/9187.
 
-**Phase 5 — Deletion.** At 100% coverage per tier, delete jast2bc,
-AutosplitMethodWriter, the indy budget, and the JAST layer for that
-tier. This is the payoff beyond speed: three of the five bugs fixed in
-the 2026-08-31..09-01 session lived in code this phase retires.
+**Phase 5 — Deletion. IN PROGRESS (2026-09-02).** At 100% coverage per
+tier, delete jast2bc, AutosplitMethodWriter, the indy budget, and the
+JAST layer for that tier. This is the payoff beyond speed: three of the
+five bugs fixed in the 2026-08-31..09-01 session lived in code this
+phase retires.
+
+*What this phase found first: the coverage number was wrong.* The
+survey's covered-tag set was a hand-written op list, and it had drifted
+from the encoder in both directions -- still claiming
+`for`/`repeat_while`/`repeat_until`, which the encoder has never
+encoded, while missing every op added since Phase 1. It reported 34.0%
+of blocks where the encoder was in fact covering 89%. A deletion gate
+cannot run on a number like that, so `%covered` is now derived from the
+encoder's own `%emit_ops` table plus the names `encode_op`
+special-cases (nqp eca47a5d4). Being in the table means an op has an
+encoding, not that every use of it encodes -- arity and shape still
+bail -- so the survey remains an upper bound and the honest yield of a
+tag group still wants an `NQP_CODE_ALSO` run.
+
+*Coverage landed this round.* The routine calling-convention family
+(ops 112-115: assertparamcheck, bindcomplete, p6typecheckrv,
+p6decontrv_rt, plus QAST::ParamTypeCheck as a param task) -- the family
+Phase 1's census named as the biggest single lever, measured then at
+34.0% -> 67.8% of CORE.c blocks. Plus the 23 ops the old list falsely
+claimed: getattr/bindattr in all four types, the typed
+atpos/bindpos/atkey/bindkey accessors, and iscont_i/_n/_s.
+
+*Still not encodable, the next batch:* `list`/`list_i`/`list_n`/
+`list_s`/`list_b` and `hash` (variadic, so they need shape handling
+rather than a table row), and the `for`/`repeat_while`/`repeat_until`
+loop forms.
+
+*Gate for this phase (user decision, 2026-09-02): no full spectest
+runs.* Spot-check with `tools/build/dice-spectest.raku`, which runs the
+steady set of every file that has ever failed here plus a random roll
+through one warm eval server, aborts loudly on a slow or hung file, and
+appends new failures to the steady set. Compare against
+`docs/jvm-spectest-known-failing.txt`.
 
 ## Phase 0 baselines (2026-09-01, GraalVM 25.2.4, one warm 8g server)
 
