@@ -187,10 +187,17 @@ if (-d File::Spec->catfile($nqp_home, 'truffle')) {
     # the noise is not harmless -- these lines land on stderr ahead of a
     # compiler's own output, which broke a test asserting on the first line
     # of it (nqp's t/nqp/114-pod-panic.t).
+    #
+    # WarnVirtualThreadSupport: nqp's threads are virtual (Phase 4), and
+    # Truffle prints a four-line experimental-support WARNING to stderr on
+    # every single run because of it. That is not harmless noise: tests that
+    # assert a clean stderr fail on it, and 12 of the 15 t/02-rakudo failures
+    # in the 2026-09-02 gate were exactly this and nothing else.
     $truffle_opts = " --module-path $mp"
                   . " --add-modules org.graalvm.truffle,org.graalvm.truffle.runtime"
                   . " --enable-native-access=org.graalvm.truffle"
-                  . " --sun-misc-unsafe-memory-access=allow";
+                  . " --sun-misc-unsafe-memory-access=allow"
+                  . " -Dpolyglot.engine.WarnVirtualThreadSupport=false";
     $engine_cp    = $cpsep . $en;
 }
 
