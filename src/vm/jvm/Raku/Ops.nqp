@@ -27,7 +27,24 @@ my $RT_VOID := -1;
 my $ALOAD_1     := JAST::Instruction.new( :op('aload_1') );
 
 # Register a de-sugar from one QAST tree to another.
+#
+# The desugar is also published, keyed by op name, so the code engine's
+# encoder can reach it: an op it has no encoding for may still be
+# encodable AFTER desugaring, and the desugars that matter most to
+# coverage (p6callmethodhow, p6attrinited) are registered from the legacy
+# frontend, which this branch does not read. Publishing the closure means
+# the encoder applies it as an opaque value -- it reproduces no logic and
+# reads no source.
+#
+# CAUTION for any consumer: a desugar is not guaranteed pure. nqp's own
+# assign_i desugar REWRITES the node it is handed ($op.op('bind'),
+# $target.scope(...)) rather than returning a fresh tree, so anything that
+# applies one speculatively and might then discard the result has to
+# assume the original node was modified.
+my %code_op_desugars;
 sub register_op_desugar($name, $desugar, :$inlinable = 1, :$compiler = 'Raku') is export {
+    %code_op_desugars{$name} := $desugar;
+    nqp::bindhllsym('nqp', 'CODE_OP_DESUGARS', %code_op_desugars);
     nqp::getcomp('QAST').operations.add_hll_op($compiler, $name, :$inlinable, -> $qastcomp, $op {
         $qastcomp.as_jast($desugar($op));
     });
