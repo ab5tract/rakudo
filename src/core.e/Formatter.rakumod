@@ -663,8 +663,14 @@ our class Formatter {
     # negative zero of Nums boolifies to False and compares equal to
     # zero, so it needs its reciprocal checked.
     our sub negative-value($value --> int) {
+        # `$value < 0` is a Bool, and this routine promises a native int:
+        # for any negative value it returned Bool::True straight out and
+        # died on the return check ("expected int but got Bool"). The
+        # nqp:: chain below already yields an int, so only the first test
+        # needed a home.
         $value < 0
-          || nqp::istype($value,Num)
+          ?? 1
+          !! nqp::istype($value,Num)
              && nqp::iseq_n($value,0e0)
              && nqp::islt_n(nqp::div_n(1e0,$value),0e0)
     }
