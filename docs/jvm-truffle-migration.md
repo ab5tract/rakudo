@@ -357,6 +357,8 @@ it gets measured after every batch, never estimated:
 | survey fix + calling convention| 13534 (70.7%)  | 516299  (52.3%)           |
 | first sole-blocker batch       | 14054 (73.4%)  | 556526  (56.4%)           |
 | second sole-blocker batch      | 14221 (74.2%)  | 568197  (57.6%)           |
+| via 2 registered desugars      | 14811 (77.3%)  | 621174  (63.0%)           |
+| via all 19 registered desugars | 14893 (77.8%)  | 627256  (63.6%)           |
 
 Batches are chosen by **sole-blocker count** -- how many blocks a tag
 blocks *alone* -- which the report prints for free. What is left, in that
@@ -449,7 +451,16 @@ encode the RESULT -- reproducing no logic and reading no forbidden file,
 since the desugar is applied blindly as a value. Anything it produces that
 is still unencodable bails as usual.
 
-**The hazard to design around first:** a desugar may MUTATE the node it is
+**Built and gated (nqp cba978931, rakudo 38aefcc46).** The encoder now
+applies published desugars, opt-in per op via `NQP_CODE_DESUGAR=a,b` and
+inert without it. Enabling the two that matter took CORE.c from 74.2% to
+77.3% of blocks; enabling all 19 adds only 0.5 more, because the other 17
+sit inside blocks that something else already blocks -- their sole counts
+were near zero, and the sole-blocker ranking predicted exactly that. Gate
+with all 19 on: t/01-sanity + 70 of t/02-rakudo, 95/95, on a build whose
+BOOTSTRAP and settings were compiled that way.
+
+**The hazard designed around:** a desugar may MUTATE the node it is
 given rather than return a fresh tree -- nqp's own `assign_i` desugar does
 exactly that (`$op.op('bind'); $target.scope(...)`), which is why the typed
 assigns are excluded from the encoder. An encoder that ran a mutating
