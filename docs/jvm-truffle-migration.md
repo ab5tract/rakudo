@@ -362,20 +362,36 @@ it gets measured after every batch, never estimated:
 | + the list constructors        | 15441 (80.6%)  | 670378  (68.0%)           |
 | + native attribute references  | 15658 (81.7%)  | 683485  (69.3%)           |
 | + the typed assigns            | 15892 (83.0%)  | 700842  (71.1%)           |
+| + native lexical references    | 16868 (88.1%)  | 794535  (80.6%)           |
 
 (The last row was measured after the 2026-09-04 rebase onto upstream,
 where the mainline is 19146 blocks; the earlier rows are over 19141.)
 
 Batches are chosen by **sole-blocker count** -- how many blocks a tag
 blocks *alone* -- which the report prints for free. What is left after the
-typed-assign batch, in that order: `var:lexicalref` (976 sole, 1470
-blocks -- the object-wanted reference form, `getlexref_*`; the typed
-assigns used to co-block most of these, which is why its sole count
-jumped from 172); `regex` (171), the rx engine's by design;
-`op:curlexpad` (150); `op:exception` (115); `op:const` (35);
-`op:isfalse` (28); `op:atposref_i`/`_u` (24/20); `op:p6argvmarray` (13);
-`op:isbig_I` (13). `hash` stays out until the binder interaction below is
-understood.
+lexicalref batch, by the survey: `op:exception` (138 sole, 311 blocks);
+`op:curlexpad` (251); `regex` (184), the rx engine's by design;
+`op:const` (50 sole, 176); `op:slice` (56); `op:with` (43);
+`op:atpos_u`/`bindpos_u` (38/28); `op:isfalse` (37); `op:getlexcaller`
+(35); `op:atposref_i`/`_u` (37/33); `op:p6argvmarray` (19);
+`op:isbig_I` (14); `op:isnanorinf` (17). `hash` stays out until the
+binder interaction below is understood.
+
+**The survey is an upper bound, and after this batch the gap matters.**
+`NQP_CODE_BAIL=1` on the same compile prints what the encoder actually
+refused, and its histogram is ranked differently from the survey's:
+`op isconcrete_nd` 3334 blocks (the survey never listed it -- the op is
+in the bytecode table, but no encoder row existed, and the survey's
+covered set is derived from the encoder's table, so the miss was a
+plain omission), `two-child if in value context` 1135 (a shape, not an
+op: the condition is the value when it fails), `typed param` 656 (the
+wire refuses native parameters: builder work), `op getextype` 587,
+`typed attribute` 488 (the native accessors were in the table since the
+23-op batch, but the attribute *scope* with a native `.returns` still
+bailed), `block immediate` 430, `op gethllsym` 277, `var-with-fallback`
+276, `uint or wide lexical` 272, `regex` 184, `op rethrow` 84, `op hash`
+70. Rank the next batch on THIS list; the survey only says which tags
+are unclaimed, not which claims fail.
 
 *The typed assigns (2026-09-04).* `assign_i`/`assign_u`/`assign_n`/
 `assign_s` were excluded because nqp's own desugar rewrites the node it is
@@ -396,6 +412,27 @@ through a reference is not a thing the bytecode path allows either); and a
 immediately ("we'd only de-ref right away anyway"). The second piece is
 what makes the common `my int $i; $i = ...` shapes encodable, and it is
 why `var:lexicalref`'s remaining blocks are the object-wanted ones.
+
+*Native lexical references (2026-09-04, nqp b03c02baf).* The
+object-wanted `lexicalref` read -- what every `is rw` native argument,
+every l-value native lookup compiles to -- encodes as Compiler.nqp shapes
+it: the nearest declaration decides. A reference declaration (`decl var`,
+scope `lexicalref`) is an object lexical holding the reference,
+registered through `add_lexicalref` at commit, and reads and binds as
+one; a plain native declaration gets a reference taken over its slot,
+told the declared width when the type is sized (`sized_native_ref_spec`,
+so int8/int16/num32 stores truncate the way MoarVM's sized registers do);
+nothing found statically means the by-name road with the type from
+`.returns`. On the wire it is one instruction, `LEXREF type name spec`:
+the engine resolves the declaring frame through the same cached site
+`LEXGET` uses (StaticCodeInfo identity at a depth, slot index) and
+allocates the reference over that frame's slot behind a boundary,
+anchored at the program's own frame, never `tc.curFrame`. Gate
+t/01-sanity 25/25; a native-reference check (writes through
+int/int8/int16/num/num32/str lexicals, closures over an outer frame,
+native rw parameters, nested blocks) answers identically on-engine.
+CORE.c parse 146.5s (144.6s before, noise). uint lexicals stay out with
+the rest of the encoder.
 
 *Coverage landed this round.* The routine calling-convention family
 (ops 112-115: assertparamcheck, bindcomplete, p6typecheckrv,
