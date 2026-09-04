@@ -347,6 +347,47 @@ encoding, not that every use of it encodes -- arity and shape still
 bail -- so the survey remains an upper bound and the honest yield of a
 tag group still wants an `NQP_CODE_ALSO` run.
 
+*Coverage, measured on the whole CORE.c mainline (19141 blocks) with
+`NQP_CODE_REPORT=1`.* This is the number the deletion gate waits on, so
+it gets measured after every batch, never estimated:
+
+| after                          | blocks         | nodes in encodable blocks |
+|--------------------------------|----------------|---------------------------|
+| Phase 1 baseline (2026-09-01)  | 6512  (34.0%)  | 126120  (12.8%)           |
+| survey fix + calling convention| 13534 (70.7%)  | 516299  (52.3%)           |
+| first sole-blocker batch       | 14054 (73.4%)  | 556526  (56.4%)           |
+| second sole-blocker batch      | 14221 (74.2%)  | 568197  (57.6%)           |
+| via 2 registered desugars      | 14811 (77.3%)  | 621174  (63.0%)           |
+| via all 19 registered desugars | 14893 (77.8%)  | 627256  (63.6%)           |
+| + the list constructors        | 15441 (80.6%)  | 670378  (68.0%)           |
+| + native attribute references  | 15658 (81.7%)  | 683485  (69.3%)           |
+
+(The last row was measured after the 2026-09-04 rebase onto upstream,
+where the mainline is 19146 blocks; the earlier rows are over 19141.)
+
+Batches are chosen by **sole-blocker count** -- how many blocks a tag
+blocks *alone* -- which the report prints for free. What is left after the
+attribute-reference batch, in that order: `op:assign_i` (223 sole, 1232
+blocks; with `assign_s`/`assign_u` behind it -- the typed assigns are
+excluded because nqp's own desugar for them MUTATES the node, see the
+op-desugar note below); `var:lexicalref` (172 sole, 1470 blocks -- the
+object-wanted reference form, `getlexref_*`); `regex` (171), the rx
+engine's by design; `op:curlexpad` (150); `op:exception` (115);
+`op:with` (38); `op:const` (34); `op:getlexcaller` (31); `op:isfalse`
+(25). `hash` stays out until the binder interaction below is understood.
+
+*Native attribute references (2026-09-04).* `var:attributeref` was 197
+sole-blocked blocks and is gone from the top twenty. Two pieces, both
+mirroring Compiler.nqp: a reference wanted as an OBJECT encodes as
+`getattrref_<t>(object, class-handle, name)` (engine ops 159-161, native
+types only -- an object attribute has no reference form, and binding
+through a reference is not a thing the bytecode path allows either); and a
+`lexicalref`/`attributeref` read wanted as a NATIVE devolves to the plain
+`lexical`/`attribute` read, because the caller would only dereference it
+immediately ("we'd only de-ref right away anyway"). The second piece is
+what makes the common `my int $i; $i = ...` shapes encodable, and it is
+why `var:lexicalref`'s remaining blocks are the object-wanted ones.
+
 *Coverage landed this round.* The routine calling-convention family
 (ops 112-115: assertparamcheck, bindcomplete, p6typecheckrv,
 p6decontrv_rt, plus QAST::ParamTypeCheck as a param task) -- the family
@@ -355,17 +396,133 @@ Phase 1's census named as the biggest single lever, measured then at
 claimed: getattr/bindattr in all four types, the typed
 atpos/bindpos/atkey/bindkey accessors, and iscont_i/_n/_s.
 
+*The `hash`/`list` constructors and the binder bug (bisected 2026-09-03).*
+These are the largest remaining win (`op:list_s` alone is 423 sole-blocked
+blocks) and they are blocked on a bug that is now localised, not mysterious:
+
+  - `hash` ALONE reproduces it; the list family is not implicated -- and
+    that is now load-bearing, not a footnote: list/list_i/list_n/list_s
+    are IN (nqp, 80.6%), hash stays out, and the reproducer is clean.
+  - The locus is **BOOTSTRAP v6c**: rebuilding just that jar engine-free
+    makes the failure vanish while everything else stays engine-built.
+  - Within v6c, `NQP_CODE_SKIP` bisection over the 856 encoded block names
+    lands on exactly one: **`new`**. `NQP_CODE_SKIP=new` alone is enough to
+    make the failure disappear with the desugar fully active.
+  - It needs the real Raku signature binder: an nqp-level equivalent (a
+    class whose `new` takes named parameters, builds a hash, and is called
+    with `|%args`) behaves identically engine-on and engine-off.
+  - The type source was NOT the cause. `hlllist`/`hllhash` were reading
+    `cu.hllConfig` instead of the running frame's config the way
+    `Ops.hlllist`/`Ops.hllhash` do; that is a real discrepancy and is fixed
+    in NqpOps.java, but fixing it did not change the symptom.
+
+Bisected the rest of the way (2026-09-03) after teaching `NQP_CODE_SKIP`
+to match a **cuid** as well as a name -- 190 blocks in v6c are called
+`new`, so a name was not selective enough. The culprit is exactly one
+block: **cuid 1262, `OperatorProperties`'s own `new`** (generated
+BOOTSTRAP line ~21957, from `src/Raku/ast/operator-properties.rakumod`),
+the very method the error names. `NQP_CODE_SKIP=1262` alone fixes it.
+
+**It is an interaction, not one broken thing.** Both of these are needed:
+
+  1. the `hash` constructor encoded (the caller's `PROPERTIES` hash is
+     then built by the engine), and
+  2. that callee block encoded.
+
+Skipping *either* makes the failure vanish. The callee contains no hash
+of its own -- the five hash-emitting `new` blocks (cuids 328, 345, 377,
+3447, 4452) were skipped as a set and the failure persisted -- and it is
+a twelve-optional-named-parameter routine whose body is `bindattr_s` /
+`bindattr_i` / `getattr_*` / `//`, all of which have been encodable and
+gated since the 23-op batch. **Committed HEAD is clean: the reproducer
+passes there**, so this is not a latent bug in shipped work; it needs the
+uncommitted constructor to appear at all.
+
+So the suspicion now falls on the *engine-built hash meeting an
+engine-bound named-parameter prologue*: each is fine against a bytecode
+counterpart, and only the pair fails. The next probe is the flattening
+step (`explodeFlattening` on the caller's callsite) with an engine-built
+hash, versus the parameter prologue `patch_params` emits for many
+optional nameds.
+
+Reproducer, ~30s once the jars exist: compile a small `.raku` holding a
+`my constant` hash-of-hashes inside a method with
+`perl rakudo-j-build --setting=NULL.c --target=jar --output=/tmp/x.jar FILE`.
+The experiment itself (hash desugar + the cuid-matching skip knob) is in
+an nqp `git stash`.
+
+*The op-desugar wall, and a way through it (2026-09-03).* The two biggest
+unblocked-looking levers left, `op:p6callmethodhow` (366 sole) and
+`op:p6attrinited` (224 sole), are both `register_op_desugar` entries in
+`src/Perl6/Actions.nqp` -- the legacy frontend this branch does not read.
+That is ~590 sole-blocked blocks walled off by policy, and more behind
+them.
+
+They need not stay walled off. `register_op_desugar` itself lives in
+`src/vm/jvm/Raku/Ops.nqp`, which is fair game, and it currently buries the
+desugar inside the closure it hands to `add_hll_op`:
+
+    sub register_op_desugar($name, $desugar, ...) {
+        nqp::getcomp('QAST').operations.add_hll_op($compiler, $name, ...,
+            -> $qastcomp, $op { $qastcomp.as_jast($desugar($op)) });
+    }
+
+If it also recorded `$desugar` in a table the encoder can consult, then on
+meeting an unknown op the encoder could apply the registered desugar and
+encode the RESULT -- reproducing no logic and reading no forbidden file,
+since the desugar is applied blindly as a value. Anything it produces that
+is still unencodable bails as usual.
+
+**Built and gated (nqp cba978931, rakudo 38aefcc46).** The encoder now
+applies published desugars, opt-in per op via `NQP_CODE_DESUGAR=a,b` and
+inert without it. Enabling the two that matter took CORE.c from 74.2% to
+77.3% of blocks; enabling all 19 adds only 0.5 more, because the other 17
+sit inside blocks that something else already blocks -- their sole counts
+were near zero, and the sole-blocker ranking predicted exactly that. Gate
+with all 19 on: t/01-sanity + 70 of t/02-rakudo, 95/95, on a build whose
+BOOTSTRAP and settings were compiled that way.
+
+**The hazard designed around:** a desugar may MUTATE the node it is
+given rather than return a fresh tree -- nqp's own `assign_i` desugar does
+exactly that (`$op.op('bind'); $target.scope(...)`), which is why the typed
+assigns are excluded from the encoder. An encoder that ran a mutating
+desugar and then bailed would hand the bytecode path a rewritten tree. So
+this wants either a clone before applying, or a registry that marks which
+desugars are pure.
+
 *Still not encodable, the next batch:* `list`/`list_i`/`list_n`/
 `list_s`/`list_b` and `hash` (variadic, so they need shape handling
 rather than a table row), and the `for`/`repeat_while`/`repeat_until`
 loop forms.
 
-*Gate for this phase (user decision, 2026-09-02): no full spectest
-runs.* Spot-check with `tools/build/dice-spectest.raku`, which runs the
-steady set of every file that has ever failed here plus a random roll
-through one warm eval server, aborts loudly on a slow or hung file, and
-appends new failures to the steady set. Compare against
-`docs/jvm-spectest-known-failing.txt`.
+*Gate for this phase (user decision, 2026-09-02/03): no full spectest
+runs; **`t/` is the gate**.*
+
+    raku tools/build/watched-run.raku -t=t/01-sanity -t=t/02-rakudo \
+        --jobs=4 --log-dir=sweep-logs --max=900 -- ./rakudo-j -Ilib
+
+309 files, cold runner per file, ~42 min. `--max` must stay above 600:
+t/02-rakudo/15-gh_1202.t spawns 50 JVMs under its own 600s budget and a
+tighter ceiling kills it. **Standing result: 307/309.** The two failures
+are pre-existing and NOT engine-related -- both reproduce identically on
+a fully engine-free build, and both fail at compile time:
+
+  - `constant-anon-var-value.t` -- "Cannot call method 'is_composed' on a
+    null object"; minimally `sub f($x = (my uint32 $ = 9)) { $x }`.
+  - `parse-target-match-tree.t` -- "This type does not support positional
+    operations".
+
+Note that `t/` normally runs through the eval server
+(`t/harness5 --jvm --evalserver`, what the Makefile's HARNESS5 uses); the
+cold-runner form above is deliberate for now, because **the eval server
+dies after ~43 files** and every run past that returns instantly with no
+TAP, which a harness scores as failure. That regression is unexplained
+and is the reason the earlier dice-roll gate reported 40 bogus new
+failures. Fix it before trusting any warm-server sweep again.
+
+`tools/build/dice-spectest.raku` remains for spectest spot checks: steady
+set plus a random roll through one warm server, aborting loudly on a slow
+or hung file. It inherits the server-death problem above.
 
 ## Phase 0 baselines (2026-09-01, GraalVM 25.2.4, one warm 8g server)
 
