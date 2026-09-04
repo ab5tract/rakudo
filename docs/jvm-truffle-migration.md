@@ -364,6 +364,7 @@ it gets measured after every batch, never estimated:
 | + the typed assigns            | 15892 (83.0%)  | 700842  (71.1%)           |
 | + native lexical references    | 16868 (88.1%)  | 794535  (80.6%)           |
 | + batch 2 (exceptions, typed attributes, valued if, small ops) | 17400 (90.8%) | 838570 (85.0%) |
+| + batch 3 (native parameters, immediate blocks) | 17597 (91.9%) | 857964 (87.0%) |
 
 (The last row was measured after the 2026-09-04 rebase onto upstream,
 where the mainline is 19146 blocks; the earlier rows are over 19141.)
@@ -424,6 +425,47 @@ leaves the op untouched) when `$*HLL` is Raku. Of Raku's 41 `add_hll_op`
 names, `defor` is the only one the encoder also encodes generically
 (the p6* family is Raku-only); the rule is to check that file before
 encoding any op generically.
+
+*Batch 3 (2026-09-04, nqp aa650e1b1): native parameters and immediate
+blocks.* The prologue writes the declared type; `PosParam`/`NamedParam`
+fetch through posparam_<t>/namedparam_<t> (and opt_) into the typed
+slot; a slurpy stays an object and a sized native (int8) still bails,
+since it would need the bytecode path's explicit truncation after the
+fetch. An immediate block child encodes as a lang-call on its CODEREF
+with no arguments -- the bytecode path's direct call of the block's code
+ref -- and an if/with branch that takes the condition
+(`needs_cond_passed`) is called with the scratch local the condition was
+evaluated into, the bytecode path's `__IM_` local. Rows 186-196: the
+arity-2 boxes, isnanorinf, where, getlexcaller, getcomp, atposref_n/_s,
+atpos_u, bindpos_u. Gate 25/25, CORE.c parse 154.7s. Real bails 3159 ->
+2018: `uint or wide lexical` 272, `regex` 184, `hash` 93, `p6return`
+82, `with` 51, immediate blocks wanting arguments outside if/with 51,
+`slice` 47, then a long tail of single table rows.
+
+Three encoder bugs the batch exposed, all older than it:
+
+  - A nested immediate block compiled at commit must be flipped to
+    `declaration` around `as_jast`, as the bytecode path's own if/for
+    roads do: compiled as immediate, `as_jast` also emits its direct
+    call into the enclosing method and registers a reentry label the
+    discarded emission never defines ("reenter_2 used but not defined",
+    in NQPP5QRegex -- the nqp gradle stage builds run the encoder, not
+    from the build files but from the long-lived gradle daemon's
+    environment).
+  - The program size gate (60000 characters, the string-constant cliff)
+    ran AFTER the commit: a block over it registered its lexicals and
+    then fell back to bytecode, which re-declared them -- "Lexical
+    '&parent' already declared", the BOOTSTRAP BEGIN body once it was
+    reachable. The gate now runs before the commit on an upper-bound
+    estimate, and the post-commit check dies loudly.
+  - `patch_params` builds the prologue in a scratch array, and
+    `encode_child`'s coercion splice inside it shifted every recorded
+    nested-block position at or past a scratch-relative mark, so qbids
+    were patched onto tags ("nqpp: unknown tag 17041 at 92" on `use
+    Test`, gate 21/25). The nested list is hidden while the prologue is
+    built; any position-based shift must only run over entries recorded
+    in the same array. The builder's unknown-tag error now dumps the
+    program and its pool, which is what located it.
 
 *The typed assigns (2026-09-04).* `assign_i`/`assign_u`/`assign_n`/
 `assign_s` were excluded because nqp's own desugar rewrites the node it is
