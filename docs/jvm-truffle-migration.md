@@ -631,8 +631,14 @@ Rule: never let a host exception reach the DSL loop.
 The fold's per-install republish (~290 invalidations against 38 on the
 old road) now refolds lazily -- immediately the first time, then only
 after sixteen misses since the last fold -- for 219 invalidations and a
-144.6s parse. Still open: the `DirectCallNode` step for inlining across
-the dispatch, and the remaining 38 invalidations the old road also has.
+144.6s parse. The `DirectCallNode` step landed last (nqp "engine callees inline across
+a dispatch through adopted call nodes"): a folded program with a literal
+engine-bodied callee calls it through a call node adopted under the
+dispatch instruction's node, so the inliner sees it -- 1.408s -> 1.229s
+on the engine-to-engine loop, neutral on the compile, where only 37
+callees inlined: most of what the compiler calls is still bytecode-bodied
+or has not run before its caller compiles. Still open: the remaining 38
+invalidations the old road also has, and more of the compiler on-engine.
 
 ## Phase 0 baselines (2026-09-01, GraalVM 25.2.4, one warm 8g server)
 
