@@ -361,20 +361,29 @@ it gets measured after every batch, never estimated:
 | via all 19 registered desugars | 14893 (77.8%)  | 627256  (63.6%)           |
 | + the list constructors        | 15441 (80.6%)  | 670378  (68.0%)           |
 | + native attribute references  | 15658 (81.7%)  | 683485  (69.3%)           |
+| + the typed assigns            | 15892 (83.0%)  | 700842  (71.1%)           |
 
 (The last row was measured after the 2026-09-04 rebase onto upstream,
 where the mainline is 19146 blocks; the earlier rows are over 19141.)
 
 Batches are chosen by **sole-blocker count** -- how many blocks a tag
 blocks *alone* -- which the report prints for free. What is left after the
-attribute-reference batch, in that order: `op:assign_i` (223 sole, 1232
-blocks; with `assign_s`/`assign_u` behind it -- the typed assigns are
-excluded because nqp's own desugar for them MUTATES the node, see the
-op-desugar note below); `var:lexicalref` (172 sole, 1470 blocks -- the
-object-wanted reference form, `getlexref_*`); `regex` (171), the rx
-engine's by design; `op:curlexpad` (150); `op:exception` (115);
-`op:with` (38); `op:const` (34); `op:getlexcaller` (31); `op:isfalse`
-(25). `hash` stays out until the binder interaction below is understood.
+typed-assign batch, in that order: `var:lexicalref` (976 sole, 1470
+blocks -- the object-wanted reference form, `getlexref_*`; the typed
+assigns used to co-block most of these, which is why its sole count
+jumped from 172); `regex` (171), the rx engine's by design;
+`op:curlexpad` (150); `op:exception` (115); `op:const` (35);
+`op:isfalse` (28); `op:atposref_i`/`_u` (24/20); `op:p6argvmarray` (13);
+`op:isbig_I` (13). `hash` stays out until the binder interaction below is
+understood.
+
+*The typed assigns (2026-09-04).* `assign_i`/`assign_u`/`assign_n`/
+`assign_s` were excluded because nqp's own desugar rewrites the node it is
+handed (`op('bind')`, `scope(...)`); the encoder now performs that rewrite
+on a shallow copy of the target, with `native_assign_bind_scope` mirrored
+over its own view of the block chain, and the container road is four
+engine ops (`Ops.assign_*`). `my int $i; $i++` -- every benchmark loop --
+encodes with this.
 
 *Native attribute references (2026-09-04).* `var:attributeref` was 197
 sole-blocked blocks and is gone from the top twenty. Two pieces, both
