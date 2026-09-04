@@ -612,10 +612,25 @@ lowered to base type plus concreteness so the type-check cache answers it.
 
 Rule written into the code: nothing Kotlin on a PE-visible path unless it
 is a plain field access, and every new fast path gets checked with the
-expansion trace. Still open: 13 roots that bail with "deopt taken too
-many times" (`PERFORM-PARSE`, `IMPL-QAST-DECL`), the fold's per-install
-assumption invalidation (288 invalidations against 38 on the old road),
-and the `DirectCallNode` step for inlining across the dispatch.
+expansion trace.
+
+*The deopt cycle (same afternoon).* Thirteen roots, the parse driver
+`PERFORM-PARSE` among them, were abandoned by Graal with "deopt taken too
+many times"; with cycle detection off they recompiled a hundred times
+each. `engine.TraceTransferToInterpreter` put the transfers at the
+generated interpreter's `resolveThrowable`: the Bytecode DSL treats any
+non-Truffle exception as an internal error and invalidates the compiled
+root BEFORE the language's `interceptInternalException` gets to wrap it,
+and this runtime uses host exceptions as ordinary control flow (an
+`UnwindException` for every return, next, last and handled die). Every
+operation now converts at its boundary (`NqpOps.carry`) into the same
+carriers the interception produced; bailouts 13 -> 0, deopts 549 -> 385,
+parse time unchanged -- those roots were not the remaining bottleneck.
+Rule: never let a host exception reach the DSL loop.
+
+Still open: the fold's per-install assumption invalidation (~290
+invalidations against 38 on the old road), and the `DirectCallNode` step
+for inlining across the dispatch.
 
 ## Phase 0 baselines (2026-09-01, GraalVM 25.2.4, one warm 8g server)
 
