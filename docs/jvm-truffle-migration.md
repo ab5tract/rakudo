@@ -628,9 +628,11 @@ carriers the interception produced; bailouts 13 -> 0, deopts 549 -> 385,
 parse time unchanged -- those roots were not the remaining bottleneck.
 Rule: never let a host exception reach the DSL loop.
 
-Still open: the fold's per-install assumption invalidation (~290
-invalidations against 38 on the old road), and the `DirectCallNode` step
-for inlining across the dispatch.
+The fold's per-install republish (~290 invalidations against 38 on the
+old road) now refolds lazily -- immediately the first time, then only
+after sixteen misses since the last fold -- for 219 invalidations and a
+144.6s parse. Still open: the `DirectCallNode` step for inlining across
+the dispatch, and the remaining 38 invalidations the old road also has.
 
 ## Phase 0 baselines (2026-09-01, GraalVM 25.2.4, one warm 8g server)
 
