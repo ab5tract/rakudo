@@ -360,14 +360,33 @@ it gets measured after every batch, never estimated:
 | via 2 registered desugars      | 14811 (77.3%)  | 621174  (63.0%)           |
 | via all 19 registered desugars | 14893 (77.8%)  | 627256  (63.6%)           |
 | + the list constructors        | 15441 (80.6%)  | 670378  (68.0%)           |
+| + native attribute references  | 15658 (81.7%)  | 683485  (69.3%)           |
+
+(The last row was measured after the 2026-09-04 rebase onto upstream,
+where the mainline is 19146 blocks; the earlier rows are over 19141.)
 
 Batches are chosen by **sole-blocker count** -- how many blocks a tag
-blocks *alone* -- which the report prints for free. What is left, in that
-order: `op:list_s` (423) and its `list`/`list_i` siblings, blocked on the
-binder bug; `op:p6callmethodhow` (366); `op:p6attrinited` (224), blocked
-because it is desugared in the off-limits legacy frontend;
-`var:attributeref` (197); `regex` (171), the rx engine's by design;
-`var:lexicalref` (155); `op:exception` (87).
+blocks *alone* -- which the report prints for free. What is left after the
+attribute-reference batch, in that order: `op:assign_i` (223 sole, 1232
+blocks; with `assign_s`/`assign_u` behind it -- the typed assigns are
+excluded because nqp's own desugar for them MUTATES the node, see the
+op-desugar note below); `var:lexicalref` (172 sole, 1470 blocks -- the
+object-wanted reference form, `getlexref_*`); `regex` (171), the rx
+engine's by design; `op:curlexpad` (150); `op:exception` (115);
+`op:with` (38); `op:const` (34); `op:getlexcaller` (31); `op:isfalse`
+(25). `hash` stays out until the binder interaction below is understood.
+
+*Native attribute references (2026-09-04).* `var:attributeref` was 197
+sole-blocked blocks and is gone from the top twenty. Two pieces, both
+mirroring Compiler.nqp: a reference wanted as an OBJECT encodes as
+`getattrref_<t>(object, class-handle, name)` (engine ops 159-161, native
+types only -- an object attribute has no reference form, and binding
+through a reference is not a thing the bytecode path allows either); and a
+`lexicalref`/`attributeref` read wanted as a NATIVE devolves to the plain
+`lexical`/`attribute` read, because the caller would only dereference it
+immediately ("we'd only de-ref right away anyway"). The second piece is
+what makes the common `my int $i; $i = ...` shapes encodable, and it is
+why `var:lexicalref`'s remaining blocks are the object-wanted ones.
 
 *Coverage landed this round.* The routine calling-convention family
 (ops 112-115: assertparamcheck, bindcomplete, p6typecheckrv,
