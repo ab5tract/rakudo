@@ -47,7 +47,12 @@ Session-start facts that keep getting relearned the hard way:
   ~20x faster than cold). Whole-suite sweeps:
   `raku tools/build/evalserver-sweep.raku t/01-sanity ...` — it budgets
   `jobs x heap` against MemAvailable itself; never launch N servers
-  without doing the `N x Xmx` vs free-RAM arithmetic.
+  without doing the `N x Xmx` vs free-RAM arithmetic. Since 2026-09-02
+  `rakudo-eval-server` does that arithmetic itself (its ceiling plus
+  what every live server can still grow into, against MemAvailable),
+  refuses with exit 75 when it does not fit, and runs the JVM in a
+  systemd scope capped at its ceiling. A refusal is the answer: stop a
+  server or lower `RAKUDO_EVALSERVER_HEAP`, never work around it.
 - **`java` must be Oracle GraalVM 25.2.4** (a plain JDK voids all perf
   numbers).
 - **Runtime jars rebuild in seconds, without a setting recompile.** Edits
