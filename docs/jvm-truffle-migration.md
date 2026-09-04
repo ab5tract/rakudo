@@ -363,6 +363,7 @@ it gets measured after every batch, never estimated:
 | + native attribute references  | 15658 (81.7%)  | 683485  (69.3%)           |
 | + the typed assigns            | 15892 (83.0%)  | 700842  (71.1%)           |
 | + native lexical references    | 16868 (88.1%)  | 794535  (80.6%)           |
+| + batch 2 (exceptions, typed attributes, valued if, small ops) | 17400 (90.8%) | 838570 (85.0%) |
 
 (The last row was measured after the 2026-09-04 rebase onto upstream,
 where the mainline is 19146 blocks; the earlier rows are over 19141.)
@@ -392,6 +393,37 @@ bailed), `block immediate` 430, `op gethllsym` 277, `var-with-fallback`
 276, `uint or wide lexical` 272, `regex` 184, `op rethrow` 84, `op hash`
 70. Rank the next batch on THIS list; the survey only says which tags
 are unclaimed, not which claims fail.
+
+*Batch 2 (2026-09-04, nqp 29fd4b583), ranked on that list.* Table rows
+166-185 (the exception family: exception, getextype, setextype,
+setpayload, getmessage, setmessage, newexception, backtrace,
+backtracestrings; isfalse, isbig_I, atposref_i/_u, isrwcont,
+isconcrete_nd, gethllsym; and the `:cont` family die/die_s, throw,
+rethrow, throwextype, which read a resumed result off the frame's return
+register exactly as throwpayloadlex did); two frame-anchored wire
+instructions, `CURLEXPAD` (`Ops.ctx_of` over the program's own frame)
+and `P6ARGVMARRAY` (cf.csd/cf.args through the reflective RakOps
+handle); `nqp::const` through Compiler.nqp's `%const_map`, published as
+the `CODE_CONST_MAP` HLL symbol; the attribute scope with a native
+`.returns` picking getattr_<t>/bindattr_<t>; the two-child `if` in value
+context keeping the condition as the value when it fails (evaluated once
+into a scratch local of its own type, allocated after encoding, re-read
+coerced in the else arm); `VarWithFallback` as the ifnull shape. Gate
+25/25, CORE.c parse 150.1s. Real bails 9017 -> 3159; what is left:
+`typed param` 656 (the wire refused native parameters), `block
+immediate` 554, `uint or wide lexical` 272, `regex` 184, `box_s` arity
+2 (83), `p6return` 82, `hash` 74, `with` 44, `getlexcaller` 42.
+
+**Found by batch 2's check, and older than it: Raku overrides `defor`.**
+`src/vm/jvm/Raku/Ops.nqp` registers the HLL's own `defor` -- definedness
+is the `.defined` method -- while the encoder encoded nqp's `isconcrete`
+form for every HLL, so `$*MISSING // "fallback"` died on-engine (a
+Failure is concrete and undefined). The encoder now builds the
+override's own tree (a fresh tree over the same children, so a bail
+leaves the op untouched) when `$*HLL` is Raku. Of Raku's 41 `add_hll_op`
+names, `defor` is the only one the encoder also encodes generically
+(the p6* family is Raku-only); the rule is to check that file before
+encoding any op generically.
 
 *The typed assigns (2026-09-04).* `assign_i`/`assign_u`/`assign_n`/
 `assign_s` were excluded because nqp's own desugar rewrites the node it is
