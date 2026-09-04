@@ -3,7 +3,7 @@
 # it stops producing output.
 #
 # Single command:
-#   watched-run.raku [--log=PATH] [--stall=SECONDS] [--max=SECONDS] [--show=REGEX ...] -- cmd args...
+#   watched-run.raku [--log=PATH] [--stall=SECONDS] [--max=SECONDS] [--show=TEXT ...] [--show-rx=REGEX ...] -- cmd args...
 #
 # Many test files, in parallel:
 #   watched-run.raku -t=a.t -t=b.t ... [--jobs=N] [--log-dir=DIR] [--stall=..] [--max=..] -- runner args...
@@ -11,13 +11,21 @@
 #
 # --stall    how long a silence is allowed before we call it wedged (default 900)
 # --max      overall ceiling per run, 0 for none (default 0)
-# --show     echo lines matching this regex to stderr as they arrive, prefixed
-#            with elapsed seconds; repeatable. This replaces tailing the log
-#            from outside just to see progress markers.
+# --show     echo lines containing this literal text to stderr as they
+#            arrive, prefixed with elapsed seconds; repeatable. This replaces
+#            tailing the log from outside just to see progress markers.
+# --show-rx  the same, matching a Raku regex (quote the argument; `=` and
+#            spaces are metacharacters to the regex parser).
 # -t         a test file to run as `cmd args... FILE`; repeatable. Each run
 #            gets its own watchdog and its own log under --log-dir.
 # --jobs     how many -t runs may be in flight at once (default 5)
-# --log-dir  where the per-file logs go in -t mode (default sweep-logs)
+# --log-dir  where the per-file logs go in -t mode (default sweep-logs).
+#            When every file has run, DIR/SUMMARY is written (ok/total,
+#            elapsed seconds, the runner, one line per non-ok file with its
+#            exit code and verdict), so a detached sweep leaves its verdict
+#            on disk and a waiter can poll for the file instead of counting
+#            logs. It is written to a temporary name and renamed, so it is
+#            never seen half-written.
 #
 # All the timing lives in here, as timer events on the react block, so the
 # caller just starts this and waits for it to exit; no polling on the outside.
@@ -143,17 +151,21 @@ sub MAIN(
     Int  :$max     = 0,
     Int  :$jobs    = 5,
     :@show,
+    :@show-rx,
     :@t
  ) {
     @cmd or die "nothing to run: pass the command after --\n";
 
-    # Compile the patterns before anything starts: a broken regex must fail
-    # here, not inside the react block once the child is already running.
-    my @pats = @show.map: -> $show {
-        my $s = $show ~~ RegexInput ?? $show.substr(1, *-1) !! $show;
-        my $rx = try "anon regex \{ $s \}".EVAL;
-        $rx // die "bad --show pattern '$s': { $!.message }\n";
-    };
+    # A --show is literal text; a --show-rx is compiled before anything
+    # starts, so a broken regex fails here, not inside the react block once
+    # the child is already running.
+    my @pats = flat
+        @show.map(-> Str $text { *.contains($text) }),
+        @show-rx.map(-> $show {
+            my $s = $show ~~ RegexInput ?? $show.substr(1, *-1) !! $show;
+            my $rx = try "anon regex \{ $s \}".EVAL;
+            $rx // die "bad --show-rx pattern '$s': { $!.message }\n";
+        });
 
     if @t {
         # A -t argument may name a directory; it stands for every test file
@@ -176,11 +188,24 @@ sub MAIN(
                     run-one([|@cmd, $file], :log("$log-dir/$name.log"), :$stall, :$max,
                             :@pats, :tag($file.IO.basename));
             note "{ $code == 0 ?? 'ok  ' !! 'FAIL' } $file (exit $code, $verdict)";
-            $file => $code
+            $file => ($code, $verdict)
         };
-        my @failed = @results.grep(*.value != 0);
-        note "{ @results.elems - @failed.elems } of { @results.elems } ok "
-                ~ "in {(now - $started).Int}s, logs: $log-dir";
+        my @failed = @results.grep(*.value[0] != 0);
+        my $elapsed = (now - $started).Int;
+        my $line = "{ @results.elems - @failed.elems } of { @results.elems } ok "
+                ~ "in {$elapsed}s, logs: $log-dir";
+        note $line;
+        # The verdict on disk, whole or absent: written beside the logs
+        # under a temporary name and renamed into place.
+        my $tmp = "$log-dir/SUMMARY.tmp";
+        spurt $tmp, join "\n",
+            "ok { @results.elems - @failed.elems } of { @results.elems }",
+            "elapsed {$elapsed}s",
+            "runner { @cmd.join(' ') }",
+            "finished { DateTime.now }",
+            |@failed.sort(*.key).map({ "FAIL { .key } exit { .value[0] } { .value[1] }" }),
+            '';
+        rename $tmp, "$log-dir/SUMMARY";
         exit @failed ?? 1 !! 0;
     }
     else {
