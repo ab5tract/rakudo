@@ -570,11 +570,52 @@ mainline block -- neither end reaches the direct road. The
 engine-to-engine measurement and the t/ gate wait on the rebuild that
 also carries the typed-assign encoding (the `op:assign_i` sole-blocker).
 
-Next: a DSL specialization per applicable program with a `DirectCallNode`
-on the callee's target (inlining across the dispatch), restricted to
-programs whose guards read only arguments and literals; then the
-calling-convention ops (`p6typecheckrv`, `p6decontrv`) as dispatch
-programs proper.
+*What the CORE.c compile then taught (2026-09-04, afternoon).* The
+compile's parse stage had gone from 164s (the post-rebase build) to
+289-323s, and the four-way A/B cleared the dispatch road of all but ~15s
+of it. Truffle's compilation trace found the real cost: 114 of 1650
+compilations failed with "code installation failed: code is too large"
+after a mean 6.4s each -- 733s of the 1880s the run compiled at all --
+and such a root runs interpreted afterwards. Program size was not the
+reason (the failing roots were 94-836 wire words); partial evaluation
+inflated every root to ~1.5KB of machine code per wire word.
+`compiler.TraceMethodExpansion` with `engine.NodeSourcePositions` on a
+48-word accessor that compiled to 44KB named the mass: 70% of its IR
+under one lexical read, in Kotlin's `lateinit` and `!!` checks, whose
+failure paths (stack-trace sanitizing and StackTraceElement formatting)
+PE inlines in full, ~330 IR nodes per check; `Ops.createNull` alone was
+~700 nodes per `nqp::null()`. The dispatch fold added its own: the direct
+engine entry inlined per folded program, ~3000 nodes per site, for a call
+that ends in an indirect `CallTarget.call` PE cannot see through.
+
+The fixes (nqp "keep Kotlin's null and lateinit checks out of compiled
+code"): hot paths read the frame's fields from Java (lexical get/bind,
+typed result read and return store, the null constant as a compilation
+constant); nqp-runtime compiles with the Java-interop null assertions
+off; the fold's invoke road is a boundary, only its guard tests stay in
+compiled code. Roots are named `<block>[<wire words>]` in traces, and
+`NQP_CODE_MAX_COMPILE` guards against the next such wall. Result: the
+identity method 103KB -> 8KB, `IMPL-OPTIMIZE` 252KB -> 58KB, mean root
+36KB -> 11KB, size failures 114 -> 0, total JIT time 1880s -> 224s, the
+method-call loop 30% faster, and **CORE.c's parse stage 145s** -- below
+the pre-migration 164s for the first time.
+
+Two other per-call costs found on the way and fixed: `CallFrame`
+construction searched the whole dynamic caller chain for a live outer on
+every invocation of a code ref with no outer (~1.1M searches per module
+compile, zero successes; now gated on a live-invocation count, since
+taking the prior invocation outright as MoarVM does breaks static code
+refs invoked inside a recursive outer), and `p6typecheckrv` re-derived a
+return type's genericness through the metamodel on every return (cached
+per signature in rakudo's RakOps), with the `Int:D` parameter check
+lowered to base type plus concreteness so the type-check cache answers it.
+
+Rule written into the code: nothing Kotlin on a PE-visible path unless it
+is a plain field access, and every new fast path gets checked with the
+expansion trace. Still open: 13 roots that bail with "deopt taken too
+many times" (`PERFORM-PARSE`, `IMPL-QAST-DECL`), the fold's per-install
+assumption invalidation (288 invalidations against 38 on the old road),
+and the `DirectCallNode` step for inlining across the dispatch.
 
 ## Phase 0 baselines (2026-09-01, GraalVM 25.2.4, one warm 8g server)
 
