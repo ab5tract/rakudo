@@ -367,6 +367,7 @@ it gets measured after every batch, never estimated:
 | + batch 3 (native parameters, immediate blocks) | 17597 (91.9%) | 857964 (87.0%) |
 | + batch 4 (a tranche of small ops) | 17979 (93.9%) | 893609 (90.6%) |
 | + batch 5 (cond-taking loops, more small ops) | 18051 (94.2%) | 899238 (91.2%) |
+| + plain uint lexicals          | 18051 (94.2%)  | 899238  (91.2%)           |
 
 (The last row was measured after the 2026-09-04 rebase onto upstream,
 where the mainline is 19146 blocks; the earlier rows are over 19141.)
@@ -752,6 +753,44 @@ on the engine-to-engine loop, neutral on the compile, where only 37
 callees inlined: most of what the compiler calls is still bytecode-bodied
 or has not run before its caller compiles. Still open: the remaining 38
 invalidations the old road also has, and more of the compiler on-engine.
+
+
+*Where coverage stands, and the true remaining distance (2026-09-04).*
+Six batches this session took the CORE.c mainline from 83.0% to **94.2%
+of blocks (91.2% of nodes)**, gate green at every step. What is left is
+not a longer tail of the same -- it is three structural walls, and the
+honest count of each from `NQP_CODE_BAIL=1`:
+
+  - `regex` (184 blocks): the rx engine's by design. A QAST::Regex node
+    is the grammar engine's descriptor, never encoded as general code;
+    this is a permanent exclusion, not a gap to close.
+  - `op hash` (109): blocked on the hash/list binder bug bisected to
+    BOOTSTRAP `OperatorProperties.new` (cuid 1262), documented above.
+    Until that is understood, `hash` stays out, and so do the blocks
+    that only it blocks.
+  - `op p6return` / `op with` (82 / 51): deferred this session. A first
+    cut of both broke the setting compile -- p6return's mid-body return
+    stores into `cf.caller` and marks `outer.exitAfterUnwind`, which is
+    wrong for a phaser closure whose caller is not the routine it should
+    return from, and it faulted under the SUCCEED handler at BEGIN time.
+    These need the engine's own return-from-routine protocol, not the
+    bytecode path's frame-register shape; that is real design work.
+
+Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
+rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
+(sized native parameters, which want the bytecode path's post-fetch
+truncation). The plain-uint-lexical batch is the shape of what is left
+below the walls: it removed all 272 of its own bails and bought zero
+blocks, because every uint lexical sat in a block another wall already
+blocked -- the sole-blocker ranking predicted exactly that, and it is why
+the number held at 94.2%.
+
+**Deletion (the actual Phase 5) cannot follow yet.** It needs 100%
+encodability per tier, and three of the walls above are not this
+session's to move: regex is deliberately the rx engine's, hash waits on
+the binder bug, and the return family wants a designed protocol. The
+work that remained mechanical has been done; the rest is named here so
+the next session starts from the walls, not from a survey number.
 
 ## Phase 0 baselines (2026-09-01, GraalVM 25.2.4, one warm 8g server)
 
