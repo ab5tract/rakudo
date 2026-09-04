@@ -524,6 +524,49 @@ failures. Fix it before trusting any warm-server sweep again.
 set plus a random roll through one warm server, aborting loudly on a slow
 or hung file. It inherits the server-death problem above.
 
+## Dispatch on Truffle (started 2026-09-04)
+
+The architecture target above says dispatch programs become guard nodes
+and assumptions. The first two steps landed in nqp (commit "Code engine:
+dispatch programs replay as PE-visible code, and enter engine callees
+directly"):
+
+- *Folded replay.* Each engine dispatch instruction keeps the replayable
+  prefix of its site's recorded programs as a compilation-final array
+  (`NqpDispatch`), and the guards and outcomes are evaluated by plain Java
+  that partial evaluation folds. Value sources fold too: an attribute read
+  is only recorded behind a type guard on the object it reads (the
+  tracked-attribute contract), so its storage class and slot hint resolve
+  once and the read is an exact-class speculation plus a switch on a
+  constant. Recording is untouched; a miss is `Dispatch.fallback` and a
+  refold; refolds and the per-run reset swap the array under a fresh
+  Assumption.
+- *Direct engine entry.* `codeRun` notes the compiled program on the
+  block's StaticCodeInfo; an invoke outcome that resolves to such a code
+  ref builds the frame and runs the program as the stub would, skipping
+  the MethodHandle, the stub, and `codeRun`.
+- *What measuring it found first (rakudo, RakOps.p6typecheckrv):* every
+  return of a routine with a declared return type looked up and invoked
+  `archetypes` and `generic` through the metamodel -- two `find_method`
+  walks per return in the steady state. MoarVM's raku-rv-typecheck
+  dispatcher records that once; the JVM op now caches it per signature
+  (`rvChecks`, reset with the dispatch caches). On the 30k-iteration
+  probe this removed ~61k engine block entries (`archetype`) per run.
+
+Measured on a 300k method-call loop: guard-side boundary crossings went
+from three per dispatch to zero; wall time sits at parity with the old
+road (`NQP_CODE_DISPATCH_OLD=1` is the A/B), because that benchmark's hot
+callee `infix:<+>` has no engine body and its caller is the bailing
+mainline block -- neither end reaches the direct road. The
+engine-to-engine measurement and the t/ gate wait on the rebuild that
+also carries the typed-assign encoding (the `op:assign_i` sole-blocker).
+
+Next: a DSL specialization per applicable program with a `DirectCallNode`
+on the callee's target (inlining across the dispatch), restricted to
+programs whose guards read only arguments and literals; then the
+calling-convention ops (`p6typecheckrv`, `p6decontrv`) as dispatch
+programs proper.
+
 ## Phase 0 baselines (2026-09-01, GraalVM 25.2.4, one warm 8g server)
 
 - Full spectest: 1306 files / 73,273 tests / **8449s wall** (pre-fix
