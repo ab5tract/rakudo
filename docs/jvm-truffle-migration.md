@@ -366,6 +366,7 @@ it gets measured after every batch, never estimated:
 | + batch 2 (exceptions, typed attributes, valued if, small ops) | 17400 (90.8%) | 838570 (85.0%) |
 | + batch 3 (native parameters, immediate blocks) | 17597 (91.9%) | 857964 (87.0%) |
 | + batch 4 (a tranche of small ops) | 17979 (93.9%) | 893609 (90.6%) |
+| + batch 5 (cond-taking loops, more small ops) | 18051 (94.2%) | 899238 (91.2%) |
 
 (The last row was measured after the 2026-09-04 rebase onto upstream,
 where the mainline is 19146 blocks; the earlier rows are over 19141.)
