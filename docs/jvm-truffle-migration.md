@@ -812,11 +812,20 @@ honest count of each from `NQP_CODE_BAIL=1`:
     NOT equivalent: `$!need-succeed-handler` is a LexicalScope property
     independent of a Routine's `$!may-use-return`, so a block with
     `succeed` need not have a RETURN handler to catch the throw, which is
-    exactly why p6return uses the direct frame mechanism. The correct fix
-    needs the engine's own non-local-return that works without a handler
-    frame -- real frame-lifecycle design. `with`/`without` was reverted
-    alongside it; the withy `.defined` path wants its own encoding. Both
-    are named here so the next session starts from the mechanism.
+    exactly why p6return uses the direct frame mechanism. The precise
+    mechanism, traced this session: `p6return` appears in exactly one place,
+    the SUCCEED handler block (scoping.rakumod:459). Enabling it engine-side
+    makes that HANDLER block encode, so engine `p6return` runs its frame
+    manipulation (`return_o` into the caller register + `outer.exitAfter-
+    Unwind`) while the handle machinery (`ExceptionHandling.invokeHandler`)
+    invokes the handler expecting the BYTECODE frame protocol -- the two do
+    not compose, hence the `P6Opaque.allocate` NPE at BEGIN. The committed
+    state correctly BAILS `p6return`, keeping those handler blocks on
+    bytecode (the price is 82 blocks). The concrete next step is to make the
+    engine's handler-invocation honor `exitAfterUnwind` set from an
+    engine-frame handler the way it does from a bytecode one -- not another
+    frame-register variant. `with`/`without` was reverted alongside it; the
+    withy `.defined` path wants its own encoding.
 
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
