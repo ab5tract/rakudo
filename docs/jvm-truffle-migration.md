@@ -831,6 +831,24 @@ honest count of each from `NQP_CODE_BAIL=1`:
     propagation, the way the flat-named-arg and defor bugs were fixed.
     `with`/`without` rides the same blocks and the same cascade.
 
+    *Localized further (2026-09-04, `NQP_UNBOX_DEBUG` naming the frame): the
+    first host error is `Ops.unbox_i` on a uint64-max bigint inside
+    `IMPL-FITS-NATIVE-INT` (literals.rakumod:96), whose body is
+    `try $fits := nqp::iseq_I(nqp::box_i(nqp::unbox_i($value), ...), $value)`
+    -- the `try` is MEANT to catch the unbox failure and answer "does not
+    fit". The op boundary wraps that RuntimeException as `NqpHostError` and
+    `hostErrToUnwind` converts it to `dieInternal`, so the engine `try`
+    should catch it -- which means this unbox may be a CAUGHT red herring
+    (the instrument prints on every throw, caught or not) and the real
+    failure the downstream `P6Opaque.allocate` NPE seen during
+    `COMP_EXCEPTION`/`convert-exception`. The unresolved question, and the
+    exact next diagnostic, is `NQP_EH_DEBUG=1` on this build: does
+    `hostErrToUnwind` run for that unbox and does the `try` catch it, or
+    does something escape? Either way the failure is in the engine
+    exception-handling of these BEGIN-time blocks, not p6return's own
+    execution (which never runs), and it is a bounded runtime bug, not a
+    protocol redesign.*
+
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
 (sized native parameters, which want the bytecode path's post-fetch
