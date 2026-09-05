@@ -1179,17 +1179,21 @@ A box_u(unbox_u(box_u(2^64-2))) round-trip now answers the large value.
 Still not Flat: a uint lexical, attribute or parameter read into an
 Int boxes signed on BOTH paths, and the last cause is the BYTECODE
 COMPILER itself -- add_hll_box('', RT_UINT) emits hllboxtype_i + box_i,
-the nqp variant bootint + box_i. That, plus the engine's deferred uint
-lexical/parameter mapping to T_UINT, is batch 24 -- which found two
-more on its first run: the engine's dispatch flag packs the argument
-type into two bits and T_UINT (4) IS the named bit, so a uint argument
-was misread as a named one ("unknown tag" mid-program; now wire bit 16
--> the callsite's ARG_UINT, as process_args emits); and the runtime
-BINDER boxed an ARG_UINT argument into an object parameter with box_i
-at four sites, so `say $x` printed -2 with every compiler fix in place.
-Five signed sites in all for one native type; and a uint boxes to Int,
-since Raku's uint_box is the UInt subset. Flat's guard stays until the
-whole chain lands.
+the nqp variant bootint + box_i. That, plus the engine's deferred uint lexical/parameter mapping, was
+attempted next (batches 24/24b/24c) and REVERTED. It kept uncovering
+more signed sites -- the dispatch flag packs the arg type in two bits
+and T_UINT (4) collides with the named bit ("unknown tag" mid-program);
+the runtime binder boxes an ARG_UINT argument with box_i at four sites;
+return_u tags the return RET_INT so a `--> uint` return boxes signed;
+the `is rw` accessor's UIntAttrRef container and the Raku signature
+binder are two more, the latter now throwing on a 2^64-2 literal arg --
+a wide, cross-cutting chain with no clean stopping point mid-session.
+So the line is drawn at batch 23: box_u / unbox_u / set_uint and the
+*param_u fetches are unsigned (a native round-trip is correct), and
+Rakudo::Iterator.Flat KEEPS its `#?if jvm` guard. Finishing the uint
+boxing everywhere -- every RET_UINT reader, ARG_UINT binder site,
+container FETCH and the RT_UINT compiler box, with one shared unsigned
+helper -- is its own focused task, not a detour inside the op work.
 And Stash's bindattr-for-atomicbindattr. Un-guarding it still broke
 building CORE.d, and the diagnosis turned it into a two-line runtime fix
 (batch 21): P6OpaqueBaseInstance's atomic accessors reflected on the
