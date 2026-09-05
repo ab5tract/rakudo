@@ -75,7 +75,12 @@ my sub run-one(@cmd, Str :$log!, Int :$stall!, Int :$max!, :@pats, Str :$tag,
             my $who = $tag ?? " $tag" !! '';
             for @pats -> $pat {
                 whenever $lines.grep($pat) -> $l {
-                    note "[{(now - $started).Int}s]$who $l";
+                    # Prefix the elapsed seconds and mirror the marker into
+                    # the log, so a detached run (terminal discarded) still
+                    # carries the timing -- greppable as a leading [Ns].
+                    my $mark = "[{(now - $started).Int}s]$who $l";
+                    note $mark;
+                    $fh.say: $mark;
                 }
             }
         }
