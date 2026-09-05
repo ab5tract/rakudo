@@ -784,12 +784,20 @@ honest count of each from `NQP_CODE_BAIL=1`:
     through `new`. A string-only hash is fine; the native-int value is the
     trigger. The encoder's bindkey order matches the bytecode path
     (`bindkey(hash, key, value)`, op 68) and the int value is boxed as
-    `as_jast(:want(RT_OBJ))` boxes it, so the cause is subtler -- most
-    likely the coercion splice inside the bindkey opcall or the
-    constant-fold consuming the engine hash differently. Minimal repro
+    `as_jast(:want(RT_OBJ))` boxes it, so the cause is at runtime, not
+    in the wire (the OPCALL/COERCE walk is correct). Sharper symptom: the
+    call is `OperatorProperties.new(|%value, :dba($group))`
+    (operator-properties.rakumod:551); `|%value` flattens the inner hash,
+    and the `'fiddly' => 1` entry comes out with the VALUE as the key --
+    named "1" -- so my engine-built hash, when flattened, swaps that
+    entry's key and value, and ONLY the entry whose value is a native
+    (boxed) int. Suspect the hash TYPE from op 140 (hllhash) round-tripping
+    a boxed-int value differently than the bytecode hash, or the box_i'd
+    value confusing the flatten's key/value split. Needs runtime
+    instrumentation on the reproducer, not static reasoning. Minimal repro
     (~30s, hash on): `my constant H := nqp::hash('a','x','fiddly',1)` in a
-    method, `--setting=NULL.c`. A reproduced narrow bug now, not the old
-    mystery.
+    method, `--setting=NULL.c`, then flatten H. A reproduced narrow bug
+    now, not the old mystery.
   - `op p6return` / `op with` (82 / 51): deferred. Three distinct
     encodings of `p6return` were tried and all three fail identically --
     a host `NullPointerException` in `P6Opaque.allocate` (a null
