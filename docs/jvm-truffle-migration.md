@@ -368,6 +368,7 @@ it gets measured after every batch, never estimated:
 | + batch 4 (a tranche of small ops) | 17979 (93.9%) | 893609 (90.6%) |
 | + batch 5 (cond-taking loops, more small ops) | 18051 (94.2%) | 899238 (91.2%) |
 | + plain uint lexicals          | 18051 (94.2%)  | 899238  (91.2%)           |
+| + engine-covered regex         | 18051 (94.2%)  | 899238  (91.2%)  (co-blocked; see below) |
 
 (The last row was measured after the 2026-09-04 rebase onto upstream,
 where the mainline is 19146 blocks; the earlier rows are over 19141.)
@@ -761,9 +762,15 @@ of blocks (91.2% of nodes)**, gate green at every step. What is left is
 not a longer tail of the same -- it is three structural walls, and the
 honest count of each from `NQP_CODE_BAIL=1`:
 
-  - `regex` (184 blocks): the rx engine's by design. A QAST::Regex node
-    is the grammar engine's descriptor, never encoded as general code;
-    this is a permanent exclusion, not a gap to close.
+  - `regex` -- RESOLVED (nqp 5837b78b0). This was wrongly called a
+    permanent wall. A rule the grammar engine covers is compiled by the
+    bytecode path as a small CALL into the engine (engine_jast), not as a
+    bytecode matcher; the encoder now mirrors that -- the prologue as a
+    QAST tree ending in a new `rxmatch` op, the rule's callbacks riding
+    the CODEREF road as bytecode. 184 blocks off the bail list; gate green
+    on a build whose whole grammar compiled with it active. Only a rule
+    the engine cannot express (rx_descriptor null) still needs the
+    bytecode matcher, and that is the genuinely permanent part.
   - `op hash` (109): blocked on the hash/list binder bug bisected to
     BOOTSTRAP `OperatorProperties.new` (cuid 1262), documented above.
     Until that is understood, `hash` stays out, and so do the blocks
@@ -796,18 +803,27 @@ honest count of each from `NQP_CODE_BAIL=1`:
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
 (sized native parameters, which want the bytecode path's post-fetch
-truncation). The plain-uint-lexical batch is the shape of what is left
-below the walls: it removed all 272 of its own bails and bought zero
-blocks, because every uint lexical sat in a block another wall already
-blocked -- the sole-blocker ranking predicted exactly that, and it is why
-the number held at 94.2%.
+truncation). Both the plain-uint-lexical batch and the regex batch are the shape of
+what is left below the remaining walls: each removed all of its own bails
+(272 uint, 184 regex) and bought ZERO blocks in the CORE.c mainline,
+because every one of those blocks is also blocked by `hash`, `p6return`,
+`with`, or a native-parameter type -- the multiply-blocked interior the
+sole-blocker ranking always predicted. The number holds at 94.2% not
+because the work did nothing (regex is a real 184-block tier of the
+grammar now on-engine) but because the mainline's remaining blocks each
+carry two or three reasons, and freeing one leaves the others.
 
-**Deletion (the actual Phase 5) cannot follow yet.** It needs 100%
-encodability per tier, and three of the walls above are not this
-session's to move: regex is deliberately the rx engine's, hash waits on
-the binder bug, and the return family wants a designed protocol. The
-work that remained mechanical has been done; the rest is named here so
-the next session starts from the walls, not from a survey number.
+**Deletion (the actual Phase 5) still cannot follow.** It needs 100%
+encodability, and after regex the CORE.c mainline's remaining blockers
+are: `hash` (109, the binder bug), `p6return`/`with` (133, the return
+protocol), native-parameter types (95, sized/uint/wide params -- the
+fetch wants the bytecode path's post-fetch truncation), and a small tail
+(floor_n, objectid, atposnd, ord, rindex, getlexrelcaller, ...). The
+first two are the genuine walls -- one an unresolved bug, one a design
+question; the rest is mechanical but co-blocked, so it moves the number
+only once the two walls fall. regex proved a claimed wall could be
+tractable on a hard look, so `hash` and `p6return` deserve the same
+before being called immovable -- but each is real work, not a batch.
 
 ## Phase 0 baselines (2026-09-01, GraalVM 25.2.4, one warm 8g server)
 
