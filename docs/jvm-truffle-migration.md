@@ -913,9 +913,24 @@ honest count of each from `NQP_CODE_BAIL=1`:
     `command_eval`. The precise fix is in the engine HANDLE's
     `exitAfterUnwind` handling: it must not tear down frames past a pending
     unwind that targets a deeper (bytecode) handler -- an engine↔bytecode
-    frame-exit-ORDER bug. Confident code change needs a frame-exit-order
-    trace (when handler-59's frame leaves vs when its unwind is raised),
-    which is the one remaining instrument before the fix.*
+    frame-exit-ORDER bug. The frame-exit-order was then read
+    straight from the existing trace (no new build): the `uTarget=59`
+    unwind propagates UP through `COMP_EXCEPTION`, `from-slurpy-flat`,
+    `new`, `EXPR` and anonymous frames -- none carrying `hid=59` -- and
+    escapes. So `handlerDynamic` found handler 59 by walking the LOGICAL
+    frame chain (`tc.curFrame.caller`...), but the unwinder is thrown up
+    the JAVA stack, and with an engine frame (`COMP_EXCEPTION`) in the path
+    the two DIVERGE: handler 59's frame is not a Java-stack ancestor of the
+    throw point, so the unwind can never reach it. This is the architectural
+    root -- and it vindicates the original "frame protocol" instinct while
+    correcting its specifics. It is NOT a targeted bug fix: it needs the
+    engine frame to participate in the dynamic exception-handler chain the
+    way a bytecode frame does (so a handler found logically is reachable on
+    the actual stack), OR the engine HANDLE to re-home unwinds whose target
+    is not a Java-stack ancestor. That is design-level work on the
+    engine/runtime exception model, which is exactly why the committed state
+    correctly bails these blocks to bytecode. It is the real, final shape
+    of the p6return/with blocker.*
 
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
