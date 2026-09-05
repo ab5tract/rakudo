@@ -481,14 +481,29 @@ object RakOps {
     private val targetTypeSite = CallSiteDescriptor(
         byteArrayOf(CallSiteDescriptor.ARG_OBJ, CallSiteDescriptor.ARG_OBJ), null)
 
-    @JvmStatic
-    fun p6typecheckrv(rv: SixModelObject?, routine: SixModelObject?, bypassType: SixModelObject?, tc: ThreadContext): SixModelObject? {
-        val gcx = key.getGC(tc)
-        val sig = routine!!.get_attribute_boxed(tc, gcx.Code, "$!signature", HINT_CODE_SIG)
-        var rtype = sig!!.get_attribute_boxed(tc, gcx.Signature, "$!returns", HINT_SIG_RETURNS)
+    /* Return-value type checks. What the check needs to know about a
+     * routine -- its declared return type and whether that type is generic
+     * (needs instantiating against the frame on every return) -- is a
+     * property of the signature, so it is worked out once per signature
+     * and kept, the way the raku-rv-typecheck dispatcher on MoarVM guards
+     * on the return type once and never asks the metamodel again. Before
+     * this, every return of a routine with a declared return type looked
+     * up and invoked `archetypes` and `generic` through the metamodel
+     * (find_method, mro walk, method_table) -- two metamodel calls per
+     * return in the steady state, dwarfing the call itself. Keyed by the
+     * signature object, so it goes cold with the dispatch caches for the
+     * same reason rvDecontSites does. */
+    private class RvCheck(@JvmField val rtype: SixModelObject?, @JvmField val generic: Boolean)
+    private val rvChecks = java.util.concurrent.ConcurrentHashMap<SixModelObject, RvCheck>()
+    init {
+        org.raku.nqp.dispatch.DispatchBootstrap.registerResettable { rvChecks.clear() }
+    }
+
+    private fun rvCheckFor(sig: SixModelObject, gcx: GlobalExt, tc: ThreadContext): RvCheck {
+        rvChecks[sig]?.let { return it }
+        val rtype = sig.get_attribute_boxed(tc, gcx.Signature, "$!returns", HINT_SIG_RETURNS)
+        var generic = false
         if (rtype != null) {
-            /* The return type could be generic. In that case we have
-             * to call instantiate_generic before doing the type check. */
             val HOW = rtype.st.HOW
             val archetypesMeth = Ops.findmethod(HOW, "archetypes", tc)
             /* The type must ride along: DefiniteHOW's nullary archetypes()
@@ -499,27 +514,44 @@ object RakOps {
             val genericMeth = Ops.findmethodNonFatal(Archetypes, "generic", tc)
             if (genericMeth != null) {
                 Ops.invokeDirect(tc, genericMeth, Ops.invocantCallSite, arrayOf<Any?>(Archetypes))
-                if (Ops.istrue(Ops.result_o(tc.curFrame!!), tc) == 1L) {
-                    val ig = Ops.findmethod(HOW, "instantiate_generic", tc)
-                    val ContextRef = tc.gc.ContextRef!!
-                    val cc = ContextRef.st.REPR.allocate(tc, ContextRef.st)
-                    (cc as ContextRefInstance).context = tc.curFrame!!
-                    Ops.invokeDirect(tc, ig, genIns, arrayOf<Any?>(HOW, rtype, cc))
-                    rtype = Ops.result_o(tc.curFrame!!)
-                    /* A generic that instantiated to a native type checks
-                     * against its box: the routine body produces boxed
-                     * values. Same mapping the raku-rv-typecheck-generic
-                     * dispatcher applies on MoarVM. */
-                    val ni = Ops.gethllsym("Raku", "NativeInstantiation", tc)
-                    if (ni != null && Ops.isnull(ni) == 0L) {
-                        val boxMeth = Ops.findmethodNonFatal(ni, "box", tc)
-                        if (boxMeth != null) {
-                            Ops.invokeDirect(tc, boxMeth, targetTypeSite,
-                                arrayOf<Any?>(ni, rtype))
-                            val boxed = Ops.result_o(tc.curFrame!!)
-                            if (boxed != null && Ops.isnull(boxed) == 0L)
-                                rtype = boxed
-                        }
+                generic = Ops.istrue(Ops.result_o(tc.curFrame!!), tc) == 1L
+            }
+        }
+        val check = RvCheck(rtype, generic)
+        rvChecks[sig] = check
+        return check
+    }
+
+    @JvmStatic
+    fun p6typecheckrv(rv: SixModelObject?, routine: SixModelObject?, bypassType: SixModelObject?, tc: ThreadContext): SixModelObject? {
+        val gcx = key.getGC(tc)
+        val sig = routine!!.get_attribute_boxed(tc, gcx.Code, "$!signature", HINT_CODE_SIG)
+        val check = rvCheckFor(sig!!, gcx, tc)
+        var rtype = check.rtype
+        if (rtype != null) {
+            /* A generic return type has to be instantiated against this
+             * very frame before the check. */
+            if (check.generic) {
+                val HOW = rtype.st.HOW
+                val ig = Ops.findmethod(HOW, "instantiate_generic", tc)
+                val ContextRef = tc.gc.ContextRef!!
+                val cc = ContextRef.st.REPR.allocate(tc, ContextRef.st)
+                (cc as ContextRefInstance).context = tc.curFrame!!
+                Ops.invokeDirect(tc, ig, genIns, arrayOf<Any?>(HOW, rtype, cc))
+                rtype = Ops.result_o(tc.curFrame!!)
+                /* A generic that instantiated to a native type checks
+                 * against its box: the routine body produces boxed
+                 * values. Same mapping the raku-rv-typecheck-generic
+                 * dispatcher applies on MoarVM. */
+                val ni = Ops.gethllsym("Raku", "NativeInstantiation", tc)
+                if (ni != null && Ops.isnull(ni) == 0L) {
+                    val boxMeth = Ops.findmethodNonFatal(ni, "box", tc)
+                    if (boxMeth != null) {
+                        Ops.invokeDirect(tc, boxMeth, targetTypeSite,
+                            arrayOf<Any?>(ni, rtype))
+                        val boxed = Ops.result_o(tc.curFrame!!)
+                        if (boxed != null && Ops.isnull(boxed) == 0L)
+                            rtype = boxed
                     }
                 }
             }
