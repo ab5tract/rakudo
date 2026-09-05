@@ -869,9 +869,20 @@ honest count of each from `NQP_CODE_BAIL=1`:
     The SECOND escapes, which means the engine handle's host-error path
     (inner TryCatch -> `hostErrToUnwind` -> outer catch) leaves
     `cf.curHandler` in a bad state, so the next handle's `handlerDynamic`
-    no longer finds its CATCH. The fix is `curHandler` restoration on the
-    host-error catch path in the HANDLE builder / the outer catch's
-    `setCurHandler`, verified by re-running with two big-literal calls.*
+    no longer finds its CATCH. The fix location narrowed once
+    more: `try` compiles to `handle` with CATCH, whose builder DOES emit an
+    inner TryCatch that runs `hostErrToUnwind` -- yet across the whole
+    failing build `hostErrToUnwind` is called ONLY with `NqpUnwind`, NEVER
+    with `NqpHostError`. So the bigint-unbox's `NqpHostError` never reaches
+    the try's host-error conversion; it bypasses the inner TryCatch and
+    escapes. Host errors in `try` work everywhere else (HEAD builds), so
+    this is context-specific to `IMPL-FITS-NATIVE-INT`'s nested
+    `iseq_I(box_i(unbox_i(...)))`. The exact next diagnostic: print at the
+    HANDLE inner TryCatch's catch clause what exception it receives for
+    this block -- does the inner TryCatch not catch `NqpHostError` here, or
+    does the op-level `carry` fail to wrap this unbox as `NqpHostError`?
+    That one print settles the fix. p6return is not implicated (0 firings);
+    this is a bounded engine handle host-error catching gap.*
 
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
