@@ -1118,6 +1118,13 @@ block's `$_`, arity 0; code.rakumod's implicit-topic-mode 1), whose
 default resolves in the callee's own binder either way. The encoder
 bailed on `arity > 0 || ann('count')`; correct is `arity > 0` only.
 That is the 45 direct refusals plus the 82 co-blocked given/when ones.
+Landed (batch 20) with 20b's file-op rows and 21's atomic-delegate
+fix: 96.5% (18477), only +7 net -- the 45 refusals are gone from the
+histogram, but every routine they sat in is refused a third time (loop
+shape, chained chain, resume). The remaining ~670 blocks are a long
+tail of 1-8 each plus that structural cluster: from here the yield per
+op row is small, and the T_UINT correctness batch matters more than
+the next percent.
 
 **Syscalls are the newdisp op mechanism.** nqp::syscall(name, args)
 compiles to dispatch('boot-syscall', name, args) on moar AND here
@@ -1130,6 +1137,10 @@ stat_time / file* ops through an opaque JavaObjectWrapper StatHandle
 (a missing file yields EXISTS=0, no throw -- IO::Path relies on it).
 Proven 9/9 by a direct nqp::syscall test after a 5-second runtime-jar
 sync: runtime ops never need the full build to test.
+Landed (nqp 512ca4fef, rakudo a00180d6c) at 96.4%: the un-guarded
+moar code routes through the FILETEST-* helpers and the dir iterator,
+whose filereadable/filewritable/fileexecutable/fileislink/lstat/chown/
+chmod/getenvhash calls had no encoder rows (batch 20b adds them).
 
 **Backend directives.** Surveyed every `#?if jvm` / `#?if !moar` in the
 Rakudo source (140 sites; the js ones are moot). Removed the stray
