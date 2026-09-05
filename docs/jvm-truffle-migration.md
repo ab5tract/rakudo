@@ -849,6 +849,20 @@ honest count of each from `NQP_CODE_BAIL=1`:
     execution (which never runs), and it is a bounded runtime bug, not a
     protocol redesign.*
 
+    *ANSWERED (`NQP_EH_DEBUG`): the bigint-unbox is NOT a red herring. The
+    trace shows `handleUnwind ex=NqpUnwind target=1552 uTarget=1552
+    curFrame=IMPL-FITS-NATIVE-INT` -- the engine `try`'s unwind runs and
+    its target matches -- yet the host exception re-fires and the nqp
+    stack then escapes all the way to MAIN, failing the compile. So the
+    engine `try`/handle runs its unwind but does NOT fully suppress the
+    host-error-converted exception: it is caught, its handler runs, and it
+    still escapes. THAT is the precise defect -- an engine handle host-error
+    suppression bug, reproduced by a uint64-max integer literal driving
+    `IMPL-FITS-NATIVE-INT`'s `try { ... nqp::unbox_i($big) ... }`. The fix
+    is in the engine handle's host-error path (why a matched-target unwind
+    still propagates); p6return itself is not implicated. This is the
+    single concrete bug between 94.2% and the p6return/with blocks.*
+
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
 (sized native parameters, which want the bytecode path's post-fetch
