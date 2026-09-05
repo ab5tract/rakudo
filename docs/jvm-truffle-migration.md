@@ -863,6 +863,16 @@ honest count of each from `NQP_CODE_BAIL=1`:
     still propagates); p6return itself is not implicated. This is the
     single concrete bug between 94.2% and the p6return/with blocks.*
 
+    *Refined fix location: the unbox runs TWICE (two uint64-max literals
+    reach `IMPL-FITS-NATIVE-INT`), and `dieInternal` -> `handlerDynamic`
+    -> `handleUnwind` matches on the FIRST -- so the first `try` catches.
+    The SECOND escapes, which means the engine handle's host-error path
+    (inner TryCatch -> `hostErrToUnwind` -> outer catch) leaves
+    `cf.curHandler` in a bad state, so the next handle's `handlerDynamic`
+    no longer finds its CATCH. The fix is `curHandler` restoration on the
+    host-error catch path in the HANDLE builder / the outer catch's
+    `setCurHandler`, verified by re-running with two big-literal calls.*
+
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
 (sized native parameters, which want the bytecode path's post-fetch
