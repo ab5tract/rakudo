@@ -771,38 +771,19 @@ honest count of each from `NQP_CODE_BAIL=1`:
     on a build whose whole grammar compiled with it active. Only a rule
     the engine cannot express (rx_descriptor null) still needs the
     bytecode matcher, and that is the genuinely permanent part.
-  - `op hash` (109): the ORIGINAL binder bug (bisected to
-    `OperatorProperties.new`) is GONE. This session's native-parameter
-    binder changed the prologue it interacted with, and with `hash`
-    enabled BOOTSTRAP v6c now compiles clean. A new, narrower bug took its
-    place, and `hash` is reverted for it: a compile-time hash with a
-    native-INTEGER value miscompiles. `operator-properties`'
-    `properties-for-group` builds `nqp::hash('precedence','y=',
-    'associative','unary','fiddly',1)`; engine-built, its `'fiddly' => 1`
-    surfaces at parse time as `Unexpected named argument '1' passed` (the
-    value 1 used as an argument NAME) when `produce` folds the constant
-    through `new`. A string-only hash is fine; the native-int value is the
-    trigger. The encoder's bindkey order matches the bytecode path
-    (`bindkey(hash, key, value)`, op 68) and the int value is boxed as
-    `as_jast(:want(RT_OBJ))` boxes it, and the hash constructor is NOT
-    the culprit -- its wire was traced word by word and is correct, and
-    `Ops.bindkey`'s key parameter is typed `String`, so it cannot store an
-    int as a key. What actually happens: enabling `hash` completes the
-    ENCLOSING block (`properties-for-group`, which was encodable except for
-    its `nqp::hash` literals), and a latent bug in another op of that block
-    is exposed. The failing line is
-    `OperatorProperties.new(|%value, :dba($group))`
-    (operator-properties.rakumod:551): the `|%value` flatten of the group
-    hash yields a Pair keyed by the boxed int for the `'fiddly' => 1`
-    entry, so `new` sees a named argument named "1". The bug is in the
-    engine encoding of that flatten/`atkey`/`new` block, not in `hash`.
-    Next step is a bisection: build the compiler with `hash` on but
-    `NQP_CODE_SKIP=<properties-for-group cuid>` (from an `NQP_CODE_WHY`
-    run) and confirm the failure is that one block, then trace which op in
-    it mis-encodes with a boxed-int hash value in scope. Minimal
-    end-to-end repro (~30s once a hash-on compiler exists): any file with
-    an operator, since parsing routes through `produce`. This is a
-    localised latent-block bug, no longer the binder mystery.
+  - `op hash` -- RESOLVED (nqp b2a83c655). The "hash binder bug" was two
+    bugs. The first, the one bisected to `OperatorProperties.new`, was
+    fixed by this session's native-parameter binder (BOOTSTRAP compiles
+    clean with hash on). The second was not the hash at all: a latent
+    FLAT-NAMED-ARGUMENT dispatch bug that hash merely exposed by completing
+    the blocks that flatten hashes. The encoder had given a flat named
+    argument (`|%h`) a NAME by stringifying its `.named` truth flag to
+    "1"; the binder rejected it. Found by instrumenting the flatten -- every
+    int-valued hash flattened with correct keys, proving the construction
+    right. Fixed in the encoder (name a non-flat named arg only) and the
+    builder (read a name only then); a flat named arg is
+    `ARG_NAMED|ARG_FLAT` with its names supplied from the hash. hash now
+    encodes -- 109 blocks off the bail list, gate green.
   - `op p6return` / `op with` (82 / 51): deferred. Three distinct
     encodings of `p6return` were tried and all three fail identically --
     a host `NullPointerException` in `P6Opaque.allocate` (a null
@@ -841,17 +822,22 @@ because the work did nothing (regex is a real 184-block tier of the
 grammar now on-engine) but because the mainline's remaining blocks each
 carry two or three reasons, and freeing one leaves the others.
 
-**Deletion (the actual Phase 5) still cannot follow.** It needs 100%
-encodability, and after regex the CORE.c mainline's remaining blockers
-are: `hash` (109, the binder bug), `p6return`/`with` (133, the return
-protocol), native-parameter types (95, sized/uint/wide params -- the
-fetch wants the bytecode path's post-fetch truncation), and a small tail
-(floor_n, objectid, atposnd, ord, rindex, getlexrelcaller, ...). The
-first two are the genuine walls -- one an unresolved bug, one a design
-question; the rest is mechanical but co-blocked, so it moves the number
-only once the two walls fall. regex proved a claimed wall could be
-tractable on a hard look, so `hash` and `p6return` deserve the same
-before being called immovable -- but each is real work, not a batch.
+**Deletion (the actual Phase 5) still cannot follow, but the walls are
+nearly down.** Two of the three called blockers fell this session on a
+hard look: regex encodes, and hash encodes (its bug was a general
+flat-named-argument dispatch defect, now fixed for every call site). The
+CORE.c mainline's remaining blockers are: `p6return`/`with` (133, the
+engine return protocol -- the last genuine wall), native-parameter types
+(95, sized/uint/wide params wanting the bytecode path's post-fetch
+truncation), immediate blocks wanting arguments outside if/with/loops
+(45), and a small mechanical tail (floor_n, objectid, atposnd, ord,
+rindex, getlexrelcaller). The number holds at 94.2% only because these
+co-block the same interior; clearing `p6return` and the native-param
+types should move it sharply. The lesson stands: every "wall" so far was
+tractable on a hard look -- regex, then hash. `p6return` is the one left,
+and it wants a designed protocol (route a non-local return through the
+RETURN control handler that already encodes, not the bytecode path's
+frame-register optimization).
 
 ## Phase 0 baselines (2026-09-01, GraalVM 25.2.4, one warm 8g server)
 
