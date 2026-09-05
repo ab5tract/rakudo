@@ -1165,10 +1165,23 @@ parameter once it sits in its int slot (batch 13), unbox_u (batch 12),
 and the pre-existing lex_rt uint-lexical mapping -- boxes SIGNED when it
 reaches an object context: 2^64-1 becomes Int -1. Rare in CORE.c, but
 Flat's -1 sentinel is exactly that case, and t/spec will find others.
-The proper fix is a first-class T_UINT in the encoder's type lattice
-(the bytecode has RT_UINT distinct from RT_INT) with a box_u coercion
-kind, everything else treating it as int -- bounded, and the next
-correctness batch before any 100% claim.
+Batch 22 gave the encoder that T_UINT (uint routes to box_u; without
+it the engine could only ever box_i) -- and changed nothing observable,
+which was the real lesson: `.flat` with -1 fails on the BYTECODE path
+too, and nqp::box_u itself answers -2 for a native 2^64-2. The bug is
+in the runtime pair: Ops.box_u boxes the long signed, and unbox_u /
+posparam_u unbox through get_int and throw at 2^63. Batch 23 fixed the runtime half (nqp
+577761161, rakudo 0f33bd185): SixModelObject.set_uint, emitted by
+P6bigint.generateBoxingMethods into every bigint-boxing P6opaque (Int
+included -- box_u's call had been falling to the signed default);
+box_u and p6box_u use it; the *param_u fetches unbox through get_uint.
+A box_u(unbox_u(box_u(2^64-2))) round-trip now answers the large value.
+Still not Flat: a uint lexical, attribute or parameter read into an
+Int boxes signed on BOTH paths, and the last cause is the BYTECODE
+COMPILER itself -- add_hll_box('', RT_UINT) emits hllboxtype_i + box_i,
+the nqp variant bootint + box_i. That, plus the engine's deferred uint
+lexical/parameter mapping to T_UINT, is batch 24; Flat's guard stays
+until it lands.
 And Stash's bindattr-for-atomicbindattr. Un-guarding it still broke
 building CORE.d, and the diagnosis turned it into a two-line runtime fix
 (batch 21): P6OpaqueBaseInstance's atomic accessors reflected on the
