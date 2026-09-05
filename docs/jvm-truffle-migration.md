@@ -771,10 +771,25 @@ honest count of each from `NQP_CODE_BAIL=1`:
     on a build whose whole grammar compiled with it active. Only a rule
     the engine cannot express (rx_descriptor null) still needs the
     bytecode matcher, and that is the genuinely permanent part.
-  - `op hash` (109): blocked on the hash/list binder bug bisected to
-    BOOTSTRAP `OperatorProperties.new` (cuid 1262), documented above.
-    Until that is understood, `hash` stays out, and so do the blocks
-    that only it blocks.
+  - `op hash` (109): the ORIGINAL binder bug (bisected to
+    `OperatorProperties.new`) is GONE. This session's native-parameter
+    binder changed the prologue it interacted with, and with `hash`
+    enabled BOOTSTRAP v6c now compiles clean. A new, narrower bug took its
+    place, and `hash` is reverted for it: a compile-time hash with a
+    native-INTEGER value miscompiles. `operator-properties`'
+    `properties-for-group` builds `nqp::hash('precedence','y=',
+    'associative','unary','fiddly',1)`; engine-built, its `'fiddly' => 1`
+    surfaces at parse time as `Unexpected named argument '1' passed` (the
+    value 1 used as an argument NAME) when `produce` folds the constant
+    through `new`. A string-only hash is fine; the native-int value is the
+    trigger. The encoder's bindkey order matches the bytecode path
+    (`bindkey(hash, key, value)`, op 68) and the int value is boxed as
+    `as_jast(:want(RT_OBJ))` boxes it, so the cause is subtler -- most
+    likely the coercion splice inside the bindkey opcall or the
+    constant-fold consuming the engine hash differently. Minimal repro
+    (~30s, hash on): `my constant H := nqp::hash('a','x','fiddly',1)` in a
+    method, `--setting=NULL.c`. A reproduced narrow bug now, not the old
+    mystery.
   - `op p6return` / `op with` (82 / 51): deferred. Three distinct
     encodings of `p6return` were tried and all three fail identically --
     a host `NullPointerException` in `P6Opaque.allocate` (a null
