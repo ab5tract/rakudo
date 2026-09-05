@@ -1180,8 +1180,16 @@ Still not Flat: a uint lexical, attribute or parameter read into an
 Int boxes signed on BOTH paths, and the last cause is the BYTECODE
 COMPILER itself -- add_hll_box('', RT_UINT) emits hllboxtype_i + box_i,
 the nqp variant bootint + box_i. That, plus the engine's deferred uint
-lexical/parameter mapping to T_UINT, is batch 24; Flat's guard stays
-until it lands.
+lexical/parameter mapping to T_UINT, is batch 24 -- which found two
+more on its first run: the engine's dispatch flag packs the argument
+type into two bits and T_UINT (4) IS the named bit, so a uint argument
+was misread as a named one ("unknown tag" mid-program; now wire bit 16
+-> the callsite's ARG_UINT, as process_args emits); and the runtime
+BINDER boxed an ARG_UINT argument into an object parameter with box_i
+at four sites, so `say $x` printed -2 with every compiler fix in place.
+Five signed sites in all for one native type; and a uint boxes to Int,
+since Raku's uint_box is the UInt subset. Flat's guard stays until the
+whole chain lands.
 And Stash's bindattr-for-atomicbindattr. Un-guarding it still broke
 building CORE.d, and the diagnosis turned it into a two-line runtime fix
 (batch 21): P6OpaqueBaseInstance's atomic accessors reflected on the
