@@ -1568,6 +1568,9 @@ class RakuAST::Parameter
                             ?? $param-type.HOW.nominalize($param-type)
                             !! $param-type;
         my int $spec  := nqp::objprimspec($nominal-type);
+        # Set when the definite-type branch below already emitted the
+        # concreteness check, so the syntactic :D/:U check is not repeated.
+        my int $definedness-done := 0;
 
         # Take the parameter into a temporary local.
         my $name := QAST::Node.unique("__lowered_param");
@@ -1729,19 +1732,50 @@ class RakuAST::Parameter
                                     QAST::WVal.new( :value($constraint-type))))));
                     }
                     else {
-                        $context.ensure-sc($param-type);
+                        # A definite type (Int:D) is its base type plus a
+                        # concreteness test -- exactly what its HOW's
+                        # accepts_type computes. Spelled out here, the
+                        # base type is answered by the type-check cache;
+                        # an istype on the definite type object itself is
+                        # a cache miss every call, and on the JVM that is
+                        # five metamodel invocations per parameter per
+                        # call (accepts_type, base_type, definite, two
+                        # check_instantiated) -- what a JFR profile of a
+                        # method-call loop showed dominating it.
+                        my $check-type := $param-type;
+                        my int $definite-check := 0;
+                        if $ptype-archetypes.definite && nqp::can($param-type.HOW, 'base_type') {
+                            $check-type := $param-type.HOW.base_type($param-type);
+                            $definite-check := $param-type.HOW.definite($param-type) ?? 1 !! 2;
+                        }
+                        $context.ensure-sc($check-type);
                         $param-qast.push(QAST::ParamTypeCheck.new(QAST::Op.new(
                             :op('istype_nd'),
                             $get-decont-var(),
-                            QAST::WVal.new( :value($param-type) )
+                            QAST::WVal.new( :value($check-type) )
                         )));
+                        if $definite-check == 1 {
+                            $param-qast.push(QAST::ParamTypeCheck.new(QAST::Op.new(
+                                :op('isconcrete_nd'),
+                                $get-decont-var()
+                            )));
+                        }
+                        elsif $definite-check == 2 {
+                            $param-qast.push(QAST::ParamTypeCheck.new(QAST::Op.new(
+                                :op('not_i'),
+                                QAST::Op.new(
+                                    :op('isconcrete_nd'),
+                                    $get-decont-var()
+                                ))));
+                        }
+                        $definedness-done := $definite-check != 0;
                     }
                 }
             }
             my $definite := nqp::istype($!type.IMPL-TARGET-TYPE, RakuAST::Type::Definedness)
               ?? $!type.IMPL-TARGET-TYPE.definite
               !! self.IMPL-CAPTURE-DEFINITE;
-            if nqp::isconcrete($definite) {
+            if !$definedness-done && nqp::isconcrete($definite) {
                 if $definite {
                     $param-qast.push(QAST::ParamTypeCheck.new(QAST::Op.new(
                         :op('isconcrete_nd'),
