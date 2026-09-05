@@ -803,11 +803,20 @@ honest count of each from `NQP_CODE_BAIL=1`:
     `p6return` needs the engine's own non-local-return protocol (most
     likely routing through the RETURN handler that already encodes, i.e.
     throwing the RETURN category rather than writing frame registers),
-    which is design work, not an encoding tweak. `with`/`without` was
-    reverted alongside it and not retried in isolation; the withy path
-    (the `.defined` test, merged awkwardly into the cond-passing branch)
-    wants its own separate encoding. Both are named here so the next
-    session starts from the mechanism, not another blind build.
+    which is design work, not an encoding tweak. A FOURTH attempt confirmed
+    this: re-run on the hash+flat-named-fixed tree, in case the NPE had
+    been the flat-named bug surfacing through the SUCCEED handler's blocks
+    -- it failed identically, so p6return's fault is genuinely its own
+    frame handling. And the obvious redesign -- throw `CONTROL_RETURN` to
+    route through the routine's RETURN handler that already encodes -- is
+    NOT equivalent: `$!need-succeed-handler` is a LexicalScope property
+    independent of a Routine's `$!may-use-return`, so a block with
+    `succeed` need not have a RETURN handler to catch the throw, which is
+    exactly why p6return uses the direct frame mechanism. The correct fix
+    needs the engine's own non-local-return that works without a handler
+    frame -- real frame-lifecycle design. `with`/`without` was reverted
+    alongside it; the withy `.defined` path wants its own encoding. Both
+    are named here so the next session starts from the mechanism.
 
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
