@@ -902,6 +902,21 @@ honest count of each from `NQP_CODE_BAIL=1`:
     engine frame; the reproduction is any BEGIN-time `succeed`
     (COMP_EXCEPTION) once `p6return` lets the enclosing block encode.*
 
+    *Handler 59 identified (`NQP_H59_DEBUG` printing the handler frame): it
+    is `engine=false` (a BYTECODE frame), `kind=2` (EX_UNWIND_OBJECT),
+    `category=1` (CATCH), an anonymous frame, with `curFrame=COMP_EXCEPTION`.
+    So the escaping unwind targets a CATCH handler in a BYTECODE frame while
+    an ENGINE frame (COMP_EXCEPTION) sits in its propagation path. The
+    engine frame's `exitAfterUnwind` early-return pops the stack past
+    handler 59's frame before the unwind targeting it propagates up, so the
+    bytecode handler is gone when the unwind arrives and it escapes to
+    `command_eval`. The precise fix is in the engine HANDLE's
+    `exitAfterUnwind` handling: it must not tear down frames past a pending
+    unwind that targets a deeper (bytecode) handler -- an engine↔bytecode
+    frame-exit-ORDER bug. Confident code change needs a frame-exit-order
+    trace (when handler-59's frame leaves vs when its unwind is raised),
+    which is the one remaining instrument before the fix.*
+
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
 (sized native parameters, which want the bytecode path's post-fetch
