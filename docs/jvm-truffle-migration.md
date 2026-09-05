@@ -784,20 +784,25 @@ honest count of each from `NQP_CODE_BAIL=1`:
     through `new`. A string-only hash is fine; the native-int value is the
     trigger. The encoder's bindkey order matches the bytecode path
     (`bindkey(hash, key, value)`, op 68) and the int value is boxed as
-    `as_jast(:want(RT_OBJ))` boxes it, so the cause is at runtime, not
-    in the wire (the OPCALL/COERCE walk is correct). Sharper symptom: the
-    call is `OperatorProperties.new(|%value, :dba($group))`
-    (operator-properties.rakumod:551); `|%value` flattens the inner hash,
-    and the `'fiddly' => 1` entry comes out with the VALUE as the key --
-    named "1" -- so my engine-built hash, when flattened, swaps that
-    entry's key and value, and ONLY the entry whose value is a native
-    (boxed) int. Suspect the hash TYPE from op 140 (hllhash) round-tripping
-    a boxed-int value differently than the bytecode hash, or the box_i'd
-    value confusing the flatten's key/value split. Needs runtime
-    instrumentation on the reproducer, not static reasoning. Minimal repro
-    (~30s, hash on): `my constant H := nqp::hash('a','x','fiddly',1)` in a
-    method, `--setting=NULL.c`, then flatten H. A reproduced narrow bug
-    now, not the old mystery.
+    `as_jast(:want(RT_OBJ))` boxes it, and the hash constructor is NOT
+    the culprit -- its wire was traced word by word and is correct, and
+    `Ops.bindkey`'s key parameter is typed `String`, so it cannot store an
+    int as a key. What actually happens: enabling `hash` completes the
+    ENCLOSING block (`properties-for-group`, which was encodable except for
+    its `nqp::hash` literals), and a latent bug in another op of that block
+    is exposed. The failing line is
+    `OperatorProperties.new(|%value, :dba($group))`
+    (operator-properties.rakumod:551): the `|%value` flatten of the group
+    hash yields a Pair keyed by the boxed int for the `'fiddly' => 1`
+    entry, so `new` sees a named argument named "1". The bug is in the
+    engine encoding of that flatten/`atkey`/`new` block, not in `hash`.
+    Next step is a bisection: build the compiler with `hash` on but
+    `NQP_CODE_SKIP=<properties-for-group cuid>` (from an `NQP_CODE_WHY`
+    run) and confirm the failure is that one block, then trace which op in
+    it mis-encodes with a boxed-int hash value in scope. Minimal
+    end-to-end repro (~30s once a hash-on compiler exists): any file with
+    an operator, since parsing routes through `produce`. This is a
+    localised latent-block bug, no longer the binder mystery.
   - `op p6return` / `op with` (82 / 51): deferred. Three distinct
     encodings of `p6return` were tried and all three fail identically --
     a host `NullPointerException` in `P6Opaque.allocate` (a null
