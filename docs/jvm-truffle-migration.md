@@ -1231,6 +1231,24 @@ the same declaration drives both. The hand-written rows become
 overrides for ops with special encodings; the hand-written cases are now
 redundant and can go; new ops never get a case again.
 
+## The registry landed flat -- and that is the point (2026-09-05)
+
+Batch 25 (classlib ops from the registry) validated: gate 25/25, 10/10
+registry-only ops (radix, sha1, lc, uc, iseq_s, pow_n, abs_i, chars,
+index, x -- none with a hand row) encode and run, and the old "op X"
+refusal tail is gone from the histogram. Coverage did not move: 96.5%
+(18477) before and after. That is expected and correct -- the registry
+is REDUNDANT with the hand rows added in batches 12-20b, so it adds no
+coverage; its value is that no op needs a hand row ever again and those
+redundant OP_X/run0/op3 triples can now be deleted. What still refuses
+is what the registry cannot reach: non-classlib ops with custom codegen
+(xor, usecapture, p6invokeflat, sprintf/sprintfdirectives, numify), the
+:cont ops it deliberately bails on (continuationreset/control), and the
+structural cluster (loop shape 16, chained chain 12 + chain arity 4,
+repeat-with-handlers 8, no-coercion 3->1 7 / 2->3 5). Follow-up: delete
+the redundant hand cases; then the remaining refusals are the honest
+map of what is left.
+
 ## Lessons already paid for (write them into the code)
 
 - No `@ExplodeLoop` over a cyclic program — RxVmNode's comment says
