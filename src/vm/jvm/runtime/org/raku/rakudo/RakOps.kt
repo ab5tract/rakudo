@@ -185,7 +185,7 @@ object RakOps {
     fun p6box_u(value: Long, tc: ThreadContext): SixModelObject {
         val gcx = key.getGC(tc)
         val res = gcx.Int!!.st.REPR.allocate(tc, gcx.Int!!.st)
-        res.set_int(tc, value)
+        res.set_uint(tc, value)
         return res
     }
 
