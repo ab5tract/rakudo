@@ -812,20 +812,24 @@ honest count of each from `NQP_CODE_BAIL=1`:
     NOT equivalent: `$!need-succeed-handler` is a LexicalScope property
     independent of a Routine's `$!may-use-return`, so a block with
     `succeed` need not have a RETURN handler to catch the throw, which is
-    exactly why p6return uses the direct frame mechanism. The precise
-    mechanism, traced this session: `p6return` appears in exactly one place,
-    the SUCCEED handler block (scoping.rakumod:459). Enabling it engine-side
-    makes that HANDLER block encode, so engine `p6return` runs its frame
-    manipulation (`return_o` into the caller register + `outer.exitAfter-
-    Unwind`) while the handle machinery (`ExceptionHandling.invokeHandler`)
-    invokes the handler expecting the BYTECODE frame protocol -- the two do
-    not compose, hence the `P6Opaque.allocate` NPE at BEGIN. The committed
-    state correctly BAILS `p6return`, keeping those handler blocks on
-    bytecode (the price is 82 blocks). The concrete next step is to make the
-    engine's handler-invocation honor `exitAfterUnwind` set from an
-    engine-frame handler the way it does from a bytecode one -- not another
-    frame-register variant. `with`/`without` was reverted alongside it; the
-    withy `.defined` path wants its own encoding.
+    exactly why p6return uses the direct frame mechanism. **CORRECTION
+    (2026-09-04, instrumented): p6return is NOT a frame-protocol problem at
+    all.** A frame-chain print in `NqpOps.p6return` fired ZERO times across
+    the whole failing build -- engine `p6return` never executes. The four
+    earlier "frame protocol" diagnoses were wrong. What actually happens:
+    enabling `p6return` unblocks the exception-handling blocks it sits in
+    (`convert-exception`, `COMP_EXCEPTION`), and one of THEM has a latent
+    want-propagation bug that surfaces first as `Cannot unbox 64 bit wide
+    bigint into native integer` (`Ops.unbox_i` on a >64-bit bigint, engine
+    op at NqpOps.run0), then a downstream `P6Opaque.allocate` NPE while that
+    error is being handled. This is exactly the hash pattern: enabling an op
+    completes a block whose OTHER op mis-encodes. So the blocker is a
+    findable want/type bug (an engine `unbox_i` where the bytecode path
+    keeps the value boxed, in the succeed/THROW/convert-exception path), not
+    a frame protocol -- and p6return itself is likely correct. Next step:
+    instrument which engine `unbox_i` site takes a bigint and fix its want
+    propagation, the way the flat-named-arg and defor bugs were fixed.
+    `with`/`without` rides the same blocks and the same cascade.
 
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
