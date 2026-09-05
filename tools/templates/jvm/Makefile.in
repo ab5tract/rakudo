@@ -121,7 +121,6 @@ $(J_RUNNER): @@script(create-jvm-runner.pl)@@@for_specs( @bsm(SETTING_@ucspec@)@
 	$(NOECHO)$(CP) $(J_RUNNER) rakudo$(J_BAT)
 	$(NOECHO)$(CHMOD) 755 rakudo$(J_BAT)
 
-@bpm(DEBUG_RUNNER)@: @@script(create-jvm-runner.pl)@@ @bsm(RAKUDO_DEBUG)@
 	@echo(+++ Setting up	$@)@
 	$(NOECHO)$(PERL5) @shquot(@script(create-jvm-runner.pl)@)@ dev-debug @q($(BASE_DIR))@ . . @q(@nqp_home@)@ @q(@static_nqp_home@)@ @q(@static_rakudo_home@)@ @q($(NQP_JARS))@
 
