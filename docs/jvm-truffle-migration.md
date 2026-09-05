@@ -932,6 +932,24 @@ honest count of each from `NQP_CODE_BAIL=1`:
     correctly bails these blocks to bytecode. It is the real, final shape
     of the p6return/with blocker.*
 
+    *CONFIRMED with evidence (`NQP_LEFT_DEBUG`): when the escaping unwind
+    (target 59, kind=2 EX_UNWIND_OBJECT) is created, handler 59's frame is
+    LIVE -- `LEFT=false` -- anonymous, found with `curFrame=COMP_EXCEPTION`.
+    So it is NOT "frame already left": the handler frame is live but is not a
+    Java-stack ancestor of the throw point, so the unwinder (a Java throw)
+    goes up past `COMP_EXCEPTION`/`from-slurpy-flat`/`new`/`EXPR` (handles
+    1168/4/1/2) and escapes. `handlerDynamic` walks the logical `cf.caller`
+    chain and finds a handler the unwinder cannot reach on the Java stack.
+    This divergence appears only when `COMP_EXCEPTION` is engine-encoded --
+    in an all-bytecode build the logical chain and Java stack stay aligned
+    and HEAD compiles. So the fix is architectural: reconcile the engine
+    frame's handler-chain participation with the Java stack (so a handler
+    found logically is reachable), or deliver the unwind by logical
+    re-entry rather than a raw Java throw. Not a targeted change. The next
+    concrete diagnostic, if pursued, is to compare the engine vs bytecode
+    handler chain for this exact BEGIN-time `COMP_EXCEPTION` case and see
+    which handler-59 registration differs.*
+
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
 (sized native parameters, which want the bytecode path's post-fetch
