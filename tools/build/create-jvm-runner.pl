@@ -236,6 +236,20 @@ else {
     # of them there are.
     my $esheap = $^O eq 'MSWin32' ? '8g' : '${RAKUDO_EVALSERVER_HEAP:=8g}';
 
+    # Once the code engine stopped pinning a GlobalContext per distinct run
+    # (nqp: "clear the resolution inline caches per eval-server run"), a
+    # server's LIVE heap across a whole subdir is small and flat (~0.5g).
+    # What still climbs is what G1 COMMITS: it grabs toward -Xmx under a
+    # run's allocation burst and, by default, never gives it back, so RSS
+    # sits near the ceiling even while little is live -- and that, plus the
+    # libgraal native isolate below, is what the cage kept killing. Ask G1
+    # to hand committed memory back (it can shrink toward -Xms100m): return
+    # pages once free space passes MaxHeapFreeRatio, and run a periodic GC
+    # so an idle server between files uncommits rather than holding the peak.
+    my $esgc = $^O eq 'MSWin32' ? ''
+             : ' -XX:MinHeapFreeRatio=15 -XX:MaxHeapFreeRatio=40'
+             . ' -XX:G1PeriodicGCInterval=20000 -XX:-G1PeriodicGCInvokesConcurrent';
+
     # The memory guard. Several servers at once have twice taken this
     # machine down (2026-08-31, 2026-09-02): the kernel OOM killer fires
     # late on a swapless box, picks the biggest JVM, and the terminal's
@@ -247,9 +261,14 @@ else {
     #  - run the JVM in its own systemd scope capped at that ceiling, so a
     #    runaway is killed by itself and nothing else is.
     #
-    # A server's ceiling is its heap plus ~2g the JVM keeps outside it
-    # (512m thread stacks, metaspace, Truffle code cache): the server shot
-    # on 2026-09-02 held 8.7g against an 8g heap. systemd-run --scope
+    # A server's ceiling is its heap plus what the JVM keeps outside it:
+    # metaspace, the HotSpot code cache, touched thread stack, and -- the
+    # big one on this engine -- the GraalVM libgraal JIT isolate, a native
+    # heap outside -Xmx (and outside NMT) that runs to ~2g while it compiles
+    # the Rakudo compiler on the engine. 2g of overhead covered the pre-
+    # engine world but not libgraal plus an allocation spike; 3g does, with
+    # G1 now uncommitting the heap so RSS rarely nears the cap. systemd-run
+    # --scope
     # execs the command in place, so the pid a caller gets is java's own
     # and pipes/kills behave exactly as before.
     my $guard = <<'GUARD';
@@ -259,7 +278,7 @@ else {
 # RAKUDO_EVALSERVER_HEAP or stop a server instead.
 heap="${RAKUDO_EVALSERVER_HEAP:=8g}"
 mb_of() { case "$1" in *[gG]) echo $(( ${1%[gG]} * 1024 )) ;; *[mM]) echo "${1%[mM]}" ;; *[kK]) echo $(( ${1%[kK]} / 1024 )) ;; *) echo $(( $1 / 1048576 )) ;; esac; }
-OVERHEAD_MB=2048
+OVERHEAD_MB=3072
 need=$(( $(mb_of "$heap") + OVERHEAD_MB ))
 if [ -r /proc/meminfo ]; then
     avail=$(awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo)
@@ -286,8 +305,8 @@ if command -v systemd-run >/dev/null 2>&1 && systemd-run --user --scope --quiet 
 fi
 GUARD
     my $caged = $^O eq 'MSWin32' ? '' : '$cage ';
-    install "rakudo-eval-server", "${caged}java -Xmx$esheap $jopts org.raku.nqp.tools.EvalServer", $guard;
-    install "perl6-eval-server", "${caged}java -Xmx$esheap $jopts org.raku.nqp.tools.EvalServer", $guard;
+    install "rakudo-eval-server", "${caged}java -Xmx$esheap$esgc $jopts org.raku.nqp.tools.EvalServer", $guard;
+    install "perl6-eval-server", "${caged}java -Xmx$esheap$esgc $jopts org.raku.nqp.tools.EvalServer", $guard;
 }
 
 # vim: expandtab sw=4
