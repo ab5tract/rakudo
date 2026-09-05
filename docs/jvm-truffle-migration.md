@@ -361,20 +361,125 @@ it gets measured after every batch, never estimated:
 | via all 19 registered desugars | 14893 (77.8%)  | 627256  (63.6%)           |
 | + the list constructors        | 15441 (80.6%)  | 670378  (68.0%)           |
 | + native attribute references  | 15658 (81.7%)  | 683485  (69.3%)           |
+| + the typed assigns            | 15892 (83.0%)  | 700842  (71.1%)           |
+| + native lexical references    | 16868 (88.1%)  | 794535  (80.6%)           |
+| + batch 2 (exceptions, typed attributes, valued if, small ops) | 17400 (90.8%) | 838570 (85.0%) |
+| + batch 3 (native parameters, immediate blocks) | 17597 (91.9%) | 857964 (87.0%) |
+| + batch 4 (a tranche of small ops) | 17979 (93.9%) | 893609 (90.6%) |
+| + batch 5 (cond-taking loops, more small ops) | 18051 (94.2%) | 899238 (91.2%) |
+| + plain uint lexicals          | 18051 (94.2%)  | 899238  (91.2%)           |
+| + engine-covered regex         | 18051 (94.2%)  | 899238  (91.2%)  (co-blocked; see below) |
+| + small-op mechanical tail     | 18098 (94.5%)  | 901970  (91.5%)           |
+| + ord/rindex/index, pow_I, multidim refs | 18143 (94.7%) | 905892  (91.9%)          |
 
 (The last row was measured after the 2026-09-04 rebase onto upstream,
 where the mainline is 19146 blocks; the earlier rows are over 19141.)
 
 Batches are chosen by **sole-blocker count** -- how many blocks a tag
 blocks *alone* -- which the report prints for free. What is left after the
-attribute-reference batch, in that order: `op:assign_i` (223 sole, 1232
-blocks; with `assign_s`/`assign_u` behind it -- the typed assigns are
-excluded because nqp's own desugar for them MUTATES the node, see the
-op-desugar note below); `var:lexicalref` (172 sole, 1470 blocks -- the
-object-wanted reference form, `getlexref_*`); `regex` (171), the rx
-engine's by design; `op:curlexpad` (150); `op:exception` (115);
-`op:with` (38); `op:const` (34); `op:getlexcaller` (31); `op:isfalse`
-(25). `hash` stays out until the binder interaction below is understood.
+lexicalref batch, by the survey: `op:exception` (138 sole, 311 blocks);
+`op:curlexpad` (251); `regex` (184), the rx engine's by design;
+`op:const` (50 sole, 176); `op:slice` (56); `op:with` (43);
+`op:atpos_u`/`bindpos_u` (38/28); `op:isfalse` (37); `op:getlexcaller`
+(35); `op:atposref_i`/`_u` (37/33); `op:p6argvmarray` (19);
+`op:isbig_I` (14); `op:isnanorinf` (17). `hash` stays out until the
+binder interaction below is understood.
+
+**The survey is an upper bound, and after this batch the gap matters.**
+`NQP_CODE_BAIL=1` on the same compile prints what the encoder actually
+refused, and its histogram is ranked differently from the survey's:
+`op isconcrete_nd` 3334 blocks (the survey never listed it -- the op is
+in the bytecode table, but no encoder row existed, and the survey's
+covered set is derived from the encoder's table, so the miss was a
+plain omission), `two-child if in value context` 1135 (a shape, not an
+op: the condition is the value when it fails), `typed param` 656 (the
+wire refuses native parameters: builder work), `op getextype` 587,
+`typed attribute` 488 (the native accessors were in the table since the
+23-op batch, but the attribute *scope* with a native `.returns` still
+bailed), `block immediate` 430, `op gethllsym` 277, `var-with-fallback`
+276, `uint or wide lexical` 272, `regex` 184, `op rethrow` 84, `op hash`
+70. Rank the next batch on THIS list; the survey only says which tags
+are unclaimed, not which claims fail.
+
+*Batch 2 (2026-09-04, nqp 29fd4b583), ranked on that list.* Table rows
+166-185 (the exception family: exception, getextype, setextype,
+setpayload, getmessage, setmessage, newexception, backtrace,
+backtracestrings; isfalse, isbig_I, atposref_i/_u, isrwcont,
+isconcrete_nd, gethllsym; and the `:cont` family die/die_s, throw,
+rethrow, throwextype, which read a resumed result off the frame's return
+register exactly as throwpayloadlex did); two frame-anchored wire
+instructions, `CURLEXPAD` (`Ops.ctx_of` over the program's own frame)
+and `P6ARGVMARRAY` (cf.csd/cf.args through the reflective RakOps
+handle); `nqp::const` through Compiler.nqp's `%const_map`, published as
+the `CODE_CONST_MAP` HLL symbol; the attribute scope with a native
+`.returns` picking getattr_<t>/bindattr_<t>; the two-child `if` in value
+context keeping the condition as the value when it fails (evaluated once
+into a scratch local of its own type, allocated after encoding, re-read
+coerced in the else arm); `VarWithFallback` as the ifnull shape. Gate
+25/25, CORE.c parse 150.1s. Real bails 9017 -> 3159; what is left:
+`typed param` 656 (the wire refused native parameters), `block
+immediate` 554, `uint or wide lexical` 272, `regex` 184, `box_s` arity
+2 (83), `p6return` 82, `hash` 74, `with` 44, `getlexcaller` 42.
+
+**Found by batch 2's check, and older than it: Raku overrides `defor`.**
+`src/vm/jvm/Raku/Ops.nqp` registers the HLL's own `defor` -- definedness
+is the `.defined` method -- while the encoder encoded nqp's `isconcrete`
+form for every HLL, so `$*MISSING // "fallback"` died on-engine (a
+Failure is concrete and undefined). The encoder now builds the
+override's own tree (a fresh tree over the same children, so a bail
+leaves the op untouched) when `$*HLL` is Raku. Of Raku's 41 `add_hll_op`
+names, `defor` is the only one the encoder also encodes generically
+(the p6* family is Raku-only); the rule is to check that file before
+encoding any op generically.
+
+*Batch 3 (2026-09-04, nqp aa650e1b1): native parameters and immediate
+blocks.* The prologue writes the declared type; `PosParam`/`NamedParam`
+fetch through posparam_<t>/namedparam_<t> (and opt_) into the typed
+slot; a slurpy stays an object and a sized native (int8) still bails,
+since it would need the bytecode path's explicit truncation after the
+fetch. An immediate block child encodes as a lang-call on its CODEREF
+with no arguments -- the bytecode path's direct call of the block's code
+ref -- and an if/with branch that takes the condition
+(`needs_cond_passed`) is called with the scratch local the condition was
+evaluated into, the bytecode path's `__IM_` local. Rows 186-196: the
+arity-2 boxes, isnanorinf, where, getlexcaller, getcomp, atposref_n/_s,
+atpos_u, bindpos_u. Gate 25/25, CORE.c parse 154.7s. Real bails 3159 ->
+2018: `uint or wide lexical` 272, `regex` 184, `hash` 93, `p6return`
+82, `with` 51, immediate blocks wanting arguments outside if/with 51,
+`slice` 47, then a long tail of single table rows.
+
+Three encoder bugs the batch exposed, all older than it:
+
+  - A nested immediate block compiled at commit must be flipped to
+    `declaration` around `as_jast`, as the bytecode path's own if/for
+    roads do: compiled as immediate, `as_jast` also emits its direct
+    call into the enclosing method and registers a reentry label the
+    discarded emission never defines ("reenter_2 used but not defined",
+    in NQPP5QRegex -- the nqp gradle stage builds run the encoder, not
+    from the build files but from the long-lived gradle daemon's
+    environment).
+  - The program size gate (60000 characters, the string-constant cliff)
+    ran AFTER the commit: a block over it registered its lexicals and
+    then fell back to bytecode, which re-declared them -- "Lexical
+    '&parent' already declared", the BOOTSTRAP BEGIN body once it was
+    reachable. The gate now runs before the commit on an upper-bound
+    estimate, and the post-commit check dies loudly.
+  - `patch_params` builds the prologue in a scratch array, and
+    `encode_child`'s coercion splice inside it shifted every recorded
+    nested-block position at or past a scratch-relative mark, so qbids
+    were patched onto tags ("nqpp: unknown tag 17041 at 92" on `use
+    Test`, gate 21/25). The nested list is hidden while the prologue is
+    built; any position-based shift must only run over entries recorded
+    in the same array. The builder's unknown-tag error now dumps the
+    program and its pool, which is what located it.
+
+*The typed assigns (2026-09-04).* `assign_i`/`assign_u`/`assign_n`/
+`assign_s` were excluded because nqp's own desugar rewrites the node it is
+handed (`op('bind')`, `scope(...)`); the encoder now performs that rewrite
+on a shallow copy of the target, with `native_assign_bind_scope` mirrored
+over its own view of the block chain, and the container road is four
+engine ops (`Ops.assign_*`). `my int $i; $i++` -- every benchmark loop --
+encodes with this.
 
 *Native attribute references (2026-09-04).* `var:attributeref` was 197
 sole-blocked blocks and is gone from the top twenty. Two pieces, both
@@ -387,6 +492,27 @@ through a reference is not a thing the bytecode path allows either); and a
 immediately ("we'd only de-ref right away anyway"). The second piece is
 what makes the common `my int $i; $i = ...` shapes encodable, and it is
 why `var:lexicalref`'s remaining blocks are the object-wanted ones.
+
+*Native lexical references (2026-09-04, nqp b03c02baf).* The
+object-wanted `lexicalref` read -- what every `is rw` native argument,
+every l-value native lookup compiles to -- encodes as Compiler.nqp shapes
+it: the nearest declaration decides. A reference declaration (`decl var`,
+scope `lexicalref`) is an object lexical holding the reference,
+registered through `add_lexicalref` at commit, and reads and binds as
+one; a plain native declaration gets a reference taken over its slot,
+told the declared width when the type is sized (`sized_native_ref_spec`,
+so int8/int16/num32 stores truncate the way MoarVM's sized registers do);
+nothing found statically means the by-name road with the type from
+`.returns`. On the wire it is one instruction, `LEXREF type name spec`:
+the engine resolves the declaring frame through the same cached site
+`LEXGET` uses (StaticCodeInfo identity at a depth, slot index) and
+allocates the reference over that frame's slot behind a boundary,
+anchored at the program's own frame, never `tc.curFrame`. Gate
+t/01-sanity 25/25; a native-reference check (writes through
+int/int8/int16/num/num32/str lexicals, closures over an outer frame,
+native rw parameters, nested blocks) answers identically on-engine.
+CORE.c parse 146.5s (144.6s before, noise). uint lexicals stay out with
+the rest of the encoder.
 
 *Coverage landed this round.* The routine calling-convention family
 (ops 112-115: assertparamcheck, bindcomplete, p6typecheckrv,
@@ -561,11 +687,300 @@ mainline block -- neither end reaches the direct road. The
 engine-to-engine measurement and the t/ gate wait on the rebuild that
 also carries the typed-assign encoding (the `op:assign_i` sole-blocker).
 
-Next: a DSL specialization per applicable program with a `DirectCallNode`
-on the callee's target (inlining across the dispatch), restricted to
-programs whose guards read only arguments and literals; then the
-calling-convention ops (`p6typecheckrv`, `p6decontrv`) as dispatch
-programs proper.
+*What the CORE.c compile then taught (2026-09-04, afternoon).* The
+compile's parse stage had gone from 164s (the post-rebase build) to
+289-323s, and the four-way A/B cleared the dispatch road of all but ~15s
+of it. Truffle's compilation trace found the real cost: 114 of 1650
+compilations failed with "code installation failed: code is too large"
+after a mean 6.4s each -- 733s of the 1880s the run compiled at all --
+and such a root runs interpreted afterwards. Program size was not the
+reason (the failing roots were 94-836 wire words); partial evaluation
+inflated every root to ~1.5KB of machine code per wire word.
+`compiler.TraceMethodExpansion` with `engine.NodeSourcePositions` on a
+48-word accessor that compiled to 44KB named the mass: 70% of its IR
+under one lexical read, in Kotlin's `lateinit` and `!!` checks, whose
+failure paths (stack-trace sanitizing and StackTraceElement formatting)
+PE inlines in full, ~330 IR nodes per check; `Ops.createNull` alone was
+~700 nodes per `nqp::null()`. The dispatch fold added its own: the direct
+engine entry inlined per folded program, ~3000 nodes per site, for a call
+that ends in an indirect `CallTarget.call` PE cannot see through.
+
+The fixes (nqp "keep Kotlin's null and lateinit checks out of compiled
+code"): hot paths read the frame's fields from Java (lexical get/bind,
+typed result read and return store, the null constant as a compilation
+constant); nqp-runtime compiles with the Java-interop null assertions
+off; the fold's invoke road is a boundary, only its guard tests stay in
+compiled code. Roots are named `<block>[<wire words>]` in traces, and
+`NQP_CODE_MAX_COMPILE` guards against the next such wall. Result: the
+identity method 103KB -> 8KB, `IMPL-OPTIMIZE` 252KB -> 58KB, mean root
+36KB -> 11KB, size failures 114 -> 0, total JIT time 1880s -> 224s, the
+method-call loop 30% faster, and **CORE.c's parse stage 145s** -- below
+the pre-migration 164s for the first time.
+
+Two other per-call costs found on the way and fixed: `CallFrame`
+construction searched the whole dynamic caller chain for a live outer on
+every invocation of a code ref with no outer (~1.1M searches per module
+compile, zero successes; now gated on a live-invocation count, since
+taking the prior invocation outright as MoarVM does breaks static code
+refs invoked inside a recursive outer), and `p6typecheckrv` re-derived a
+return type's genericness through the metamodel on every return (cached
+per signature in rakudo's RakOps), with the `Int:D` parameter check
+lowered to base type plus concreteness so the type-check cache answers it.
+
+Rule written into the code: nothing Kotlin on a PE-visible path unless it
+is a plain field access, and every new fast path gets checked with the
+expansion trace.
+
+*The deopt cycle (same afternoon).* Thirteen roots, the parse driver
+`PERFORM-PARSE` among them, were abandoned by Graal with "deopt taken too
+many times"; with cycle detection off they recompiled a hundred times
+each. `engine.TraceTransferToInterpreter` put the transfers at the
+generated interpreter's `resolveThrowable`: the Bytecode DSL treats any
+non-Truffle exception as an internal error and invalidates the compiled
+root BEFORE the language's `interceptInternalException` gets to wrap it,
+and this runtime uses host exceptions as ordinary control flow (an
+`UnwindException` for every return, next, last and handled die). Every
+operation now converts at its boundary (`NqpOps.carry`) into the same
+carriers the interception produced; bailouts 13 -> 0, deopts 549 -> 385,
+parse time unchanged -- those roots were not the remaining bottleneck.
+Rule: never let a host exception reach the DSL loop.
+
+The fold's per-install republish (~290 invalidations against 38 on the
+old road) now refolds lazily -- immediately the first time, then only
+after sixteen misses since the last fold -- for 219 invalidations and a
+144.6s parse. The `DirectCallNode` step landed last (nqp "engine callees inline across
+a dispatch through adopted call nodes"): a folded program with a literal
+engine-bodied callee calls it through a call node adopted under the
+dispatch instruction's node, so the inliner sees it -- 1.408s -> 1.229s
+on the engine-to-engine loop, neutral on the compile, where only 37
+callees inlined: most of what the compiler calls is still bytecode-bodied
+or has not run before its caller compiles. Still open: the remaining 38
+invalidations the old road also has, and more of the compiler on-engine.
+
+
+*Where coverage stands, and the true remaining distance (2026-09-04).*
+Six batches this session took the CORE.c mainline from 83.0% to **94.2%
+of blocks (91.2% of nodes)**, gate green at every step. What is left is
+not a longer tail of the same -- it is three structural walls, and the
+honest count of each from `NQP_CODE_BAIL=1`:
+
+  - `regex` -- RESOLVED (nqp 5837b78b0). This was wrongly called a
+    permanent wall. A rule the grammar engine covers is compiled by the
+    bytecode path as a small CALL into the engine (engine_jast), not as a
+    bytecode matcher; the encoder now mirrors that -- the prologue as a
+    QAST tree ending in a new `rxmatch` op, the rule's callbacks riding
+    the CODEREF road as bytecode. 184 blocks off the bail list; gate green
+    on a build whose whole grammar compiled with it active. Only a rule
+    the engine cannot express (rx_descriptor null) still needs the
+    bytecode matcher, and that is the genuinely permanent part.
+  - `op hash` -- RESOLVED (nqp b2a83c655). The "hash binder bug" was two
+    bugs. The first, the one bisected to `OperatorProperties.new`, was
+    fixed by this session's native-parameter binder (BOOTSTRAP compiles
+    clean with hash on). The second was not the hash at all: a latent
+    FLAT-NAMED-ARGUMENT dispatch bug that hash merely exposed by completing
+    the blocks that flatten hashes. The encoder had given a flat named
+    argument (`|%h`) a NAME by stringifying its `.named` truth flag to
+    "1"; the binder rejected it. Found by instrumenting the flatten -- every
+    int-valued hash flattened with correct keys, proving the construction
+    right. Fixed in the encoder (name a non-flat named arg only) and the
+    builder (read a name only then); a flat named arg is
+    `ARG_NAMED|ARG_FLAT` with its names supplied from the hash. hash now
+    encodes -- 109 blocks off the bail list, gate green.
+  - `op p6return` / `op with` (82 / 51): deferred. Three distinct
+    encodings of `p6return` were tried and all three fail identically --
+    a host `NullPointerException` in `P6Opaque.allocate` (a null
+    REPRData.instance) at the same site: the SUCCEED handler inside
+    `convert-exception`/`COMP_EXCEPTION`, evaluated at BEGIN time while
+    the setting compiles. The three: (1) `StoreRet` + an
+    `outer.exitAfterUnwind` mark; (2) a faithful `Ops.return_o` +
+    `outer.exitAfterUnwind` + `cf.leave()` helper; (3) the same without
+    the explicit `leave()` (a normal engine block leaves through the
+    emitted wrapper's postlude after `codeRun`, not inside `runProgram`,
+    so calling it in the helper double-leaves). None is right. `p6return`
+    is the direct-return optimisation the bytecode path emits *instead of*
+    the RETURN control exception, and its `cf.outer.exitAfterUnwind` +
+    early-method-`return` shape assumes a JVM frame the engine program
+    does not have -- the engine's early `Return` ends only the program,
+    and the wrapper method around it still runs. The honest conclusion:
+    `p6return` needs the engine's own non-local-return protocol (most
+    likely routing through the RETURN handler that already encodes, i.e.
+    throwing the RETURN category rather than writing frame registers),
+    which is design work, not an encoding tweak. A FOURTH attempt confirmed
+    this: re-run on the hash+flat-named-fixed tree, in case the NPE had
+    been the flat-named bug surfacing through the SUCCEED handler's blocks
+    -- it failed identically, so p6return's fault is genuinely its own
+    frame handling. And the obvious redesign -- throw `CONTROL_RETURN` to
+    route through the routine's RETURN handler that already encodes -- is
+    NOT equivalent: `$!need-succeed-handler` is a LexicalScope property
+    independent of a Routine's `$!may-use-return`, so a block with
+    `succeed` need not have a RETURN handler to catch the throw, which is
+    exactly why p6return uses the direct frame mechanism. **CORRECTION
+    (2026-09-04, instrumented): p6return is NOT a frame-protocol problem at
+    all.** A frame-chain print in `NqpOps.p6return` fired ZERO times across
+    the whole failing build -- engine `p6return` never executes. The four
+    earlier "frame protocol" diagnoses were wrong. What actually happens:
+    enabling `p6return` unblocks the exception-handling blocks it sits in
+    (`convert-exception`, `COMP_EXCEPTION`), and one of THEM has a latent
+    want-propagation bug that surfaces first as `Cannot unbox 64 bit wide
+    bigint into native integer` (`Ops.unbox_i` on a >64-bit bigint, engine
+    op at NqpOps.run0), then a downstream `P6Opaque.allocate` NPE while that
+    error is being handled. This is exactly the hash pattern: enabling an op
+    completes a block whose OTHER op mis-encodes. So the blocker is a
+    findable want/type bug (an engine `unbox_i` where the bytecode path
+    keeps the value boxed, in the succeed/THROW/convert-exception path), not
+    a frame protocol -- and p6return itself is likely correct. Next step:
+    instrument which engine `unbox_i` site takes a bigint and fix its want
+    propagation, the way the flat-named-arg and defor bugs were fixed.
+    `with`/`without` rides the same blocks and the same cascade.
+
+    *Localized further (2026-09-04, `NQP_UNBOX_DEBUG` naming the frame): the
+    first host error is `Ops.unbox_i` on a uint64-max bigint inside
+    `IMPL-FITS-NATIVE-INT` (literals.rakumod:96), whose body is
+    `try $fits := nqp::iseq_I(nqp::box_i(nqp::unbox_i($value), ...), $value)`
+    -- the `try` is MEANT to catch the unbox failure and answer "does not
+    fit". The op boundary wraps that RuntimeException as `NqpHostError` and
+    `hostErrToUnwind` converts it to `dieInternal`, so the engine `try`
+    should catch it -- which means this unbox may be a CAUGHT red herring
+    (the instrument prints on every throw, caught or not) and the real
+    failure the downstream `P6Opaque.allocate` NPE seen during
+    `COMP_EXCEPTION`/`convert-exception`. The unresolved question, and the
+    exact next diagnostic, is `NQP_EH_DEBUG=1` on this build: does
+    `hostErrToUnwind` run for that unbox and does the `try` catch it, or
+    does something escape? Either way the failure is in the engine
+    exception-handling of these BEGIN-time blocks, not p6return's own
+    execution (which never runs), and it is a bounded runtime bug, not a
+    protocol redesign.*
+
+    *ANSWERED (`NQP_EH_DEBUG`): the bigint-unbox is NOT a red herring. The
+    trace shows `handleUnwind ex=NqpUnwind target=1552 uTarget=1552
+    curFrame=IMPL-FITS-NATIVE-INT` -- the engine `try`'s unwind runs and
+    its target matches -- yet the host exception re-fires and the nqp
+    stack then escapes all the way to MAIN, failing the compile. So the
+    engine `try`/handle runs its unwind but does NOT fully suppress the
+    host-error-converted exception: it is caught, its handler runs, and it
+    still escapes. THAT is the precise defect -- an engine handle host-error
+    suppression bug, reproduced by a uint64-max integer literal driving
+    `IMPL-FITS-NATIVE-INT`'s `try { ... nqp::unbox_i($big) ... }`. The fix
+    is in the engine handle's host-error path (why a matched-target unwind
+    still propagates); p6return itself is not implicated. This is the
+    single concrete bug between 94.2% and the p6return/with blocks.*
+
+    *Refined fix location: the unbox runs TWICE (two uint64-max literals
+    reach `IMPL-FITS-NATIVE-INT`), and `dieInternal` -> `handlerDynamic`
+    -> `handleUnwind` matches on the FIRST -- so the first `try` catches.
+    The SECOND escapes, which means the engine handle's host-error path
+    (inner TryCatch -> `hostErrToUnwind` -> outer catch) leaves
+    `cf.curHandler` in a bad state, so the next handle's `handlerDynamic`
+    no longer finds its CATCH. The fix location narrowed once
+    more: `try` compiles to `handle` with CATCH, whose builder DOES emit an
+    inner TryCatch that runs `hostErrToUnwind` -- yet across the whole
+    failing build `hostErrToUnwind` is called ONLY with `NqpUnwind`, NEVER
+    with `NqpHostError`. So the bigint-unbox's `NqpHostError` never reaches
+    the try's host-error conversion; it bypasses the inner TryCatch and
+    escapes. Host errors in `try` work everywhere else (HEAD builds), so
+    this is context-specific to `IMPL-FITS-NATIVE-INT`'s nested
+    `iseq_I(box_i(unbox_i(...)))`. The exact next diagnostic: print at the
+    HANDLE inner TryCatch's catch clause what exception it receives for
+    this block -- does the inner TryCatch not catch `NqpHostError` here, or
+    does the op-level `carry` fail to wrap this unbox as `NqpHostError`?*
+
+    *ANSWERED, and the diagnosis flips: the bigint-unbox is a CAUGHT RED
+    HERRING. `hostErrToUnwind` does receive its `NqpHostError` (twice,
+    matching the two literals), converts each to `dieInternal`, the try's
+    CATCH runs, and `handleUnwind` matches (1552/1554) -- fully handled.
+    The REAL failure is later: a control `NqpUnwind` with `uTarget=59`
+    passes through handles whose targets are 1168, 4, 1, 2 (none match 59)
+    and escapes to `command_eval`, NPEing -- its target handler (59)
+    belongs to a frame that already EXITED. Mechanism: the SUCCEED handler
+    block is compiled as a nested block on the BYTECODE CODEREF road (so
+    engine `p6return` never runs -- the 0 firings), its bytecode `p6return`
+    sets `cf.exitAfterUnwind`, and the ENCLOSING engine-encoded block's
+    handle machinery does not honour that the way bytecode does, so the
+    handler-59 frame leaves before the unwind targeting it fires. So it IS
+    the engine handle + `exitAfterUnwind` interaction -- but at the
+    enclosing-engine-block level, not in p6return's own op. The fix is in
+    the engine HANDLE builder's `exitAfterUnwind`/unwind-target handling
+    for a control unwind raised by a bytecode handler running inside an
+    engine frame; the reproduction is any BEGIN-time `succeed`
+    (COMP_EXCEPTION) once `p6return` lets the enclosing block encode.*
+
+    *Handler 59 identified (`NQP_H59_DEBUG` printing the handler frame): it
+    is `engine=false` (a BYTECODE frame), `kind=2` (EX_UNWIND_OBJECT),
+    `category=1` (CATCH), an anonymous frame, with `curFrame=COMP_EXCEPTION`.
+    So the escaping unwind targets a CATCH handler in a BYTECODE frame while
+    an ENGINE frame (COMP_EXCEPTION) sits in its propagation path. The
+    engine frame's `exitAfterUnwind` early-return pops the stack past
+    handler 59's frame before the unwind targeting it propagates up, so the
+    bytecode handler is gone when the unwind arrives and it escapes to
+    `command_eval`. The precise fix is in the engine HANDLE's
+    `exitAfterUnwind` handling: it must not tear down frames past a pending
+    unwind that targets a deeper (bytecode) handler -- an engine↔bytecode
+    frame-exit-ORDER bug. The frame-exit-order was then read
+    straight from the existing trace (no new build): the `uTarget=59`
+    unwind propagates UP through `COMP_EXCEPTION`, `from-slurpy-flat`,
+    `new`, `EXPR` and anonymous frames -- none carrying `hid=59` -- and
+    escapes. So `handlerDynamic` found handler 59 by walking the LOGICAL
+    frame chain (`tc.curFrame.caller`...), but the unwinder is thrown up
+    the JAVA stack, and with an engine frame (`COMP_EXCEPTION`) in the path
+    the two DIVERGE: handler 59's frame is not a Java-stack ancestor of the
+    throw point, so the unwind can never reach it. This is the architectural
+    root -- and it vindicates the original "frame protocol" instinct while
+    correcting its specifics. It is NOT a targeted bug fix: it needs the
+    engine frame to participate in the dynamic exception-handler chain the
+    way a bytecode frame does (so a handler found logically is reachable on
+    the actual stack), OR the engine HANDLE to re-home unwinds whose target
+    is not a Java-stack ancestor. That is design-level work on the
+    engine/runtime exception model, which is exactly why the committed state
+    correctly bails these blocks to bytecode. It is the real, final shape
+    of the p6return/with blocker.*
+
+    *CONFIRMED with evidence (`NQP_LEFT_DEBUG`): when the escaping unwind
+    (target 59, kind=2 EX_UNWIND_OBJECT) is created, handler 59's frame is
+    LIVE -- `LEFT=false` -- anonymous, found with `curFrame=COMP_EXCEPTION`.
+    So it is NOT "frame already left": the handler frame is live but is not a
+    Java-stack ancestor of the throw point, so the unwinder (a Java throw)
+    goes up past `COMP_EXCEPTION`/`from-slurpy-flat`/`new`/`EXPR` (handles
+    1168/4/1/2) and escapes. `handlerDynamic` walks the logical `cf.caller`
+    chain and finds a handler the unwinder cannot reach on the Java stack.
+    This divergence appears only when `COMP_EXCEPTION` is engine-encoded --
+    in an all-bytecode build the logical chain and Java stack stay aligned
+    and HEAD compiles. So the fix is architectural: reconcile the engine
+    frame's handler-chain participation with the Java stack (so a handler
+    found logically is reachable), or deliver the unwind by logical
+    re-entry rather than a raw Java throw. Not a targeted change. The next
+    concrete diagnostic, if pursued, is to compare the engine vs bytecode
+    handler chain for this exact BEGIN-time `COMP_EXCEPTION` case and see
+    which handler-59 registration differs.*
+
+Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
+rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
+(sized native parameters, which want the bytecode path's post-fetch
+truncation). Both the plain-uint-lexical batch and the regex batch are the shape of
+what is left below the remaining walls: each removed all of its own bails
+(272 uint, 184 regex) and bought ZERO blocks in the CORE.c mainline,
+because every one of those blocks is also blocked by `hash`, `p6return`,
+`with`, or a native-parameter type -- the multiply-blocked interior the
+sole-blocker ranking always predicted. The number holds at 94.2% not
+because the work did nothing (regex is a real 184-block tier of the
+grammar now on-engine) but because the mainline's remaining blocks each
+carry two or three reasons, and freeing one leaves the others.
+
+**Deletion (the actual Phase 5) still cannot follow, but the walls are
+nearly down.** Two of the three called blockers fell this session on a
+hard look: regex encodes, and hash encodes (its bug was a general
+flat-named-argument dispatch defect, now fixed for every call site). The
+CORE.c mainline's remaining blockers are: `p6return`/`with` (133, the
+engine return protocol -- the last genuine wall), native-parameter types
+(95, sized/uint/wide params wanting the bytecode path's post-fetch
+truncation), immediate blocks wanting arguments outside if/with/loops
+(45), and a small mechanical tail (floor_n, objectid, atposnd, ord,
+rindex, getlexrelcaller). The number holds at 94.2% only because these
+co-block the same interior; clearing `p6return` and the native-param
+types should move it sharply. The lesson stands: every "wall" so far was
+tractable on a hard look -- regex, then hash. `p6return` is the one left,
+and it wants a designed protocol (route a non-local return through the
+RETURN control handler that already encodes, not the bytecode path's
+frame-register optimization).
 
 ## Phase 0 baselines (2026-09-01, GraalVM 25.2.4, one warm 8g server)
 
