@@ -54,7 +54,7 @@ NQP_RUNTIME_JAR = @nfp(nqp/build/jvm/share/runtime/nqp-runtime.jar)@
 # This is addition to J_ALL_METAMODEL_SOURCES
 @bsv(METAMODEL_SOURCES)@ = @nfp(src/vm/jvm/Raku/Metamodel/JavaHOW.nqp)@
 
-@bpv(ALL_TARGETS)@ = eval-client.pl @bpm(DEBUG_RUNNER)@
+@bpv(ALL_TARGETS)@ = eval-client.pl
 
 @bpv(CLEANUPS)@ = \
   $(RUNTIME_JAR) \
