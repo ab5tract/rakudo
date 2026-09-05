@@ -880,9 +880,27 @@ honest count of each from `NQP_CODE_BAIL=1`:
     `iseq_I(box_i(unbox_i(...)))`. The exact next diagnostic: print at the
     HANDLE inner TryCatch's catch clause what exception it receives for
     this block -- does the inner TryCatch not catch `NqpHostError` here, or
-    does the op-level `carry` fail to wrap this unbox as `NqpHostError`?
-    That one print settles the fix. p6return is not implicated (0 firings);
-    this is a bounded engine handle host-error catching gap.*
+    does the op-level `carry` fail to wrap this unbox as `NqpHostError`?*
+
+    *ANSWERED, and the diagnosis flips: the bigint-unbox is a CAUGHT RED
+    HERRING. `hostErrToUnwind` does receive its `NqpHostError` (twice,
+    matching the two literals), converts each to `dieInternal`, the try's
+    CATCH runs, and `handleUnwind` matches (1552/1554) -- fully handled.
+    The REAL failure is later: a control `NqpUnwind` with `uTarget=59`
+    passes through handles whose targets are 1168, 4, 1, 2 (none match 59)
+    and escapes to `command_eval`, NPEing -- its target handler (59)
+    belongs to a frame that already EXITED. Mechanism: the SUCCEED handler
+    block is compiled as a nested block on the BYTECODE CODEREF road (so
+    engine `p6return` never runs -- the 0 firings), its bytecode `p6return`
+    sets `cf.exitAfterUnwind`, and the ENCLOSING engine-encoded block's
+    handle machinery does not honour that the way bytecode does, so the
+    handler-59 frame leaves before the unwind targeting it fires. So it IS
+    the engine handle + `exitAfterUnwind` interaction -- but at the
+    enclosing-engine-block level, not in p6return's own op. The fix is in
+    the engine HANDLE builder's `exitAfterUnwind`/unwind-target handling
+    for a control unwind raised by a bytecode handler running inside an
+    engine frame; the reproduction is any BEGIN-time `succeed`
+    (COMP_EXCEPTION) once `p6return` lets the enclosing block encode.*
 
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
