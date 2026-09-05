@@ -1191,6 +1191,34 @@ storage in a delegate), while every plain accessor beside them checks
 the delegate first. They now delegate the same way; proven through a
 mixin, and the Stash guard goes.
 
+## Ops from the registry, not by hand (2026-09-05)
+
+The question that ended the op batches: do we need to generate these
+ops at all? No. Batches 12 through 20b added hundreds of them the hard
+way -- an OP_X constant, a `case` in NqpOps.run0 that calls the runtime
+method, and an encoder row naming the id, result type and argument
+signature -- three edits per op, verified by hand against Ops.kt, and a
+parallel table to the one the bytecode path already keeps. That table is
+Compiler.nqp's `map_classlib_core_op` / `map_classlib_hll_op`: 623 core
+and 40 Raku ops, each declared once with its class, static method,
+argument RT types, result RT type and :tc, and compiled straight to an
+invokestatic.
+
+Batch 25 derives the encoder's table from it. Registration also records
+[class, method, JVM descriptor, arg types, result type, tc] and publishes
+the hashes as hllsyms (CODE_CLASSLIB_OPS, CODE_CLASSLIB_HLL_OPS -- the
+CODE_OP_DESUGARS precedent). The encoder consults them before refusing
+an op, the HLL's own first, and emits one wire shape (CLASSLIB, tag 27)
+carrying the descriptor; a single ClassLibOp node holds a site that
+resolves the static method once (findStatic, spread over Object[],
+adapted to (Object[])Object -- a compilation-final handle Graal inlines)
+and calls it with the thread context appended when the op takes one. A
+uint result is T_UINT, so it boxes unsigned; a continuation-style or void
+op stays out. Semantics are the bytecode path's by construction, since
+the same declaration drives both. The hand-written rows become
+overrides for ops with special encodings; the hand-written cases are now
+redundant and can go; new ops never get a case again.
+
 ## Lessons already paid for (write them into the code)
 
 - No `@ExplodeLoop` over a cyclic program — RxVmNode's comment says
