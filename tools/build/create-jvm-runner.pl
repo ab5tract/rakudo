@@ -213,17 +213,29 @@ my $jopts = '-Xms100m -Xss512m --enable-native-access=ALL-UNNAMED'
           . ' -Dperl6.prefix=' . ($type eq 'install' && $^O ne 'MSWin32' ? '$DIR/..' : $prefix)
           . ' -Dnqp.library.path=' . $sharedir
           . ($^O eq 'MSWin32' ? ' -Dperl6.execname="%~dpf0"' : ' -Dperl6.execname="$EXEC"');
-my $jdbopts = '-Xdebug -Xrunjdwp:transport=dt_socket,address=' 
-            . ($^O eq 'MSWin32' ? '8000' : '${RAKUDO_JDB_PORT:=8000}') 
+my $jdbopts = '-Xdebug -Xrunjdwp:transport=dt_socket,address='
+            . ($^O eq 'MSWin32' ? '8000' : '${RAKUDO_JDB_PORT:=8000}')
             . ',server=y,suspend=y';
+
+# rakudo-j is a whole cold JVM. Left uncapped it takes the JVM default max
+# heap -- a quarter of physical RAM -- and when a test's `run $*EXECUTABLE`
+# spawns one, that uncapped child (a full JVM plus its own libgraal JIT
+# isolate, ~1.2g even for a tiny eval) lands inside the eval server's cage
+# and is what a spawn-heavy test balloons. Give the runner a bounded,
+# overridable heap. The eval server exports RAKUDO_JVM_HEAP tighter still
+# and RAKUDO_JVM_XOPTS with a JIT trim (see the guard below), so the
+# children it spawns stay small while a direct rakudo-j keeps this generous
+# default and an empty XOPTS.
+my $userjvm = $^O eq 'MSWin32' ? ''
+            : ' -Xmx${RAKUDO_JVM_HEAP:=4g} ${RAKUDO_JVM_XOPTS}';
 
 if ($debugger) {
     install "rakudo-debug-j", "java $jopts rakudo-debug";
     install "perl6-debug-j", "java $jopts rakudo-debug";
 }
 else {
-    install "rakudo-j", "java $jopts perl6";
-    install "perl6-j", "java $jopts perl6";
+    install "rakudo-j", "java$userjvm $jopts perl6";
+    install "perl6-j", "java$userjvm $jopts perl6";
     install "rakudo-jdb-server", "java $jdbopts $jopts perl6";
     install "perl6-jdb-server", "java $jdbopts $jopts perl6";
     # The server keeps one JVM for many runs, and each run builds a whole
@@ -272,6 +284,16 @@ else {
     # execs the command in place, so the pid a caller gets is java's own
     # and pipes/kills behave exactly as before.
     my $guard = <<'GUARD';
+
+# Children a test spawns via `run $*EXECUTABLE` inherit this environment.
+# On the JVM each such child is a full cold JVM plus a libgraal isolate --
+# ~1.2g uncapped for a tiny eval -- and it runs inside this server's cage,
+# so a spawn-heavy test can balloon the scope. Cap the child heap hard and
+# turn the child's Truffle JIT off (a one-shot eval exits long before
+# compiling the compiler on-engine pays off, and skipping it drops the
+# libgraal isolate entirely). Both stay overridable.
+export RAKUDO_JVM_HEAP="${RAKUDO_JVM_CHILD_HEAP:-2g}"
+export RAKUDO_JVM_XOPTS="${RAKUDO_JVM_CHILD_XOPTS:--Dpolyglot.engine.Compilation=false}"
 
 # Memory guard: see the comment above the eval-server runners in
 # tools/build/create-jvm-runner.pl. Do not bypass it -- lower
