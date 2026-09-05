@@ -1077,6 +1077,96 @@ sibling lesson — the retry with a 24G heap on the 30G swapless box got
 the SESSION shot by the kernel OOM killer — is written into AGENTS.md:
 cage heavy builds with systemd-run --scope -p MemoryMax.)
 
+## Phase 5 climb, second day (2026-09-05)
+
+CORE.c mainline encodability 94.7% -> 96.5% (18143 -> 18491 / 19146)
+over batches 12-18, one ~10-minute build each, t/01-sanity 25/25 on
+every one. What each batch was, and the three findings that matter more
+than the number.
+
+**Mechanical batches (12-17).** with/without (if/unless whose branch
+test is the overridable `.defined` method, the value kept for the block
+topic); the pure op tail in one sweep per family -- multidim access and
+binds, ctx/ctxcaller, the bigint math family, uint accessors, the
+atomic/IO/misc runtime calls, java.lang.Math, string and coerce ops;
+uint parameters (a new wire type T_UINT=4 so the builder fetches through
+posparam_u/namedparam_u and binds an int slot -- mapping uint to T_INT
+picked the signed unbox and overflowed); uint attributes through the
+`_u` accessors, exactly the bytecode path's suffix. Every row is a
+verified Ops.kt signature; the Java/Kotlin quick-compile catches typos
+before the build does.
+
+**p6return is solved and worth +0 (batch 18).** It appears only as the
+SUCCEED handler of a `handle` that wraps a block's whole body
+(src/Raku/ast/scoping.rakumod), so the handle's value is the block's
+value is the routine's return. The bytecode path forces that with
+return_o + cf.outer.exitAfterUnwind + leave. Here the handler
+dispatcher's completion value already becomes the handle's result
+(NqpProgramBuilder HANDLE -> resL) and flows out as the block value, so
+yielding the argument produces the same routine return with no unwind
+at all -- the "logical caller chain vs Java stack" divergence that sank
+the unwind-based attempts never comes into play. Identical results on
+both paths for `succeed` in given/when. The 82 refusals vanished and the
+count did not move: every one of those routines is ALSO refused for its
+bare blocks (next).
+
+**"immediate block wanting arguments" is one line (batch 20, pending).**
+Compiler.nqp's generic immediate-block compile invokes the code ref
+with an EMPTY callsite -- no arguments, whatever the arity or `count`.
+A `count` annotation alone marks an implicit OPTIONAL topic (a bare
+block's `$_`, arity 0; code.rakumod's implicit-topic-mode 1), whose
+default resolves in the callee's own binder either way. The encoder
+bailed on `arity > 0 || ann('count')`; correct is `arity > 0` only.
+That is the 45 direct refusals plus the 82 co-blocked given/when ones.
+
+**Syscalls are the newdisp op mechanism.** nqp::syscall(name, args)
+compiles to dispatch('boot-syscall', name, args) on moar AND here
+(Compiler.nqp:1910), replacing the p6foo hll ops kept in the Rakudo
+tree. Our table (nqp/.../dispatch/Syscalls.kt) lacked the stat family
+that IO::Path's `#?if moar` code uses. Batch 19 (pending): the encoder
+desugars `syscall` to the dispatch it is, and file-stat / stat-flags /
+stat-time-nanos / stat-is-* are backed by the EXISTING Ops.stat /
+stat_time / file* ops through an opaque JavaObjectWrapper StatHandle
+(a missing file yields EXISTS=0, no throw -- IO::Path relies on it).
+Proven 9/9 by a direct nqp::syscall test after a 5-second runtime-jar
+sync: runtime ops never need the full build to test.
+
+**Backend directives.** Surveyed every `#?if jvm` / `#?if !moar` in the
+Rakudo source (140 sites; the js ones are moot). Removed the stray
+old-JVM workarounds: Failure's boxed `Int $!handled` ("native int
+breaks on the JVM" -- not any more) and the 24
+IO::Path + 2 Internals `!moar` twins that emulated the stat syscalls.
+Left in place, each for a stated reason: genuine backend facts (VM
+identity, jar precomp, the Java repositories, the 65535-constant-pool
+packing, continuationreset on resume, the process API), NFG-adjacent
+(UTF-16 chars vs codes, .NFD, nomark, encodings -- later, per plan),
+and runtime-capability gaps moar fills natively (thread/lock/proc
+counters, P6EX, method caches, signals) -- the honest next targets for
+the "no special casing" goal. Two were tried and reverted. Rakudo::Iterator.Flat's int.Range.max for
+the unlimited-levels sentinel: with moar's -1, `.flat` stops flattening
+at once -- the `@!next.elems < $!levels` compare on the uint attribute
+runs SIGNED here where moar's runs unsigned, so the guard had a real
+reason all along. Chased: the engine's ONLY int-to-object coercion is
+C_I2O -> Ops.box_i, a signed box, and it has no box_u path; the
+bytecode boxes an RT_UINT result through box_u. So every uint value the
+engine reads as a plain T_INT -- a `_u` attribute (batch 15), a T_UINT
+parameter once it sits in its int slot (batch 13), unbox_u (batch 12),
+and the pre-existing lex_rt uint-lexical mapping -- boxes SIGNED when it
+reaches an object context: 2^64-1 becomes Int -1. Rare in CORE.c, but
+Flat's -1 sentinel is exactly that case, and t/spec will find others.
+The proper fix is a first-class T_UINT in the encoder's type lattice
+(the bytecode has RT_UINT distinct from RT_INT) with a box_u coercion
+kind, everything else treating it as int -- bounded, and the next
+correctness batch before any 100% claim.
+And Stash's bindattr-for-atomicbindattr. Un-guarding it still broke
+building CORE.d, and the diagnosis turned it into a two-line runtime fix
+(batch 21): P6OpaqueBaseInstance's atomic accessors reflected on the
+shell's own class for a field_N it does not have (NoSuchFieldException:
+field_0 -- a repossessed, mixed-in or deserialized object keeps its
+storage in a delegate), while every plain accessor beside them checks
+the delegate first. They now delegate the same way; proven through a
+mixin, and the Stash guard goes.
+
 ## Lessons already paid for (write them into the code)
 
 - No `@ExplodeLoop` over a cyclic program — RxVmNode's comment says
@@ -1091,3 +1181,12 @@ cage heavy builds with systemd-run --scope -p MemoryMax.)
   clear via `DispatchBootstrap.registerResettable`, and the
   leak-check command (`tools/build/evalserver-leak-check.sh`) is the
   acceptance test.
+- A bail histogram counts lines and blocks are co-blocked: clearing
+  one refusal can be +0 (p6return). Rank on the CURRENT build's
+  NQP_CODE_BAIL output, never a monitor's leftover from another build.
+- Match the bytecode path's exact call shape, not its intent: an
+  immediate block is called with an empty callsite; a uint attribute
+  uses the `_u` accessor; a uint param fetches unsigned into an int slot.
+- Runtime ops (Ops.kt, Syscalls.kt) test in seconds through a
+  runtime-jar sync against the existing rakudo-j; only encoder changes
+  need the 10-minute clean buildJvm + make.
