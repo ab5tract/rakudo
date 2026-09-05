@@ -369,6 +369,7 @@ it gets measured after every batch, never estimated:
 | + batch 5 (cond-taking loops, more small ops) | 18051 (94.2%) | 899238 (91.2%) |
 | + plain uint lexicals          | 18051 (94.2%)  | 899238  (91.2%)           |
 | + engine-covered regex         | 18051 (94.2%)  | 899238  (91.2%)  (co-blocked; see below) |
+| + small-op mechanical tail     | 18098 (94.5%)  | 901970  (91.5%)           |
 
 (The last row was measured after the 2026-09-04 rebase onto upstream,
 where the mainline is 19146 blocks; the earlier rows are over 19141.)
