@@ -768,13 +768,30 @@ honest count of each from `NQP_CODE_BAIL=1`:
     BOOTSTRAP `OperatorProperties.new` (cuid 1262), documented above.
     Until that is understood, `hash` stays out, and so do the blocks
     that only it blocks.
-  - `op p6return` / `op with` (82 / 51): deferred this session. A first
-    cut of both broke the setting compile -- p6return's mid-body return
-    stores into `cf.caller` and marks `outer.exitAfterUnwind`, which is
-    wrong for a phaser closure whose caller is not the routine it should
-    return from, and it faulted under the SUCCEED handler at BEGIN time.
-    These need the engine's own return-from-routine protocol, not the
-    bytecode path's frame-register shape; that is real design work.
+  - `op p6return` / `op with` (82 / 51): deferred. Three distinct
+    encodings of `p6return` were tried and all three fail identically --
+    a host `NullPointerException` in `P6Opaque.allocate` (a null
+    REPRData.instance) at the same site: the SUCCEED handler inside
+    `convert-exception`/`COMP_EXCEPTION`, evaluated at BEGIN time while
+    the setting compiles. The three: (1) `StoreRet` + an
+    `outer.exitAfterUnwind` mark; (2) a faithful `Ops.return_o` +
+    `outer.exitAfterUnwind` + `cf.leave()` helper; (3) the same without
+    the explicit `leave()` (a normal engine block leaves through the
+    emitted wrapper's postlude after `codeRun`, not inside `runProgram`,
+    so calling it in the helper double-leaves). None is right. `p6return`
+    is the direct-return optimisation the bytecode path emits *instead of*
+    the RETURN control exception, and its `cf.outer.exitAfterUnwind` +
+    early-method-`return` shape assumes a JVM frame the engine program
+    does not have -- the engine's early `Return` ends only the program,
+    and the wrapper method around it still runs. The honest conclusion:
+    `p6return` needs the engine's own non-local-return protocol (most
+    likely routing through the RETURN handler that already encodes, i.e.
+    throwing the RETURN category rather than writing frame registers),
+    which is design work, not an encoding tweak. `with`/`without` was
+    reverted alongside it and not retried in isolation; the withy path
+    (the `.defined` test, merged awkwardly into the cond-passing branch)
+    wants its own separate encoding. Both are named here so the next
+    session starts from the mechanism, not another blind build.
 
 Then a long tail of single table rows (floor_n, objectid, atposnd, ord,
 rindex, getlexrelcaller, ...), each a few blocks, and `param type` 95
