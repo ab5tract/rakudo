@@ -1118,6 +1118,13 @@ block's `$_`, arity 0; code.rakumod's implicit-topic-mode 1), whose
 default resolves in the callee's own binder either way. The encoder
 bailed on `arity > 0 || ann('count')`; correct is `arity > 0` only.
 That is the 45 direct refusals plus the 82 co-blocked given/when ones.
+Landed (batch 20) with 20b's file-op rows and 21's atomic-delegate
+fix: 96.5% (18477), only +7 net -- the 45 refusals are gone from the
+histogram, but every routine they sat in is refused a third time (loop
+shape, chained chain, resume). The remaining ~670 blocks are a long
+tail of 1-8 each plus that structural cluster: from here the yield per
+op row is small, and the T_UINT correctness batch matters more than
+the next percent.
 
 **Syscalls are the newdisp op mechanism.** nqp::syscall(name, args)
 compiles to dispatch('boot-syscall', name, args) on moar AND here
@@ -1130,6 +1137,10 @@ stat_time / file* ops through an opaque JavaObjectWrapper StatHandle
 (a missing file yields EXISTS=0, no throw -- IO::Path relies on it).
 Proven 9/9 by a direct nqp::syscall test after a 5-second runtime-jar
 sync: runtime ops never need the full build to test.
+Landed (nqp 512ca4fef, rakudo a00180d6c) at 96.4%: the un-guarded
+moar code routes through the FILETEST-* helpers and the dir iterator,
+whose filereadable/filewritable/fileexecutable/fileislink/lstat/chown/
+chmod/getenvhash calls had no encoder rows (batch 20b adds them).
 
 **Backend directives.** Surveyed every `#?if jvm` / `#?if !moar` in the
 Rakudo source (140 sites; the js ones are moot). Removed the stray
@@ -1154,10 +1165,35 @@ parameter once it sits in its int slot (batch 13), unbox_u (batch 12),
 and the pre-existing lex_rt uint-lexical mapping -- boxes SIGNED when it
 reaches an object context: 2^64-1 becomes Int -1. Rare in CORE.c, but
 Flat's -1 sentinel is exactly that case, and t/spec will find others.
-The proper fix is a first-class T_UINT in the encoder's type lattice
-(the bytecode has RT_UINT distinct from RT_INT) with a box_u coercion
-kind, everything else treating it as int -- bounded, and the next
-correctness batch before any 100% claim.
+Batch 22 gave the encoder that T_UINT (uint routes to box_u; without
+it the engine could only ever box_i) -- and changed nothing observable,
+which was the real lesson: `.flat` with -1 fails on the BYTECODE path
+too, and nqp::box_u itself answers -2 for a native 2^64-2. The bug is
+in the runtime pair: Ops.box_u boxes the long signed, and unbox_u /
+posparam_u unbox through get_int and throw at 2^63. Batch 23 fixed the runtime half (nqp
+577761161, rakudo 0f33bd185): SixModelObject.set_uint, emitted by
+P6bigint.generateBoxingMethods into every bigint-boxing P6opaque (Int
+included -- box_u's call had been falling to the signed default);
+box_u and p6box_u use it; the *param_u fetches unbox through get_uint.
+A box_u(unbox_u(box_u(2^64-2))) round-trip now answers the large value.
+Still not Flat: a uint lexical, attribute or parameter read into an
+Int boxes signed on BOTH paths, and the last cause is the BYTECODE
+COMPILER itself -- add_hll_box('', RT_UINT) emits hllboxtype_i + box_i,
+the nqp variant bootint + box_i. That, plus the engine's deferred uint lexical/parameter mapping, was
+attempted next (batches 24/24b/24c) and REVERTED. It kept uncovering
+more signed sites -- the dispatch flag packs the arg type in two bits
+and T_UINT (4) collides with the named bit ("unknown tag" mid-program);
+the runtime binder boxes an ARG_UINT argument with box_i at four sites;
+return_u tags the return RET_INT so a `--> uint` return boxes signed;
+the `is rw` accessor's UIntAttrRef container and the Raku signature
+binder are two more, the latter now throwing on a 2^64-2 literal arg --
+a wide, cross-cutting chain with no clean stopping point mid-session.
+So the line is drawn at batch 23: box_u / unbox_u / set_uint and the
+*param_u fetches are unsigned (a native round-trip is correct), and
+Rakudo::Iterator.Flat KEEPS its `#?if jvm` guard. Finishing the uint
+boxing everywhere -- every RET_UINT reader, ARG_UINT binder site,
+container FETCH and the RT_UINT compiler box, with one shared unsigned
+helper -- is its own focused task, not a detour inside the op work.
 And Stash's bindattr-for-atomicbindattr. Un-guarding it still broke
 building CORE.d, and the diagnosis turned it into a two-line runtime fix
 (batch 21): P6OpaqueBaseInstance's atomic accessors reflected on the
@@ -1166,6 +1202,52 @@ field_0 -- a repossessed, mixed-in or deserialized object keeps its
 storage in a delegate), while every plain accessor beside them checks
 the delegate first. They now delegate the same way; proven through a
 mixin, and the Stash guard goes.
+
+## Ops from the registry, not by hand (2026-09-05)
+
+The question that ended the op batches: do we need to generate these
+ops at all? No. Batches 12 through 20b added hundreds of them the hard
+way -- an OP_X constant, a `case` in NqpOps.run0 that calls the runtime
+method, and an encoder row naming the id, result type and argument
+signature -- three edits per op, verified by hand against Ops.kt, and a
+parallel table to the one the bytecode path already keeps. That table is
+Compiler.nqp's `map_classlib_core_op` / `map_classlib_hll_op`: 623 core
+and 40 Raku ops, each declared once with its class, static method,
+argument RT types, result RT type and :tc, and compiled straight to an
+invokestatic.
+
+Batch 25 derives the encoder's table from it. Registration also records
+[class, method, JVM descriptor, arg types, result type, tc] and publishes
+the hashes as hllsyms (CODE_CLASSLIB_OPS, CODE_CLASSLIB_HLL_OPS -- the
+CODE_OP_DESUGARS precedent). The encoder consults them before refusing
+an op, the HLL's own first, and emits one wire shape (CLASSLIB, tag 27)
+carrying the descriptor; a single ClassLibOp node holds a site that
+resolves the static method once (findStatic, spread over Object[],
+adapted to (Object[])Object -- a compilation-final handle Graal inlines)
+and calls it with the thread context appended when the op takes one. A
+uint result is T_UINT, so it boxes unsigned; a continuation-style or void
+op stays out. Semantics are the bytecode path's by construction, since
+the same declaration drives both. The hand-written rows become
+overrides for ops with special encodings; the hand-written cases are now
+redundant and can go; new ops never get a case again.
+
+## The registry landed flat -- and that is the point (2026-09-05)
+
+Batch 25 (classlib ops from the registry) validated: gate 25/25, 10/10
+registry-only ops (radix, sha1, lc, uc, iseq_s, pow_n, abs_i, chars,
+index, x -- none with a hand row) encode and run, and the old "op X"
+refusal tail is gone from the histogram. Coverage did not move: 96.5%
+(18477) before and after. That is expected and correct -- the registry
+is REDUNDANT with the hand rows added in batches 12-20b, so it adds no
+coverage; its value is that no op needs a hand row ever again and those
+redundant OP_X/run0/op3 triples can now be deleted. What still refuses
+is what the registry cannot reach: non-classlib ops with custom codegen
+(xor, usecapture, p6invokeflat, sprintf/sprintfdirectives, numify), the
+:cont ops it deliberately bails on (continuationreset/control), and the
+structural cluster (loop shape 16, chained chain 12 + chain arity 4,
+repeat-with-handlers 8, no-coercion 3->1 7 / 2->3 5). Follow-up: delete
+the redundant hand cases; then the remaining refusals are the honest
+map of what is left.
 
 ## Lessons already paid for (write them into the code)
 
