@@ -14,6 +14,54 @@ This doc is the plan of record for that port. Read
 `docs/jvm-truffle-migration.md` first for how the engine got here; this
 is the next arc.
 
+## The dispatch cost (`infix:<+>`) — profiled 2026-09-06
+
+Chasing "the dispatch cost directly" (a `$a+$b` loop measured ~677 ns/op).
+JFR (`docs/bench/callconv` reproduction: attach `JFR.start settings=profile`
+to a running `+` loop). Findings, in order of what they overturned:
+
+- **`CallFrame.<init>` is ~50% of `+`**, and one `$a+$b` builds `CallFrame`s
+  in ~6 distinct setting blocks (the proto, the multi-dispatch, the
+  `Int:D+Int:D` candidate…). `Ops.add_I` — the actual addition — is ~2%.
+  So the dispatch cost *is* the calling-convention cost × frames-per-operator.
+  The multi-dispatch resolution is mostly cached (`findmethod`/`istype` ~5%);
+  it's the *frame per call*, not re-resolution, that costs.
+- **Inside `CallFrame.<init>`, ~80% is the outer-resolution caller-chain
+  search** (`CallFrame.kt`, the `while (checkFrame != null)` loop) — ~40% of
+  the whole `+`. The `liveInvocations` atomic is only ~9% of the constructor
+  (a tempting but wrong target).
+- **The naive gate fix `>0`→`>1` is UNSAFE** — proven by a throwaway: it
+  broke instantly (`VMArray: Can't shift from an empty array`), a wrong-outer
+  lexical lookup. The search genuinely guards a static block nested in a
+  *recursive* outer, where `priorInvocation` picks the wrong level.
+- **The search SUCCEEDS at runtime** (`NQP_OUTER_DEBUG` instrumentation:
+  `found=true`, `live=1`–`2`). It is finding genuinely-live outers deep on
+  the multi-dispatch chain — *not* wasted. The perf notes' "1.1M searches,
+  zero successes" was a **compile** workload (exited module mainlines), a
+  different problem.
+
+**Two distinct problems, then:**
+
+1. *Compile-time over-count* (the "zero successes" case): module mainlines
+   exit via unwind without `leave()`, so their `liveInvocations` stays
+   over-counted and every later dispatch pays for a doomed search against
+   them. **Fixed (2026-09-06, uncommitted → committed):** the unwind path
+   now gives back the count of every frame it tears past
+   (`CallFrame.countLeft`, called from `ExceptionHandling.giveBackTornFrames`
+   before each `throw tc.unwinder`; idempotent via `left`; only frames
+   strictly between the current frame and the on-chain handler). Correct
+   (01-sanity 25/25), low-risk. **Plausibly a build speedup (~14% of a CORE.c
+   compile per the perf notes) but NOT YET MEASURED — measure the search's
+   share on the next full build.** Does nothing for runtime `+` (the search
+   there succeeds).
+2. *Runtime deep-outer search* (the `+` case): the search walks up to a
+   live outer deep on the chain. Optimizing it safely (an O(1) per-thread
+   live-frame lookup, or setting `cr.outer` at code-ref creation like
+   MoarVM) hits the cross-thread + recursion subtleties that sank `>1`. The
+   clean big win is **frame-count reduction** — inline the resolved
+   candidate so `$a+$b` stops building ~6 frames (spesh-level, a deliberate
+   project). Deferred.
+
 ## The distinction we are collapsing
 
 Today the Truffle interpreter (`NqpRootNode`/`NqpOps`, "the engine") is a
