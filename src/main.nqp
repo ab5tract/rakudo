@@ -1,5 +1,7 @@
-use Perl6::Grammar;
-use Perl6::Actions;
+# Perl6::ModuleLoader binds the 'Raku'/'ModuleLoader' hllsym the RakuAST
+# frontend needs (setup-RakuAST-WHO); the legacy frontend used to pull it
+# in transitively (Perl6::Grammar -> Perl6::World -> Perl6::ModuleLoader).
+use Perl6::ModuleLoader;
 use Raku::Grammar;
 use Raku::Actions;
 use Perl6::Compiler;
@@ -15,21 +17,15 @@ nqp::bindhllsym('default', 'SysConfig', Perl6::SysConfig.new(%rakudo-build-confi
 # Create and configure compiler object.
 my $comp := Perl6::Compiler.new();
 $comp.language('Raku');
-if +nqp::getenvhash()<RAKUDO_RAKUAST> {
-    nqp::bindhllsym('Raku', 'COMPILER-FRONTEND', 'rakuast');
-    $comp.parsegrammar(Raku::Grammar);
-    $comp.parseactions(Raku::Actions);
-    $comp.addstage('syntaxcheck', :before<ast>);
-    $comp.addstage('qast', :after<ast>);
-    $comp.addstage('optimize', :before<qast>);
-}
-else {
-    nqp::bindhllsym('Raku', 'COMPILER-FRONTEND', 'legacy');
-    $comp.parsegrammar(Perl6::Grammar);
-    $comp.parseactions(Perl6::Actions);
-    $comp.addstage('syntaxcheck', :before<ast>);
-    $comp.addstage('optimize', :after<ast>);
-}
+# The RakuAST frontend is the only frontend; the legacy Perl6::Grammar /
+# Perl6::Actions are no longer compiled or linked (their World/Actions/
+# Grammar jars are gone from the build). RAKUDO_RAKUAST is thus a no-op.
+nqp::bindhllsym('Raku', 'COMPILER-FRONTEND', 'rakuast');
+$comp.parsegrammar(Raku::Grammar);
+$comp.parseactions(Raku::Actions);
+$comp.addstage('syntaxcheck', :before<ast>);
+$comp.addstage('qast', :after<ast>);
+$comp.addstage('optimize', :before<qast>);
 
 my $*OMIT-SOURCE := nqp::getenvhash()<RAKUDO_OMIT_SOURCE>;
 
