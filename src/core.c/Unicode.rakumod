@@ -1,9 +1,9 @@
 my class Unicode {
 
-#?if moar
+#?if !js
     my constant NFG = True;
 #?endif
-#?if !moar
+#?if js
     my constant NFG = False;
 #?endif
 
