@@ -45,8 +45,8 @@ src/core.c/Order.rakumod
 src/core.c/Rakudo/Sorting.rakumod
 src/core.c/Num.rakumod
 src/core.c/Buf.rakumod
-@if(backend!=jvm
 src/core.c/Uni.rakumod
+@if(backend!=jvm
 src/core.c/Collation.rakumod)@
 src/core.c/Encoding/Decoder.rakumod
 src/core.c/Encoding/Decoder/Builtin.rakumod

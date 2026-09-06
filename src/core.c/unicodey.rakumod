@@ -6,25 +6,14 @@ my class Rakudo::Unicodey is implementation-detail {
         NYI('unival').throw;
     }
 
-    method ords(str $str) {  # strtocodes NYI on JVM
-        my @ords := array[uint32].new;
-        my int $chars = nqp::chars($str);
-        my int $i     = 0;
-        my int $ord;
-
-        # nqp::chars counts UTF-16 units here, and a non-BMP codepoint
-        # takes two of them. nqp::ord reads the pair as the one codepoint
-        # it is, so stepping by one would read the trailing half again as
-        # a lone surrogate.
-        nqp::while(
-          nqp::islt_i($i,$chars),
-          nqp::stmts(
-            nqp::push_i(@ords,$ord = nqp::ord($str,$i)),
-            ($i = nqp::add_i($i,nqp::isge_i($ord,0x10000) ?? 2 !! 1))
-          )
-        );
-
-        @ords
+    method ords(str $str) {
+        # NFG on JVM: strtocodes works, so use the same codepoint extraction
+        # as every other backend.
+        nqp::strtocodes(
+          $str,
+          nqp::const::NORMALIZE_NFC,
+          nqp::create(array[uint32])
+        )
     }
 
     method unimatch(int, str, str) is hidden-from-backtrace {
@@ -43,17 +32,18 @@ my class Rakudo::Unicodey is implementation-detail {
         NYI('uniprops').throw;
     }
 
-    method NFC(str) is hidden-from-backtrace {
-        NYI('NFC').throw;
+    # NFG on JVM: strtocodes works, so these match every other backend.
+    method NFC(str $str) {
+        nqp::strtocodes($str,nqp::const::NORMALIZE_NFC,nqp::create(NFC))
     }
-    method NFD(str)  is hidden-from-backtrace {
-        NYI('NFD').throw;
+    method NFD(str $str) {
+        nqp::strtocodes($str,nqp::const::NORMALIZE_NFD,nqp::create(NFD))
     }
-    method NFKC(str) is hidden-from-backtrace {
-        NYI('NFKC').throw;
+    method NFKC(str $str) {
+        nqp::strtocodes($str,nqp::const::NORMALIZE_NFKC,nqp::create(NFKC))
     }
-    method NFKD(str) is hidden-from-backtrace {
-        NYI('NFKD').throw;
+    method NFKD(str $str) {
+        nqp::strtocodes($str,nqp::const::NORMALIZE_NFKD,nqp::create(NFKD))
     }
 #?endif
 
