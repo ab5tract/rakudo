@@ -4224,12 +4224,18 @@ class RakuAST::Method::AttributeAccessor
     # it.
     method IMPL-QAST-FORM-BLOCK(RakuAST::IMPL::QASTContext $context, str :$blocktype,
             RakuAST::Expression :$expression) {
+        my $named-slurpy := QAST::Var.new( :decl<param>, :scope<local>, :name('_'),
+            :slurpy, :named );
+#?if jvm
+        # The discarded named slurpy builds no hash; mark it so the Truffle
+        # encoder binds it with no CallFrame, making the accessor frame-free.
+        $named-slurpy.annotate('discard_named', 1);
+#?endif
         my $block := QAST::Block.new(
             :name(self.name.canonicalize), :blocktype('declaration_static'),
             QAST::Stmts.new(
                 QAST::Var.new( :decl<param>, :scope<local>, :name('self') ),
-                QAST::Var.new( :decl<param>, :scope<local>, :name('_'),
-                    :slurpy, :named ),
+                $named-slurpy,
                 QAST::Var.new( :decl<static>, :scope<lexical>, :name('%_') )
             ),
             self.IMPL-COMPILE-BODY($context)
