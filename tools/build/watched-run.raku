@@ -78,7 +78,8 @@ my sub run-one(@cmd, Str :$log!, Int :$stall!, Int :$max!, :@pats, Str :$tag,
                     # Prefix the elapsed seconds and mirror the marker into
                     # the log, so a detached run (terminal discarded) still
                     # carries the timing -- greppable as a leading [Ns].
-                    my $mark = "[{(now - $started).Int}s]$who $l";
+                    my Str() $duration = (now - $started).Int;
+                    my $mark = "[{$duration}s]{" " x 3 - $duration.comb}$who $l";
                     note $mark;
                     $fh.say: $mark;
                 }
@@ -147,6 +148,7 @@ my sub run-one(@cmd, Str :$log!, Int :$stall!, Int :$max!, :@pats, Str :$tag,
 
 # It must be greater than two slashes. Otherwise treat it as a string search for '//'
 subset RegexInput of Str where { .starts-with('/') && .ends-with('/') && 2 < .comb }
+subset RegexArg where { (not $_) || $_ ~~ RegexInput }
 
 sub MAIN(
     *@cmd,
@@ -156,7 +158,7 @@ sub MAIN(
     Int  :$max     = 0,
     Int  :$jobs    = 5,
     :@show,
-    :@show-rx,
+    RegexArg :@show-rx,
     :@t
  ) {
     @cmd or die "nothing to run: pass the command after --\n";
@@ -164,13 +166,11 @@ sub MAIN(
     # A --show is literal text; a --show-rx is compiled before anything
     # starts, so a broken regex fails here, not inside the react block once
     # the child is already running.
-    my @pats = flat
-        @show.map(-> Str $text { *.contains($text) }),
-        @show-rx.map(-> $show {
-            my $s = $show ~~ RegexInput ?? $show.substr(1, *-1) !! $show;
+    my @pats = (|@show, |@show-rx).map: -> $show {
+            my $s = $show.Str ~~ RegexInput ?? $show.substr(1, *-1) !! qq["$show"];
             my $rx = try "anon regex \{ $s \}".EVAL;
             $rx // die "bad --show-rx pattern '$s': { $!.message }\n";
-        });
+        };
 
     if @t {
         # A -t argument may name a directory; it stands for every test file
@@ -215,6 +215,7 @@ sub MAIN(
     }
     else {
         note "log: { $log.IO.absolute }";
+        my $start = now;
         my ($code, $verdict) =
                 run-one(@cmd, :$log, :$stall, :$max, :@pats, :interruptible);
         note "$verdict, exit $code, log: $log";
