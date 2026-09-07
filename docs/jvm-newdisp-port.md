@@ -72,7 +72,7 @@ state between eval-server runs.
   per-instruction invokedynamic site, inside a 48000-site budget (the
   65535 resolved-references ceiling, minus room for constants), falling
   back to an uncached `dispatchWide` invokestatic past the budget.
-  `NQP_JVM_NO_LANG_CALL=1` compiles the old paths for debugging. What
+  (The old invokedynamic paths were removed on 2026-09-07.) What
   the `invokeDirect` routing added is the complementary half: the
   runtime-internal invocations (binder, phaser firing, metamodel,
   exit handlers) that never pass through a compiled site.
