@@ -7,6 +7,7 @@ import java.lang.reflect.Field
 import org.raku.nqp.runtime.CallSiteDescriptor
 import org.raku.nqp.runtime.Ops
 import org.raku.nqp.runtime.ThreadContext
+import org.raku.nqp.sixmodel.AttributeFetch
 import org.raku.nqp.sixmodel.ContainerSpec
 import org.raku.nqp.sixmodel.STable
 import org.raku.nqp.sixmodel.SerializationReader
@@ -36,6 +37,12 @@ class RakudoContainerSpec : ContainerSpec() {
     /* Fetches a value out of a container. Used for decontainerization. */
     override fun fetch(tc: ThreadContext, cont: SixModelObject): SixModelObject? {
         return cont.get_attribute_boxed(tc, RakOps.key.getGC(tc).Scalar, "\$!value", HINT_value.toLong())
+    }
+    /* The fetch above is a plain attribute read; the engine's decont fast
+     * path reads the slot's field directly under a type guard (jesp). */
+    override fun fetchAttribute(tc: ThreadContext): AttributeFetch? {
+        val scalar = RakOps.key.getGC(tc).Scalar ?: return null
+        return AttributeFetch(scalar, "\$!value")
     }
     override fun fetch_i(tc: ThreadContext, cont: SixModelObject): Long {
         return fetch(tc, cont)!!.get_int(tc)
