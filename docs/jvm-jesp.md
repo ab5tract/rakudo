@@ -34,6 +34,8 @@ message; its output must not change:
 | diamond 3, plus raw `lateinit` reads (`NqpRaw`) | 285-290 | 90M | 8k |
 | diamond 4, `add_I` as a sited operation (small-int cache off) | 189-191 | 90M | 8k |
 | diamond 4 with `JESP_INTCACHE=1` (shared boxed small Ints) | 186-195 | 90M | 8k |
+| diamond 5, frame-free callees on, `+` candidate still framed by its implicit magicals | 195-198 | 90M | 8k |
+| diamond 5 with bare implicit magicals not forcing a frame: the `+` candidate runs frame-free (quiet machine; 169-215 while other JVMs were exiting) | 142 | 90M | 8k |
 
 The cold-runner `t/01-sanity` (4 jobs) went from 167 s to 119 s over the
 same steps: the compiler runs on the same engine, so the diamonds speed up
@@ -280,6 +282,15 @@ callsite and arguments.
 The encoder now marks eligible blocks frame-free by default;
 `NQP_CODE_NOFRAME=0` turns it off.
 
+**Gates for the rebuilt setting (both at the same parallelism, 4).**
+Cold `t/01-sanity` with 4 runners: 25 of 25 in 135 s. Warm eval-server
+sweep with 4 servers at 2 GB: 25 of 25 in 79 s. (With 4 servers at 3 GB
+one chunk failed with no TAP at all: the launcher's memory guard refused
+the fourth server against the 21 GB available. Size the pool by memory
+before reading a chunk failure as a test failure.) The smoke script is
+unchanged. From here on the two gates are always run and labelled with
+the same job count.
+
 **Compile time.** The frame-free setting build's CORE.c parse is 228-230 s.
 The right comparison is not `NQP_CODE_NOFRAME=0` (that changes only how
 the *output* is encoded; both arms 224-230 s) but the runtime knob
@@ -289,6 +300,14 @@ to the morning's 206 s predates this diamond and needs its own
 bisection across diamonds 3 and 4. CORE.d parse 6.8 s, CORE.e 32.5 s;
 the whole `make` 845 s with BOOTSTRAP at about 4.5 minutes.
 
+After the parameter-lowering round the same measurement reads 241.9 s
+inside `make` and 246.9 s standing alone, against 257.7 s standing
+alone with `NQP_FRAMEFREE=0` on the same build (both on a machine with
+no other JVM). So the frame-free callees still cost the compiler
+nothing -- if anything they save a few seconds -- and the drift from
+228-232 s is something else: the encoder change, the sentinel cache, or
+the machine. The bisection across diamonds 3 and 4 is still owed.
+
 **Coverage, measured on the first frame-free setting build.** The
 setting's 21082 encoded blocks split 4691 frame-free / 16391 framed
 (`NQP_CODE_WHY` on a manual CORE.c compile). Framed because they make a
@@ -296,24 +315,44 @@ dispatch: over half (the return-register class the calling-convention
 doc defers); because of a frame-forcing op: about a third; because of
 un-lowered lexicals: the rest.
 
-**The `+` candidate is in the last class, and that is a RakuAST
-finding.** Standalone, `multi sub plus(Int:D $a, Int:D $b --> Int:D)`
-has its parameters lowered to locals (`lex2local: lower '$a' in
-RakuAST::Sub`, `RAKUDO_LOWERING_DEBUG=1`) and encodes frame-free. In the
-setting compile the same candidate encodes `framed frame_op=1 fdecls=2
-lex:$a lex:$b`, and the lowering pass logs *no decision at all* for any
-sub parameter named `$a`, `$b`, `$x` or `$n` across 55 thousand
-decisions, while `my` variables in subs and sigilless term parameters
-are lowered normally. So the pass never registers the sigiled parameter
-targets of (at least the multi) subs under the setting compile; the
-declaration exists and its scope is `my`, so the silent path is upstream
-of `IMPL-REGISTER-DECL`. Finding which subs are skipped needs the
-routine's name in the pass's trace (a frontend rebuild). Until it is
-fixed, every setting routine with sigiled parameters is framed by its
-own parameters -- the `+` candidate included -- and the loop measures
-what it measured after diamond 4. The `raku-assign` handler
-`-> $cont, $value { nqp::bindattr(...) }` is NQP code whose parameters
-are lexicals by construction and stays framed for the same reason.
+**The `+` candidate is in the last class, and the reason took three
+traces to name.** The lowering pass (`RAKUDO_LOWERING_DEBUG=1`, which now
+names the routine of each decision and reports a decided lowering that
+mints no local) approves `$a` and `$b` in all 26 `infix:<+>` candidates.
+Read in source order within Int.rakumod, the three consecutive `+`
+verdicts are: `framed frame_op=0 fdecls=4 lex:$/ lex:$! lex:$_ lex:$¢`
+for `(Int:D $a, Int:D $b --> Int:D)` -- its parameters *were* lowered,
+and only the four unused implicit magicals remain declared -- then two
+`framed fdecls=2 lex:$a lex:$b` for the `int` and `uint` candidates,
+whose native parameters correctly cannot become locals. The `*` trio
+right after reads `free`, `framed`, `framed`. Why `+` keeps its
+implicits and `*` does not: the setting uses `+` while compiling itself,
+so its block is formed at BEGIN time and later re-formed, and the
+re-formation keeps unused implicits as bare slots because a context the
+early compilation serialized rebinds them by name at load. That
+rebinding writes the static lexical table, which a frame-free block
+keeps; the body never names the slots, and none of `$/ $! $_ $¢` is
+dynamic. **Fix (nqp 00f54cdbc):** bare implicit magicals no longer count
+as live declarations in the encoder's predicate. A second, smaller leak
+showed in the same trace: 337 approved lowerings minted nothing because
+a BEGIN-time analyzer could not resolve the sentinel class
+`Rakudo::Internals::LoweredAwayLexical`; the pass now keeps the last
+resolved sentinel in the HLL symbol table for such analyzers. The
+`raku-assign` handler `-> $cont, $value { nqp::bindattr(...) }` is NQP
+code whose parameters are lexicals by construction and stays framed.
+
+**Result of the round (2026-09-07 evening, full engine rebuild).**
+`NQP_FRAMEFREE_TRACE=1` now reports `infix:<+>` as free. The loop
+measures 141.7 and 141.8 ns per iteration on a quiet machine; the
+169-215 ns readings taken while the sweep's servers were still exiting
+show how much a loaded machine inflates this number -- check
+`pgrep -c java` and the load average before trusting a timing. JFR on
+the loop confirms where the last frame is: of 168 samples inside the
+CallFrame constructor, 166 arrive through the mapped direct road (the
+`raku-assign` handler) and one through the resumable road that `+`
+takes. Frame construction is now one eighth of the loop's samples; the
+handler is the next target (either the encoder learns that an NQP
+leaf's parameters need no frame, or the assign outcome gets sited).
 
 ## Where the code is
 
