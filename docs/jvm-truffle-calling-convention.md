@@ -270,6 +270,16 @@ edits test in ~5s via the jar sync.
   cf-free arity/parameter road. Next step: build CORE.c frame-free, then
   compile CORE.d with NQP_CODE_SKIP=<name> bisection over the setting's
   frame-free candidates, or make BindFailure name the routine.
+  **Lead (2026-09-07, from the jesp work, docs/jvm-jesp.md):** a
+  frame-free callee has no `CallFrame`, so `tc.frame` inside it is the
+  *caller's* frame, and `BindFailure.failed` (an `assertparamcheck` on a
+  `where`/subset/type-mismatched parameter that the multi dispatcher
+  expects to resume past) reads the caller's invoking dispatch instead of
+  its own: the failure is then rethrown by the wrong dispatch or reported
+  as a plain "Bind check failed". Any frame-free block that can
+  `assertparamcheck` is a candidate; the fix is to make the frame-free
+  predicate exclude blocks with bind-failure-capable parameter checks, or
+  to give a frame-free callee a place to carry its invoking dispatch.
 
 ### Phases
 
