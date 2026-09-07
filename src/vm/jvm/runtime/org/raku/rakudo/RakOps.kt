@@ -557,6 +557,19 @@ object RakOps {
         return check
     }
 
+    /**
+     * jesp: may an engine site cache p6typecheckrv's acceptance for this
+     * routine per (deconted value's type, concreteness)? Yes unless the
+     * return type is generic, which instantiates against each frame.
+     */
+    @JvmStatic
+    fun p6typecheckrvCacheable(routine: SixModelObject?, tc: ThreadContext): Long {
+        val gcx = key.getGC(tc)
+        val sig = routine!!.get_attribute_boxed(tc, gcx.Code, "$!signature", HINT_CODE_SIG)
+        val check = rvCheckFor(sig!!, gcx, tc)
+        return if (check.rtype == null || !check.generic) 1 else 0
+    }
+
     @JvmStatic
     fun p6typecheckrv(rv: SixModelObject?, routine: SixModelObject?, bypassType: SixModelObject?, tc: ThreadContext): SixModelObject? {
         val gcx = key.getGC(tc)
