@@ -174,6 +174,19 @@ class RakuAST::IMPL::VarLowering {
             unless nqp::isconcrete($found);
         $sentinel := $found.compile-time-value
             if nqp::isconcrete($found) && nqp::can($found, 'compile-time-value');
+        # A BEGIN-time analysis (a routine the setting itself uses while
+        # compiling) can run with a resolver that cannot see the sentinel
+        # class although an earlier analysis in the same compilation did;
+        # then a decided lowering mints no local and the declaration stays
+        # a lexical (337 of them in a CORE.c compile). Keep the last
+        # resolved sentinel for such analyzers.
+        if nqp::isnull($sentinel) {
+            my $cached := nqp::gethllsym('Raku', 'LEX2LOCAL-SENTINEL');
+            $sentinel := $cached unless nqp::isnull($cached);
+        }
+        else {
+            nqp::bindhllsym('Raku', 'LEX2LOCAL-SENTINEL', $sentinel);
+        }
         nqp::bindattr($analyzer, RakuAST::IMPL::VarLowering, '$!sentinel', $sentinel);
         $analyzer
     }
@@ -1225,6 +1238,15 @@ class RakuAST::IMPL::VarLowering {
             }
             if $!debug {
                 my str $where := $frame.node.HOW.name($frame.node);
+                # Name the routine when it has one, so a decision can be
+                # found from the source (a setting-wide trace has thousands).
+                if nqp::can($frame.node, 'name') {
+                    my $name := $frame.node.name;
+                    if nqp::isconcrete($name) {
+                        $where := $where ~ ' '
+                            ~ (nqp::can($name, 'canonicalize') ?? $name.canonicalize !! ~$name);
+                    }
+                }
                 self.IMPL-NOTE($declined eq ''
                     ?? "lex2local: lower '" ~ $decl.lexical-name ~ "' in " ~ $where
                     !! "lex2local: keep '" ~ $decl.lexical-name ~ "' in "
