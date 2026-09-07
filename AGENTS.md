@@ -29,7 +29,12 @@ Session-start facts that keep getting relearned the hard way:
 
       raku tools/build/watched-run.raku --log=build.log \
           --show='Compiling|Generating' -- sh tools/build/jvm-build.sh jars
-      raku tools/build/watched-run.raku -t=t/02-rakudo --jobs=5 -- ./rakudo-j
+      raku tools/build/watched-run.raku -t=t/02-rakudo --jobs=3 -- ./rakudo-j
+      raku tools/build/evalserver-sweep.raku --jobs=3 --heap=2 t/01-sanity
+
+  Both gates run at 3 (decision 2026-09-08): the eval server's own guard
+  counts a server as heap + 3g off-heap and refuses a 4th on this box,
+  which surfaces as a chunk with no TAP and a 120s token timeout.
     
   - **--show and --show-rx**: Use --show="LITERAL" as many times as you need,
     meaning that --show-rx is never used for an alternation of string literals.
