@@ -36,6 +36,7 @@ message; its output must not change:
 | diamond 4 with `JESP_INTCACHE=1` (shared boxed small Ints) | 186-195 | 90M | 8k |
 | diamond 5, frame-free callees on, `+` candidate still framed by its implicit magicals | 195-198 | 90M | 8k |
 | diamond 5 with bare implicit magicals not forcing a frame: the `+` candidate runs frame-free (quiet machine; 169-215 while other JVMs were exiting) | 142 | 90M | 8k |
+| diamond 6, `hllize` as a sited operation, `checkarity`/`flatArgs` off the boundary (quiet machine) | 123-124 | 90M | 8k |
 
 The cold-runner `t/01-sanity` (4 jobs) went from 167 s to 119 s over the
 same steps: the compiler runs on the same engine, so the diamonds speed up
@@ -354,6 +355,57 @@ takes. Frame construction is now one eighth of the loop's samples; the
 handler is the next target (either the encoder learns that an NQP
 leaf's parameters need no frame, or the assign outcome gets sited).
 
+## Diamond 6: `hllize` as a sited operation, `checkarity` off the boundary
+
+**Where it came from.** With `+` frame-free, a JFR recording of the loop
+(quiet machine, `settings=profile`) put the remaining visible samples at:
+frame construction and leave 19% (the `raku-assign` handler), `hllize`
+through the generic classlib road 13%, `checkarity` 7%, and a grapheme
+break iterator inside the engine-program loader 12% (start-up, not the
+loop). One caveat learned on the way: JFR shows no Truffle-compiled root
+at all here, so those shares are of the interpreter tier plus the Java
+runtime -- the warm-up and everything the setting compiler runs -- not of
+the steady-state loop. Frame construction is visible from both tiers.
+
+**Who hllizes.** Not `+`'s body: the signature binder. A parameter with
+no specific nominal type gets `hllize` around its argument before the
+type check (`src/Raku/ast/signature.rakumod`, "HLLize before type
+checking"), and the candidate's two sigilless parameters take that road.
+`JESP_TRACE_CLASSLIB=hllize` names the block running any classlib
+`hllize` once per frame (the caller's frame for a frame-free callee) and
+showed exactly one in the loop: the frame-free callee of the mainline.
+
+**The site (nqp `NqpTypeOps.HllizeSite`).** `Ops.hllize` answers the
+object itself whenever the STable's owner is the wanted language, or the
+STable plays a role that language does not transform. Every one of those
+branches reads only the STable and the language's configuration, never
+the object, so the verdict is a function of (STable, language): one
+STable compare stands in for the frame chase, the method-handle call and
+the role switch. That is spesh's `optimize_hllize`, which deletes the op
+under known type facts. The wanted language is the block's own unit
+(`cu(f)`), which the same-HLL rule of diamond 5 makes equal to the frame's.
+Non-identity cases (a foreign type to box, a transform to invoke) pin
+the site and stay on `Ops.hllize`. The routing lives in the builder's
+classlib case: the JVM compiler maps `hllize` by name onto `Ops`, so the
+choice is by name (`Lorg/raku/nqp/runtime/Ops;` -- descriptor form, the
+first cut compared the bare class name and matched nothing).
+
+**`checkarity` and `flatArgs`.** Both were `@TruffleBoundary` calls on
+every entry. The arity verdict is two field compares on the callsite
+descriptor and three field writes; only flattening and the failure need
+the runtime. They are plain inlinable code now, the slow road behind the
+boundary. spesh drops the check outright once the callsite is known;
+here the fields are frame arguments, so the compares stay but the call
+goes.
+
+**Verification.** `JESP_DEBUG=1` on the loop: 510 hllize sites resolved,
+34 missed at least once, 4 pinned; the classlib trace no longer fires in
+the loop. The loop: 142 ns → 123-124 ns (quiet machine, both changes
+together). Gates at 4: cold `t/01-sanity` 25 of 25 in 98 s (was 135 s
+on the diamond 5b build), warm sweep on 4 servers at 2 GB 25 of 25 in
+81 s; the smoke script's output is unchanged. A runtime-jar change only:
+no setting was rebuilt for this diamond.
+
 ## Where the code is
 
 - `nqp/nqp-truffle/src/main/kotlin/org/raku/nqp/truffle/NqpDispatch.kt`
@@ -361,10 +413,13 @@ leaf's parameters need no frame, or the assign outcome gets sited).
   no-assertion Kotlin flags are set in `nqp/nqp-truffle/build.gradle.kts`
   because the file is on every dispatch instruction's compiled path).
 - `nqp/nqp-truffle/src/main/kotlin/org/raku/nqp/truffle/NqpTypeOps.kt`
-  (the sites and fast paths of diamond 3), `NqpNativeOps.kt` (the native
-  arithmetic), `NqpRaw.java` (raw reads of `lateinit` fields);
+  (the sites and fast paths of diamond 3, `HllizeSite` of diamond 6),
+  `NqpNativeOps.kt` (the native arithmetic), `NqpRaw.java` (raw reads of
+  `lateinit` fields); `NqpOps.java` (`checkarity`/`flatArgs` fast paths;
+  `JESP_TRACE_CLASSLIB=meth` names the block running a classlib op);
   `NqpRootNode.java` (the operations; Java for the DSL processor),
-  `NqpProgramBuilder.java` (`dedicatedOp`: the op-id to operation map;
+  `NqpProgramBuilder.java` (`dedicatedOp`: the op-id to operation map,
+  `dedicatedClasslib`: the same by name for classlib ops;
   Java because it consumes the generated builder).
 - `nqp/src/vm/jvm/runtime/org/raku/nqp/sixmodel/ContainerSpec.kt`
   (`fetchAttribute`), rakudo's `RakudoContainerSpec.kt` (Scalar answers
