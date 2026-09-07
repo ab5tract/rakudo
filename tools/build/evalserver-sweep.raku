@@ -56,7 +56,10 @@ sub MAIN(
     my $c = $chunk // max(3, $h * 15 div 8);
 
     my @files = @targets.map({
-        .IO.d ?? .IO.dir(test => *.ends-with('.t')).sort.map(*.relative).Slip !! $_
+        .IO.d
+            ?? .IO.dir(test => *.ends-with('.t' | '.rakutest'))
+                   .sort.map(*.relative).Slip
+            !! $_
     });
     die "no test files found\n" unless @files;
 
