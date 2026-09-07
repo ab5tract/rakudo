@@ -32,6 +32,8 @@ message; its output must not change:
 | diamond 3, the type-check family as sited operations | 409 | 90M | 8k |
 | diamond 3, plus the native int/num ops | ~300 | 90M | 8k |
 | diamond 3, plus raw `lateinit` reads (`NqpRaw`) | 285-290 | 90M | 8k |
+| diamond 4, `add_I` as a sited operation (small-int cache off) | 189-191 | 90M | 8k |
+| diamond 4 with `JESP_INTCACHE=1` (shared boxed small Ints) | 186-195 | 90M | 8k |
 
 The cold-runner `t/01-sanity` (4 jobs) went from 167 s to 119 s over the
 same steps: the compiler runs on the same engine, so the diamonds speed up
@@ -73,7 +75,7 @@ What spesh does (file, mechanism) and what the same win is here.
 | `sp_resumption` + `frame_walker.c`: resume-init values stay live in the frame; a record is built only when a resumption happens | the callee `CallFrame` carries `dispatchProgram`/`dispatchArgs`/`dispatchSite`; `CallFrame.invokingDispatch()` materializes the record on first need; `findResumption` walks frames | **done 2026-09-07 (diamond 2)** |
 | `optimize_istype`/`isconcrete`/`isnull`/`decont`/`assertparamcheck`, `sp_fastcreate`: facts from guards fold the op to a constant or a field load | dedicated Truffle operations with a per-instruction STable inline cache, so PE folds the answer under the guard already taken (`NqpTypeOps`) | **done 2026-09-07 (diamond 3)** |
 | the interpreter's native `add_i`/`islt_i`/... (no spesh work needed: MoarVM's interpreter already runs them as one instruction) | `IntBinOp`/`IntUnOp`/`NumBinOp`/`NumCmpOp`/`NumNegOp` keyed by op id, the `when` over the constant folds (`NqpNativeOps`); before, they crossed the generic boundary switch with boxed operands | **done 2026-09-07 (diamond 3)** |
-| `sp_add_I`/`sub_I`/`mul_I` with the small-int cache | a specialized `add_I` for two small Ints returning through the cached Int allocation | **next (diamond 4)**: the last generic-road op in the `+` loop, 18% of samples |
+| `sp_add_I`/`sub_I`/`mul_I` with the small-int cache | `BigIntArithOp` with a site on the three STables: both `BigInteger` slots read through a constant getter, the arithmetic in a `long` when both fit 63 bits, the result a prototype clone (`NqpTypeOps.bigintArith`); the intcache exists behind `JESP_INTCACHE=1` and measured as worthless (see below) | **done 2026-09-07 (diamond 4)** |
 | `args.c`: `sp_getarg_*`, deleted `checkarity`, optionals resolved at spec time | the frame-free prologue (`CheckArity`/`PosParam` cf-free) is the equivalent; full value needs lexicals in Truffle slots | calling-convention project |
 | `pea.c`: scalar replacement of `sp_fastcreate` P6opaques and boxes | Graal's escape analysis, once the callee is inlined and the value does not escape into a heap `CallFrame` register | blocked on the frame |
 | `optimize_getlexstatic`: a setting lexical to a constant | `WvalGet`/`LexGet` per-instruction caches | done 2026-09-04 |
@@ -163,6 +165,50 @@ Two lessons the method-expansion trace taught, both now rules:
   (ten copies in the `+` root). `NqpRaw.java` reads those fields raw, and
   every PE-visible Kotlin read of them goes through it: trace size 932 to
   591 lines, zero intrinsic failure paths, ~300 to ~287 ns.
+
+## Diamond 4 in detail: `add_I` as a sited operation
+
+`Ops.add_I` read each operand's bigint through the generated accessor and
+a thread-context side channel (`tc.nativeJ`), computed in `BigInteger`,
+allocated the result through the REPR and wrote it back through the same
+accessor: the last generic-road op left in the `+` loop, 18% of its
+samples. `BigIntArithOp` (add, sub, mul; op id as constant operand)
+carries a `BigIntSite` that speculates on the three STables (both operands
+and the result type) being one P6opaque type whose box target is a
+flattened bigint, resolving the storage class, the `BigInteger` slot's
+getter and setter as constant MethodHandles (`NqpRaw.getBig`/`setBig`, the
+void `invokeExact` kept in Java), and the prototype instance to clone.
+The fast path reads both slots, and if both fit in 63 bits does the
+arithmetic in a `long` with an explicit overflow test; the result is one
+prototype clone plus `BigInteger.valueOf`. Overflow, a large value, a
+`P6bigintInstance`, a mixed type: `Ops.add_I` behind a boundary.
+
+Two things the site had to learn:
+
+- **Deserialized constants are delegating wrappers.** The `1` and `2` of
+  `my $a = 1; my $b = 2` arrive as `P6OpaqueDelegateInstance`s whose
+  STable is the type's but whose class is not the storage class; the
+  site (and the decont site, same fix) looks through to the delegate,
+  as the dispatch fold's `AttrSrc` always did. Until it did, every call
+  missed and the site pinned generic while still measuring faster than
+  before -- the boundary switch's boxing was gone -- which is why a
+  fast path is verified by its miss count (`JESP_DEBUG=1` narrates site
+  resolution and misses), never by its timing alone.
+- **A plain value needs no speculation to decont.** The decont site now
+  answers a non-container structurally (`STable.ContainerSpec == null`, a
+  field load) and speculates only on the container it sees; before, a
+  site alternating between a Scalar and a plain value missed four times
+  and pinned generic.
+
+**The intcache is not worth having here.** MoarVM's `sp_add_I` boxes a
+small result from a per-type cache of shared Ints. Behind
+`JESP_INTCACHE=1` this exists (`P6OpaqueREPRData.intCache`, -16..255,
+filled on demand) and engages (two `1 + 2` results are one object), and
+the loop measures the same with it as without: a TLAB allocation of two
+small objects costs what the bounds check and array load cost, and the
+GC pressure does not show at this size. Off by default; the knob stays
+for a workload that might show otherwise (allocation-heavy Int code with
+a live-set large enough to make young collections expensive).
 
 ## Where the code is
 
