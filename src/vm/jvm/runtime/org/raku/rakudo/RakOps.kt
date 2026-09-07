@@ -235,7 +235,7 @@ object RakOps {
         /* Do any flattening before processing begins. */
         val cf = tc.curFrame!!
         if (theCsd.hasFlattening) {
-            theCsd = theCsd.explodeFlattening(cf, theArgs!!)
+            theCsd = theCsd.explodeFlattening(cf.tc, theArgs!!)
             theArgs = tc.flatArgs
         }
         cf.csd = theCsd
@@ -296,7 +296,7 @@ object RakOps {
         var theArgs = args
         val cf = tc.curFrame!!
         if (theCsd.hasFlattening) {
-            theCsd = theCsd.explodeFlattening(cf, theArgs!!)
+            theCsd = theCsd.explodeFlattening(cf.tc, theArgs!!)
             theArgs = tc.flatArgs
         }
         cf.csd = theCsd

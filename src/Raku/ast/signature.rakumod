@@ -2734,6 +2734,13 @@ class RakuAST::Parameter::Slurpy::Flattened
                     $temp-qast
                 )
             )) unless $discard;
+#?if jvm
+            # A discard slurpy accepts and drops stray nameds and builds no
+            # hash. Mark it so the Truffle encoder can bind it with no
+            # CallFrame (the frame-free method path); inert on any other
+            # backend and when the code engine is off.
+            $param-qast.annotate('discard_named', 1) if $discard;
+#?endif
         }
         elsif $sigil eq '$' || $sigil eq '&' {
             # Slurpiness on scalar and callable parameters does not actually have
