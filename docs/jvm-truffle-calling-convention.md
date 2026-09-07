@@ -233,7 +233,7 @@ the full suite is too painful to run per iteration.** Everything is
 **knob-gated behind `NQP_CODE_NOFRAME` (off by default)**, so the shipped
 build is byte-identical regardless and a mistaken predicate can only
 affect a knob-on run. The whole-suite `t/`+`t/spec` gate waits until the
-setting-wide win justifies it. Anything touching `src/vm/jvm/QAST/*.nqp`
+setting-wide win justifies it. Anything touching `nqp/src/vm/jvm/QAST/*.nqp` (nqp tree)
 or the wire needs a clean `buildJvm` + `make` (~12 min); runtime-only
 edits test in ~5s via the jar sync.
 
