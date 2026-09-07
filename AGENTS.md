@@ -14,7 +14,11 @@ Session-start facts that keep getting relearned the hard way:
 - **`RAKUDO_RAKUAST=1` on every build, test, and run.** The generated
   Makefile exports it into its own recipes (2026-08-29), but nothing sets
   it for your own runs and test invocations, and `src/main.nqp` silently
-  falls back to the legacy frontend without it. The legacy frontend
+  falls back to the legacy frontend without it. The Makefile also exports
+  `NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1` (2026-09-07): a bare `make` IS the
+  Truffle engine build (frontend, BOOTSTRAP, settings all encoded);
+  there is no separate "bytecode build" to compare against, and any
+  CORE.c timing must come from a build made this way. The legacy frontend
   (`src/Perl6/`) is off limits — don't read it, reason from it, or measure
   against it.
 - **Long builds and test runs go through `tools/build/watched-run.raku`.**
@@ -26,6 +30,28 @@ Session-start facts that keep getting relearned the hard way:
       raku tools/build/watched-run.raku --log=build.log \
           --show='Compiling|Generating' -- sh tools/build/jvm-build.sh jars
       raku tools/build/watched-run.raku -t=t/02-rakudo --jobs=5 -- ./rakudo-j
+    
+  - **--show and --show-rx**: Use --show="LITERAL" as many times as you need,
+    meaning that --show-rx is never used for an alternation of string literals.
+    Instead you would use --show="literal1?" --show="literal2!". Note that
+    usage of --show-rx follows Raku regex laws, which means spaces are not
+    significant (must be within quotes) and reserved characters like "!" or "?"
+    must be quoted. Therefore it is usually simpler to just use a sequence of 
+    --show flages instead of --show-rx, but the latter is still useful provided
+    you are actually writing a regex and not a "match this or this or this literal"
+    operation.
+  - In order to make this distinction clearer, *only* --show-rx arguments with surrounding
+    '/' characters can be used. It will fail when this is not the case as the argument
+    is guarded by the RegexInput subset. Ex: --show-rx='/ ^ \d $ /' will match a string
+    with a single digit.
+
+- **Prefer git amend over idle waiting for compilation**
+  We can literally always amend our commits with a fix when they break.
+  Re-compiling after every change is not feasible at this moment -- making
+  compilations and tests run faster is the entire point of our perf work.
+  It does sometimes make sense to isolate the work with a test compilation,
+  but that should not be the default case. Use a looser cohesion level
+  for planning the compilations.
 
 - **`make` builds everything, nqp bootstrap included.**
   `perl Configure.pl --backends=jvm --gen-nqp` builds the nested nqp
