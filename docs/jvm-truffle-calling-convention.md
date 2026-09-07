@@ -233,7 +233,7 @@ the full suite is too painful to run per iteration.** Everything is
 **knob-gated behind `NQP_CODE_NOFRAME` (off by default)**, so the shipped
 build is byte-identical regardless and a mistaken predicate can only
 affect a knob-on run. The whole-suite `t/`+`t/spec` gate waits until the
-setting-wide win justifies it. Anything touching `src/vm/jvm/QAST/*.nqp`
+setting-wide win justifies it. Anything touching `nqp/src/vm/jvm/QAST/*.nqp` (nqp tree)
 or the wire needs a clean `buildJvm` + `make` (~12 min); runtime-only
 edits test in ~5s via the jar sync.
 
@@ -259,6 +259,17 @@ edits test in ~5s via the jar sync.
   an engine+precompiled baseline. Deferred until more per-call wins land.
 - **Loose ends:** `state` vars (frame-forcing, once-only init); the whole
   dispatch-block class (deferred, see above).
+- **Known bug (2026-09-07), why NQP_CODE_NOFRAME stays off by default:** a
+  CORE.c setting encoded with frame-free blocks on breaks the CORE.d
+  setting compile with "Bind check failed" (RakOps/BindFailure: a lowered
+  parameter check rejected a call the full binder accepts) in the parse of
+  CORE.d, inside `key-origin`/`FOREIGN-LANG`. Frontend jars encoded
+  frame-free are fine (CORE.c parses with them); the same CORE.c recompiled
+  with NQP_CODE_NOFRAME=0 lets CORE.d compile (parse 9.2s). So the
+  divergence is in a frame-free routine of the setting itself, in the
+  cf-free arity/parameter road. Next step: build CORE.c frame-free, then
+  compile CORE.d with NQP_CODE_SKIP=<name> bisection over the setting's
+  frame-free candidates, or make BindFailure name the routine.
 
 ### Phases
 
