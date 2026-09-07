@@ -2,6 +2,15 @@
 
 Session-start facts that keep getting relearned the hard way:
 
+- **Two git working trees.** This directory is rakudo.git; `nqp/` is the
+  nqp.git working tree nested inside it (gitignored via `/nqp/`, NOT a
+  submodule). Rakudo's `git status`/`log` never show nqp changes: use
+  `git -C nqp ...` for that tree. Label every hash with its tree ("nqp
+  801fc47b7" vs "rakudo 9e53b303f5"), write nqp paths with the `nqp/`
+  prefix (`nqp/src/vm/jvm/QAST/TruffleEncoder.nqp`, `nqp/nqp-truffle/`),
+  and run gradle from here (`./nqp/gradlew -p nqp ...`), never via `cd`.
+  A worktree/bisect copy needs BOTH trees plus `git submodule update
+  --init 3rdparty/nqp-configure`.
 - **`RAKUDO_RAKUAST=1` on every build, test, and run.** The generated
   Makefile exports it into its own recipes (2026-08-29), but nothing sets
   it for your own runs and test invocations, and `src/main.nqp` silently
@@ -20,16 +29,19 @@ Session-start facts that keep getting relearned the hard way:
 
 - **`make` builds everything, nqp bootstrap included.**
   `perl Configure.pl --backends=jvm --gen-nqp` builds the nested nqp
-  checkout in place via `gradlew buildJvm` (never git-moving it, never
+  checkout in place via `./nqp/gradlew -p nqp buildJvm` (never git-moving it, never
   cloning upstream — upstream nqp has no Truffle engine) and writes the
   Makefile; a bare `make` then builds through to `rakudo-j`, exporting
   RAKUDO_RAKUAST=1 into its recipes itself. `tools/build/jvm-build.sh`
   stays as the same commands written down (`gen` / `jars` / both). The
-  nqp side alone: `cd nqp && ./gradlew buildJvm` (add `clean` first
+  nqp side alone: `./nqp/gradlew -p nqp buildJvm` (add `clean` first
   when `src/vm/jvm/QAST/*.nqp` changed — the stage graph misses that
-  edge). If the harness keeps stopping a heavy build task, run it
-  detached (`setsid nohup raku tools/build/watched-run.raku
-  --log=build.log -- make > /dev/null 2>&1 &`) and watch the log.
+  edge). If the harness keeps stopping a heavy build task, start it as a
+  plain background job (`run_in_background`, NO `setsid`/`nohup`) tee'd to
+  a log — `raku tools/build/watched-run.raku --log=build.log -- make` —
+  and watch the log. A plain background job stays visible, trackable, and
+  killable from the shell interface; `setsid nohup … &` detaches it from
+  all of that (dropped 2026-09-06).
 
 - **JVM test runs use the eval server** (`t/harness5 --jvm --evalserver`,
   ~20x faster than cold). Whole-suite sweeps:
@@ -40,7 +52,7 @@ Session-start facts that keep getting relearned the hard way:
   numbers).
 - **Runtime jars rebuild in seconds, without a setting recompile.** Edits
   under `nqp/src/vm/jvm/runtime/` or `nqp/nqp-truffle/`:
-  `cd nqp && ./gradlew :nqp-runtime:jar :nqp-truffle:jar syncRuntimeJars`
+  `./nqp/gradlew -p nqp :nqp-runtime:jar :nqp-truffle:jar syncRuntimeJars`
   (~5s) — bytecode does not depend on the runtime that executes it, so
   nothing cascades. Either way, restart any eval servers afterwards —
   they keep the old jar loaded.
