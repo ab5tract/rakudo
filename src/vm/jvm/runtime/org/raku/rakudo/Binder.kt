@@ -838,7 +838,7 @@ object Binder {
         if (hash == null)
             hash = gcx.EMPTYHASH
 
-        return exploder.explodeFlattening(tc.curFrame!!, arrayOf<Any?>(list, hash))
+        return exploder.explodeFlattening(tc, arrayOf<Any?>(list, hash))
     }
 
     private val parameterizeArray = CallSiteDescriptor(
