@@ -415,8 +415,15 @@ rebuilt from them: 264.8 s. So diamond 6 costs the compiler nothing;
 the step from 247 s to 265-270 s came with the bootstrap refresh, and
 the cold `t/01-sanity` gate on the same diamond 6 jars went from 98 s to
 131 s across that refresh too. Since stage0 only compiles stage1, the
-stage2 output ought to be identical either way; whether it is, is the
-open question (a scratch build from the old stage0, jar by jar).
+stage2 output ought to be identical either way -- and it is: the same
+sources built from the old stage0 in a scratch clone give stage2 jars
+whose class files differ by a constant 31 bytes and whose sidecars by
+about 30, the build path embedded as each unit's description (the
+scratch path is shorter). No code changed between 247 s and 268 s; the
+machine's state did (the desktop's file indexer was holding 2 GB and
+churning at the time). Two numbers on identical code an hour apart can
+disagree by 8%, so compare arms built and measured back to back, as the
+diamond 6 A/B and the diamond 7 make were.
 
 ## Diamond 7: frame-free across languages (spesh's `:useshll` rule)
 
