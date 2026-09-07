@@ -37,6 +37,7 @@ message; its output must not change:
 | diamond 5, frame-free callees on, `+` candidate still framed by its implicit magicals | 195-198 | 90M | 8k |
 | diamond 5 with bare implicit magicals not forcing a frame: the `+` candidate runs frame-free (quiet machine; 169-215 while other JVMs were exiting) | 142 | 90M | 8k |
 | diamond 6, `hllize` as a sited operation, `checkarity`/`flatArgs` off the boundary (quiet machine) | 123-124 | 90M | 8k |
+| diamond 7, frame-free across languages for blocks that read no current language: the `raku-assign` handler runs frame-free from Raku (quiet machine) | 83-92 | 90M | 8k |
 
 The cold-runner `t/01-sanity` (4 jobs) went from 167 s to 119 s over the
 same steps: the compiler runs on the same engine, so the diamonds speed up
@@ -405,6 +406,93 @@ together). Gates at 4: cold `t/01-sanity` 25 of 25 in 98 s (was 135 s
 on the diamond 5b build), warm sweep on 4 servers at 2 GB 25 of 25 in
 81 s; the smoke script's output is unchanged. A runtime-jar change only:
 no setting was rebuilt for this diamond.
+
+**Compile time, A/B'd.** After the stage0 refresh that followed (nqp
+eec893edb) and a `make clean && make`, CORE.c parsed in 270 s inside
+`make` and 268.6 s standing alone. The same setting build with the
+engine and runtime sources checked out at diamond 5b and the jars
+rebuilt from them: 264.8 s. So diamond 6 costs the compiler nothing;
+the step from 247 s to 265-270 s came with the bootstrap refresh, and
+the cold `t/01-sanity` gate on the same diamond 6 jars went from 98 s to
+131 s across that refresh too. Since stage0 only compiles stage1, the
+stage2 output ought to be identical either way; whether it is, is the
+open question (a scratch build from the old stage0, jar by jar).
+
+## Diamond 7: frame-free across languages (spesh's `:useshll` rule)
+
+**The handler's frame was never about its declarations.** The last
+frame per iteration of the `+` loop is the `raku-assign` handler
+`-> $cont, $value { nqp::bindattr($cont, Scalar, '$!value', $value) }`
+(`src/vm/moar/dispatchers.nqp`, shared with the JVM). NQP's own QAST
+optimizer already lowers a leaf block's parameters to locals
+(`nqp/src/NQP/Optimizer.nqp`, `lexicals_to_locals`: params and vars
+alike, unless a nested block uses them), and a handler-shaped probe
+encodes as `free frame_op=0 fdecls=0`. What framed it at run time was
+diamond 5's same-language rule: the handler is NQP-language code called
+from Raku code, and `NqpDispatch` enters a callee frame-free only in its
+caller's language, because an op that reads the current language off
+`tc`'s frame would otherwise read the caller's.
+
+**spesh's rule is per op, not per block.** `inline.c` refuses to inline
+across HLLs only when the candidate contains a `:useshll` op. The engine
+now does the same, folded to one bit at encode time: the encoder keeps
+`%hll_ops` (the union of MoarVM's oplist marks and every JVM `Ops`
+function that reaches `hllConfig` through the frame, mapped back to op
+names through the classlib table) and records per block whether any
+appears; the wire's frame word carries it as bit 1, chosen so a program
+encoded before the bit reads as "not free" (`NqpWire.Program.hllFree`);
+`NqpRootNode.hllFree` holds it; and the three entry decisions in
+`NqpDispatch` become `needsFrame || (!hllFree && !sameHll)`. `getattr` is
+deliberately not on the list: it is too common to blacklist, and its
+only language use is boxing a native slot read in object context, so the
+engine's getattr road now boxes with the block's own unit
+(`NqpOps.getattrSlow` -> `Ops.getattrIn(..., hll)`) instead of the
+frame's. Ops naming their language (`hllizefor`, `hllboolfor`) read no
+frame and are not on the list either. An internal die inside a
+cross-language frame-free callee surfaces as the caller language's
+exception, as it already did within one language.
+
+`NQP_CODE_WHY` now prints `uses_hll=` with the verdict.
+
+**The bootstrap it broke, and why.** The first cut of the getattr change
+made the runtime's `Ops.getattr` read `tc.frame.codeRef` eagerly, on
+every call, to hand its language to the new `getattrIn`. The nqp
+bootstrap then failed in stage2 with "Missing or wrong version of
+dependency .../stage1/NQPCORE.setting": while a compiler loads a
+module's setting the current frame is a dummy without a code ref, the
+eager read threw inside the loader, and the module ended up bound to
+the compiler's own (stage1) setting instead of the stage2 one -- whose
+handle differs by design (`--stable-sc=stage1` is spliced into stage1
+handles precisely so the two can coexist). The language is resolved
+lazily now, on the native-slot boxing branch only. The dead end on the
+way is worth recording: after the fix I re-ran the runner against the
+stage2 artifacts already on disk, saw the same error, and concluded the
+fix was wrong; the artifacts were the broken ones, and only a stage2
+rebuild could test the fix. Two runtime knobs came out of the hunt:
+`JESP_HLLFREE=0` keeps diamond 5's same-language rule, and
+`JESP_HLLFREE_TRACE=1` names each callee entered frame-free across
+languages. An NQP-only bootstrap has none: the rule only ever fires
+for Raku code calling NQP code, which is its target.
+
+**Result (nqp 56b905fcf, full engine rebuild).** `JESP_HLLFREE_TRACE=1`
+on the loop names exactly one callee entered frame-free across
+languages: the anonymous NQP handler, from Raku. The loop: 123-124 ns →
+83-92 ns (quiet machine, two runs). JFR: one CallFrame-constructor
+sample in the whole run, against 168 on diamond 6 -- the loop builds no
+frame any more. And the compiler pays too, the other way round from
+what one might fear: the RakuAST frontend and the setting's BEGIN-time
+code are Raku-language callers of NQP-language helpers all day, so
+inside `make` CORE.c parsed in 224.7 s (270 s on the same nqp sources
+before this diamond, 247 s before the stage0 refresh), BOOTSTRAP
+compiled in 263 s (325 s), and the whole `make` took 727 s (935 s).
+Gates at 4: cold `t/01-sanity` 25 of 25 in 126 s (131 s on the previous
+build; the cold gate has sat at 126-135 s since the stage0 refresh
+against 98 s once before it, which is the refresh's still-open
+question, not this diamond's); warm sweep on 4 servers at 2 GB 25 of 25
+in 74 s (81 s). One operational note: the harness's low-memory watchdog
+killed two gate chains at the seam between steps, after each step's
+result was already in the log; four cold runners exiting while four
+servers start is the peak to avoid, so let one settle before the other.
 
 ## Where the code is
 
