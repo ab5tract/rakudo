@@ -51,6 +51,26 @@ refuses an explicit over-budget combination without `--force`. The
 per-server ceiling reaches the launcher through `RAKUDO_EVALSERVER_HEAP`
 (default 8g).
 
+Usage: directories are expanded to their `.t` and `.rakutest` files,
+files are taken as given, and every run needs the engine-build
+environment exported (the script exports `RAKUDO_RAKUAST=1` itself;
+`NQP_CODE_RUN`/`NQP_CODE_PRECOMP` come from the caller):
+
+    RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 \
+        raku tools/build/evalserver-sweep.raku t/01-sanity t/02-rakudo/some.t
+
+    --heap=N      GB of heap per server (default 6, less on a tight box)
+    --jobs=N      servers at once (default: what the memory budget fits, max 6)
+    --chunk=N     files per server before it is replaced (default scales with heap)
+    --harness=P   the harness to drive (default t/harness5)
+    --force       run a jobs x heap combination that exceeds the budget
+
+Each chunk is one `t/harness5 --jvm --evalserver --jobs=1` run against
+its own server (a distinct `RAKUDO_EVALSERVER_TOKEN`), so the pool never
+serialises onto one server; the summary names failed chunks and any file
+that produced no TAP (lower `--chunk` when that happens). Wrap it in
+`watched-run.raku` for a log and a stall watchdog, as with any long run.
+
 That budgeting failed to prevent a second OOM on 2026-09-02 (four servers
 alive at once, launched by different tools), so the arithmetic now lives in
 `rakudo-eval-server` itself, where every launcher passes. Before exec the
