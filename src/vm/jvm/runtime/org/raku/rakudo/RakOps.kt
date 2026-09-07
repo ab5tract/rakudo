@@ -501,9 +501,7 @@ object RakOps {
      * (six metamodel invocations per return -- measured as the dominant cost
      * of `$a + $b`, whose candidate returns Int:D). baseType non-null selects
      * the cheap road; wantConcrete distinguishes :D (require concrete) from
-     * :U (require a type object). JESP_RVGUARD_OFF restores the plain istype
-     * for A/B measurement. */
-    private val rvGuard = System.getenv("JESP_RVGUARD_OFF") == null
+     * :U (require a type object). */
     private class RvCheck(@JvmField val rtype: SixModelObject?, @JvmField val generic: Boolean,
                           @JvmField val baseType: SixModelObject?, @JvmField val wantConcrete: Boolean)
     private val rvChecks = java.util.concurrent.ConcurrentHashMap<SixModelObject, RvCheck>()
@@ -535,7 +533,7 @@ object RakOps {
              * accepts_type. Generic types instantiate per-frame at run time,
              * so they stay on the plain istype road. Mirrors
              * signature.rakumod's :D parameter lowering exactly. */
-            if (rvGuard && !generic) {
+            if (!generic) {
                 val defArchMeth = Ops.findmethodNonFatal(Archetypes, "definite", tc)
                 var definiteArch = false
                 if (defArchMeth != null) {
