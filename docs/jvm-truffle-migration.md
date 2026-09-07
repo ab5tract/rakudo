@@ -44,7 +44,7 @@ below is a measurement for exactly this reason.
   descriptor traveling as a string constant in the jar).
 - **Encoder where `rx_descriptor` sits**: QAST → Bytecode-DSL program,
   per code object, at the same decision point in
-  `src/vm/jvm/QAST/Compiler.nqp`. Coverage is a compile-time decision
+  `nqp/src/vm/jvm/QAST/Compiler.nqp` (nqp tree). Coverage is a compile-time decision
   with a loud `bail()` reason, exactly like `QAST::RxDescriptor`, plus
   the same bisection knobs (`NQP_CODE_SKIP`, `NQP_CODE_SKIP_ANON`,
   `NQP_CODE_ONLY`, `NQP_CODE_ENCODED`) — those knobs found real engine
@@ -74,16 +74,16 @@ REPORTING before coverage (a probe that says what % of each compile
 would encode, and the top bail reasons). Gate: coverage numbers over
 roast + CORE, no behavior change (nothing runs on Truffle yet).
   - Delivered as: `NqpLanguage`/`NqpRootNode`/`NqpCheck` in nqp-truffle
-    (nqp d316956ff -- `gradlew nqpcheck` proves both tiers and a
+    (nqp d316956ff -- `./nqp/gradlew -p nqp nqpcheck` proves both tiers and a
     serialize/deserialize round trip on the Oracle GraalVM runtime),
     and `QAST::TruffleEncoder` at the CompUnit decision point (nqp
     76b87c2d2 -- `NQP_CODE_REPORT`/`NQP_CODE_SURVEY` report,
     `NQP_CODE_ALSO`/`NQP_CODE_NO` re-measure per run). Results in the
     "Phase 1 results" section below.
-  - NOTE (scheduling): touching `src/vm/jvm/QAST/*.nqp` rebuilds
+  - NOTE (scheduling): touching `nqp/src/vm/jvm/QAST/*.nqp` (nqp tree) rebuilds
     stage2, which invalidates every rakudo jar ("Missing or wrong
     version of dependency"); each iteration costs
-    `gradlew clean buildJvm` + `make j-clean && make` (~12 min; the
+    `./nqp/gradlew -p nqp clean buildJvm` + `make j-clean && make` (~12 min; the
     `clean` is not optional -- NQPP5QRegex only rebuilds via its own
     task and goes stale against a fresh NQPHLL without it). Batch the
     encoder work accordingly.
@@ -988,7 +988,7 @@ frame-register optimization).
   run; the post-fix run v5 was in flight when this was written —
   update from `goal-spectest5.log`).
 - CORE.c.setting compile: **~200s**; full `make j-clean && make`:
-  **~10 min**; nqp `gradlew buildJvm` (warm caches): **~2 min**.
+  **~10 min**; `./nqp/gradlew -p nqp buildJvm` (warm caches): **~2 min**.
 - Warm per-file cost through the eval server: ~2-6s/file, throughput
   rising ~3→8 files/min as the JIT warms over a run.
 - Leak signature: 2 live GlobalContexts after forced GC, flat live
