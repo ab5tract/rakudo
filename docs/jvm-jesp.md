@@ -204,9 +204,11 @@ Two things the site had to learn:
 small result from a per-type cache of shared Ints. Behind
 `JESP_INTCACHE=1` this exists (`P6OpaqueREPRData.intCache`, -16..255,
 filled on demand) and engages (two `1 + 2` results are one object), and
-the loop measures the same with it as without: a TLAB allocation of two
-small objects costs what the bounds check and array load cost, and the
-GC pressure does not show at this size. Off by default; the knob stays
+the loop measures the same with it as without (189 vs 190 ns), and so
+does the warm `t/01-sanity` sweep run back to back (70 s on, 74 s off,
+inside the run-to-run noise): a TLAB allocation of two small objects
+costs what the bounds check and array load cost, and the GC pressure
+does not show at this size. Off by default; the knob stays
 for a workload that might show otherwise (allocation-heavy Int code with
 a live-set large enough to make young collections expensive).
 
