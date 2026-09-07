@@ -212,6 +212,109 @@ does not show at this size. Off by default; the knob stays
 for a workload that might show otherwise (allocation-heavy Int code with
 a live-set large enough to make young collections expensive).
 
+## Diamond 5: no frame for an inlined leaf (spesh's `inline.c`)
+
+After diamond 4 the `+` loop's profile has no generic-road op left; its
+cost is the two `CallFrame`s each `+` still builds -- the `infix:<+>`
+candidate's and the `raku-assign` handler's -- construction, leave, the
+live-invocation atomic, and the calling convention around them (about
+42% of samples). Both bodies are inlined into the loop's compiled root by
+the DirectCallNode; only the heap frame survives, and it cannot be
+scalar-replaced: it is built behind a boundary, stored into `tc.curFrame`,
+and holds the callee's lexical arrays. spesh's inlining never builds it.
+
+The engine's frame-free mechanism (`docs/jvm-truffle-calling-convention.md`,
+`NQP_CODE_NOFRAME`) is exactly that: a block that declares no live
+lexical, makes no dispatch, has no nested block, reads no frame op, runs no
+handler and takes only positional local-scope parameters runs with no
+`CallFrame` at all. It stayed off because a frame-free CORE.c broke the
+CORE.d compile with "Bind check failed".
+
+**The tools.** `NqpFrameFree.kt` applies runtime overrides the first time
+a block runs (through its stub, when its name is known): `NQP_FRAMEFREE=0`
+runs every block framed, `NQP_FRAMEFREE_ONLY=a,b` / `NQP_FRAMEFREE_SKIP=a,b`
+by name, `NQP_FRAMEFREE_TRACE=1` narrates each decision. The encoding is
+otherwise identical, so a frame-free misbehaviour bisects in seconds
+against one set of jars instead of a setting rebuild per hypothesis.
+`NQP_CODE_WHY=1` at compile time prints each block's frame verdict with
+its inputs (`code frame NAME -> framed|free frame_op= fdecls= dispatches=
+nested=`).
+
+**Bug 1: language.** Every "current HLL" the runtime reads -- `hllbool`,
+`hllize`, `hllhash`, `hlllist`, `newexception`, `getcurhllsym`, the box
+types `getattr` uses for a native slot, ... -- comes from `tc.curFrame`'s
+compilation unit, which for a frame-free callee is the *caller's*. A Raku
+accessor like `Parameter.named` (`nqp::hllbool(...)`, `--> Bool:D`)
+entered from NQP dispatcher code built NQP's Bool, which is null, and the
+return-type check dereferenced it; in the CORE.d compile the same
+confusion surfaced as a bare `Died` out of a role specialization. This is
+the rule spesh's `inline.c` enforces as "no `:useshll` op across HLLs".
+**Fix:** at the call site. `NqpDispatch` enters a callee frame-free only
+when its unit's HLL is the caller's (the caller's unit is now an operand
+of the dispatch op; both are constants of the call node, so PE folds the
+compare); the invoke road compares against `tc.curFrame`'s. With that
+invariant every frame-derived HLL read is right, and no op needs to be
+told which language it is in. Verified: the frame-free CORE.c loads and
+runs, and CORE.d and CORE.e compile (parse 5.3 s and 26.7 s).
+
+**Bug 2: self-introspection.** Ops that ask the current frame for the
+block's *own* code ref, caller or phaser flags (`curcode`, `callercode`,
+`getlexcaller`, `ctxcaller`, `backtrace`, `p6bindsig`, `p6capturelex`,
+`p6setpre`/`p6clearpre`/`p6inpre`, `p6stateinit`, `p6takefirstflag`, ...)
+have no answer without a frame; the encoder's `%frame_forcing_ops` makes
+such a block framed, as does `p6typecheckrv` on a generic return type
+(it instantiates the type against the routine's own frame). Dynamic
+lookups (`getlexdyn`) are fine: a frame-free block declares no lexicals,
+so skipping its frame is exact.
+
+**Bug 3: bind failure.** A frame-free callee's `assertparamcheck` ran
+`BindFailure.failed`, which reads `tc.frame` and found the caller's
+dispatch there. With `cf == null` the check now throws
+`NqpFrameFreeBindFailure`, and the direct road that entered the callee,
+which *is* the dispatch and holds its program, arguments and callee, owns
+it: a program with bind control resumes itself with the failure flag (a
+record materialized on the spot); otherwise `BindFailure.reportFrameFree`
+runs the language's `bind_error` handler with the callee's code object,
+callsite and arguments.
+
+The encoder now marks eligible blocks frame-free by default;
+`NQP_CODE_NOFRAME=0` turns it off.
+
+**Compile time.** The frame-free setting build's CORE.c parse is 228-230 s.
+The right comparison is not `NQP_CODE_NOFRAME=0` (that changes only how
+the *output* is encoded; both arms 224-230 s) but the runtime knob
+`NQP_FRAMEFREE=0`, which runs the compiler's own blocks framed: 231.6 s.
+Frame-free changes the compiler's speed by nothing measurable. The gap
+to the morning's 206 s predates this diamond and needs its own
+bisection across diamonds 3 and 4. CORE.d parse 6.8 s, CORE.e 32.5 s;
+the whole `make` 845 s with BOOTSTRAP at about 4.5 minutes.
+
+**Coverage, measured on the first frame-free setting build.** The
+setting's 21082 encoded blocks split 4691 frame-free / 16391 framed
+(`NQP_CODE_WHY` on a manual CORE.c compile). Framed because they make a
+dispatch: over half (the return-register class the calling-convention
+doc defers); because of a frame-forcing op: about a third; because of
+un-lowered lexicals: the rest.
+
+**The `+` candidate is in the last class, and that is a RakuAST
+finding.** Standalone, `multi sub plus(Int:D $a, Int:D $b --> Int:D)`
+has its parameters lowered to locals (`lex2local: lower '$a' in
+RakuAST::Sub`, `RAKUDO_LOWERING_DEBUG=1`) and encodes frame-free. In the
+setting compile the same candidate encodes `framed frame_op=1 fdecls=2
+lex:$a lex:$b`, and the lowering pass logs *no decision at all* for any
+sub parameter named `$a`, `$b`, `$x` or `$n` across 55 thousand
+decisions, while `my` variables in subs and sigilless term parameters
+are lowered normally. So the pass never registers the sigiled parameter
+targets of (at least the multi) subs under the setting compile; the
+declaration exists and its scope is `my`, so the silent path is upstream
+of `IMPL-REGISTER-DECL`. Finding which subs are skipped needs the
+routine's name in the pass's trace (a frontend rebuild). Until it is
+fixed, every setting routine with sigiled parameters is framed by its
+own parameters -- the `+` candidate included -- and the loop measures
+what it measured after diamond 4. The `raku-assign` handler
+`-> $cont, $value { nqp::bindattr(...) }` is NQP code whose parameters
+are lexicals by construction and stays framed for the same reason.
+
 ## Where the code is
 
 - `nqp/nqp-truffle/src/main/kotlin/org/raku/nqp/truffle/NqpDispatch.kt`
