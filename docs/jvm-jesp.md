@@ -678,6 +678,21 @@ change frees leaf closures that read their outers and call nothing;
 the plain sub needs the next rule lifted: a caller of dispatches
 without a frame of its own. That is the calling-convention item.
 
+**Attempted and reverted (2026-09-08): dispatching blocks frame-free.**
+The dispatch operation used the block's own frame for one thing, reading
+the call's result out of its return registers; making a dispatching
+block frame-free meant reading from `tc.curFrame` instead (the callees
+deliver a frame-free caller's result there). The bootstrap and setting
+built and the plain gates mostly passed, but `t/01-sanity/55-use-trace.t`
+regressed: `@seps` bound to `Nil` in `set-line-separators`, a dispatch
+result read back empty. The cause is register aliasing -- a frame-free
+dispatcher and its own caller share `tc.curFrame`'s return registers, so
+a result read there can collide with a value the caller has in flight.
+The right shape is a real per-op result slot the dispatch writes and
+reads, not the caller's registers; a larger change, deferred to the
+calling-convention work rather than landed as an aliasing hack. Reverted
+to the outer-read commit; the two wins above stand.
+
 ## Census: what still runs as bytecode (2026-09-08)
 
 Block methods in the built class versus engine programs in the unit's
