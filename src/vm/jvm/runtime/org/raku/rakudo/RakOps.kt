@@ -69,6 +69,9 @@ object RakOps {
 
     @JvmField val key = ContextKey(ThreadExt::class.java, GlobalExt::class.java)
 
+    /** NQP_RV_TRACE=1: explain every rejected return-value type check on stderr. */
+    private val RV_TRACE = System.getenv("NQP_RV_TRACE") != null
+
     /* Parameter hints for fast lookups. */
     private const val HINT_CODE_DO = 0L
     private const val HINT_CODE_SIG = 1L
@@ -616,6 +619,18 @@ object RakOps {
                 else
                     Ops.istype(decontValue, rtype, tc) == 1L
             if (!accepted) {
+                if (RV_TRACE) {
+                    val bt = check.baseType
+                    System.err.println("p6typecheckrv rejected: value=" + decontValue?.javaClass?.simpleName
+                        + " valueWHAT=" + (decontValue?.st?.WHAT?.let { Ops.typeName(it, tc) } ?: "?")
+                        + " rtype=" + Ops.typeName(rtype!!, tc)
+                        + " baseType=" + (bt?.let { Ops.typeName(it, tc) } ?: "null")
+                        + " wantConcrete=" + check.wantConcrete
+                        + " istypeBase=" + (bt?.let { Ops.istype(decontValue, it, tc) } ?: -1)
+                        + " istypeRtype=" + Ops.istype(decontValue, rtype, tc)
+                        + " isconcrete=" + Ops.isconcrete(decontValue, tc)
+                        + " sameListType=" + (bt != null && decontValue != null && decontValue.st.WHAT === bt))
+                }
                 /* Straight type check failed, but it's possible we're returning
                  * an Int that can unbox into an int or similar. */
                 val spec = rtype!!.st.REPR.get_storage_spec(tc, rtype.st)
