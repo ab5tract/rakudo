@@ -693,6 +693,33 @@ reads, not the caller's registers; a larger change, deferred to the
 calling-convention work rather than landed as an aliasing hack. Reverted
 to the outer-read commit; the two wins above stand.
 
+**HLL simplification, sliced (2026-09-08).** The current-HLL readers marked
+`:useshll` in `%hll_ops` are conservatism inherited from MoarVM's
+frame-merging spesh; our engine never merges frames, so an op that reads the
+block's *own* comp-unit HLL (`compUnit.hllConfig`, threaded as `ARG_CU`) is
+correct however the block is entered, cross-language included.
+
+- *Slice 1 (this build): drop `hllize` from `%hll_ops`.* Its site already
+  resolves the config from `cu` (`NqpTypeOps.hllize -> NqpRaw.hll(cu)`), so
+  it never touched the frame -- it was listed needlessly, pinning every
+  hllize-using free block out of cross-language frame-free entry. Encoder
+  one-liner; measured discretely (HLLFREE_TRACE count, sub-call bench, gates).
+- *Slice 2 (next): the rest of the set* -- `hllbool`, `hllboxtype_i/n/s`,
+  `hlllist`, `hllhash` -- which today take the classlib method-handle road
+  and read `tc.frame`. Promoting them to dedicated `cu`-taking engine ops
+  (the pattern `hllize` already uses) lets them leave `%hll_ops` too.
+
+**Diamond 7 re-validation is deferred to after slice 2 (user, 2026-09-08).**
+Diamond 7 itself (the `frameFreeEntryOk` different-language-*name* rule, nqp
+53de71f1a) is landed and was never reverted -- the reverted change above was
+the separate dispatch-frame cut. But the HLL simplification widens diamond
+7's cross-language frame-free path: each hll op that leaves `%hll_ops` sends
+more free blocks through it, including the two-`nqp`-config bootstrap trap
+that broke diamond 7 the first time. Rather than re-test diamond 7 after each
+slice, validate the whole widened set once, after slice 2 has moved every
+static-HLL op onto `cu`. Slice 1's gates still exercise the bootstrap
+inherently; a green bootstrap there is necessary but not the full retry.
+
 ## Census: what still runs as bytecode (2026-09-08)
 
 Block methods in the built class versus engine programs in the unit's
