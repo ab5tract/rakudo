@@ -152,7 +152,6 @@ my sub run-one(@cmd, Str :$log!, Int :$stall!, Int :$max!, :@pats, Str :$tag,
 
 # It must be greater than two slashes. Otherwise treat it as a string search for '//'
 subset RegexInput of Str where { .starts-with('/') && .ends-with('/') && 2 < .comb }
-subset RegexArg where { (not $_) || $_ ~~ RegexInput }
 
 sub MAIN(
     *@cmd,
@@ -162,7 +161,7 @@ sub MAIN(
     Int  :$max     = 0,
     Int  :$jobs    = 5,
     :@show,
-    RegexArg :@show-rx,
+    :@show-rx where { .elems == 0 || .elems == .grep(RegexInput) },
     Bool :$relay = False,
     :@t
  ) {
