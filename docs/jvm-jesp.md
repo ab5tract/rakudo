@@ -39,6 +39,7 @@ message; its output must not change:
 | diamond 6, `hllize` as a sited operation, `checkarity`/`flatArgs` off the boundary (quiet machine) | 123-124 | 90M | 8k |
 | diamond 7, frame-free across languages for blocks that read no current language: the `raku-assign` handler runs frame-free from Raku (quiet machine) | 83-92 | 90M | 8k |
 | the prologue and return boundaries gone (`storeReturnTyped`, `posparam`, `truthy`): loop unchanged, cold gate 126 → 98 s, CORE.c parse 230 → 223 s | 82-83 | 90M | 8k |
+| diamond 8, the sidecar loader walks simple graphemes without the iterator: loop unchanged, cold gate 98 → 90 s | 81-82 | 90M | 8k |
 
 The cold-runner `t/01-sanity` (4 jobs) went from 167 s to 119 s over the
 same steps: the compiler runs on the same engine, so the diamonds speed up
@@ -527,6 +528,43 @@ boundary-free jars, 230.3 s with the previous `NqpOps.java` rebuilt
 into the jars, a 3% cut on the compiler for a change of forty lines.
 Reading the recording right is the lesson: an interpreter-tier share in
 JFR predicts cold-start and compile-time wins, not loop wins.
+
+## Diamond 8: the engine-program loader walks simple graphemes itself
+
+**Where it came from.** With frames and boundaries gone, the largest
+item left in a loop recording was start-up: 16% of the visible samples
+in `java.text.BreakIterator` under `CompilationUnit.loadEnginePrograms`.
+A unit's `.codeprograms.lz4` sidecar is "N" then per program
+" len:content" with `len` a grapheme count (the compiler's `nqp::chars`),
+and the loader split it with one iterator over the whole text: `setText`
+builds the entire boundary table, then every grapheme of every program
+costs a `following()`, a binary search into that table. That was
+already the O(text) version (the O(n²) one, a `setText` per program,
+was the 588 s CORE.c parse of 2026-09-06); it was still paid once per
+grapheme per unit per process.
+
+**The cut (nqp, `CompilationUnit.loadEnginePrograms`).** Program text is
+source-derived and almost all ASCII, where a grapheme is one UTF-16
+unit unless the unit is a CR (CR LF is one cluster) or the next unit
+extends it -- and every extender (combining marks, ZWJ, variation
+selectors), every surrogate, the conjoining jamo and the prepend
+characters all sit at or above U+0300. So the loader walks the text
+linearly, counts such a unit as one grapheme, and creates the iterator
+only on the first grapheme that needs it: an all-simple unit never pays
+`setText`. `NQP_SIDECAR_CHECK=1` re-derives every program the old way
+and dies on any difference; `NQP_SIDECAR_STATS=1` reports per unit how
+many graphemes took the iterator.
+
+**Verification.** The runner's 15 units: 25,864 programs, 26.7 million
+graphemes, identical to the old split, 2,686 graphemes (one in ten
+thousand) through the iterator. Cold `t/01-sanity` at 4 jobs: 25 of 25
+in 90 s (98 s before, itself the best on any build). The loop, as
+expected, unchanged at 81.5 ns; the standalone CORE.c parse likewise,
+226.3 s against 223.2 s: this diamond saves a fraction of a second per
+process start, which a hundred cold starts show and one five-minute
+compile cannot. Warm sweep on 4 servers at 2 GB: 25 of 25 in 67 s, the
+fastest yet (67-81 s). (`NQP_SIDECAR_STATS=1` writes to stderr, so it fails
+the trace test that compares a child's stderr; a knob artifact.)
 
 ## Where the code is
 
