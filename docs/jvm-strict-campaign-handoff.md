@@ -1,94 +1,122 @@
-# Strict-refusal campaign — context transfer (2026-09-08)
+# Strict-refusal campaign — context transfer (2026-09-08, evening)
 
 Resume point for the zero-refusals campaign. Read the "Don't relearn these"
 section first — it is the stuff that keeps getting re-explained.
 
 ## Don't relearn these (facts, not opinions)
 
-- **There is a Truffle regex engine, and it already works.** `QAST::Regex`
-  compiles via `QAST::RxDescriptor.encode` (`nqp/src/vm/jvm/QAST/RxDescriptor.nqp`,
-  ~21 rxtypes) to a wire string, run at runtime by
-  `GrammarEngines.rxmatch` → `TruffleGrammarEngine`
-  (`nqp/nqp-truffle/.../TruffleGrammarEngine.kt`, wire codec `RxWire.kt`).
-  The encoder does NOT encode regex internals — it emits a `rxmatch` op
-  (`TruffleEncoder.nqp:583`) referencing the descriptor. **Regex is NOT a
-  refusal** (the honest census below has only 6). The survey's "regex 466"
-  is an upper-bound artifact (`walk_rx` tags every regex block).
+- **Two engines, two names.** The *Truffle compiler* is the QAST encoder
+  (`nqp/src/vm/jvm/QAST/TruffleEncoder.nqp`) plus the wire consumer
+  (`nqp/nqp-truffle/.../NqpProgramBuilder.java`, `NqpWire.java`,
+  `NqpOps.java`, `NqpRootNode.java`). The *Truffle regex engine* is
+  `QAST::RxDescriptor` → `RxWire.kt` → `TruffleGrammarEngine.kt`; it already
+  works and the compiler only emits an `rxmatch` op referencing the
+  descriptor. Regex is NOT a refusal.
 - **watched-run.raku, streamed so the user can follow it.** Long builds/tests
-  go through `raku tools/build/watched-run.raku`. Run it as a plain
-  background job whose stdout IS the task output — do NOT wrap the whole
-  thing in `> file 2>&1`, which buries the `[Ns]` markers where the user
-  can't see them.
+  go through `raku tools/build/watched-run.raku` as a plain background job.
+  Do NOT arm a Monitor per gradle task: monitors are for precise signals
+  and must never fire more often than every 90s (user rule, 2026-09-08).
 - **Two git trees.** rakudo root + nested `nqp/` (gitignored, NOT a
-  submodule). nqp changes: `git -C <abs>/nqp ...`; run gradle as
-  `./nqp/gradlew -p nqp` from the root. Label hashes by tree.
+  submodule). nqp changes: `cd <abs>/nqp && git ...` in its own call (the
+  worktree guard refuses `git -C`); gradle as `./nqp/gradlew -p nqp` from the
+  root. Label hashes by tree.
 - **Every build/run needs `RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1`.**
 - **Env-gate every debug print** (`nqp::getenvhash()<VAR>` / `System.getenv`).
-  A stray stdout print corrupts gen-cat recipes and `JvmConfigPropertiesTask`.
-- **Controlled census, not full-build knobs.** Stage compiles use `--output`
-  (stdout free), so a controlled `nqp-j-gradle --target=jar --output=... <mod>`
-  with `NQP_CODE_BAIL=1`/`NQP_CODE_REPORT=1` is safe; a global knob on
-  `buildJvm` is not (the config-probe task parses nqp stdout).
+- **Stage0 jars carry wire programs** (`nqp.codeprograms.lz4` inside each
+  bootstrap jar), so a wire change must be ADDITIVE: new op numbers only,
+  never a changed layout of an existing op.
+- **Backtraces omit engine closures.** A nested block run by the engine has
+  no name (its CodeRef `name` is an uninitialized lateinit on the script
+  road, the enclosing routine's name on the jar road) and does not appear
+  as an `in <anon>` frame. "in obtain" can mean "in a closure inside
+  obtain". Task open: give anonymous blocks names (RakuAST could at least
+  number them).
+- **Jars from different stages cannot be mixed** (serialization dependency
+  versions). To test a stage2-compiled module in isolation, compile the
+  module AND its dependencies with the stage1 compiler into one directory
+  (the `tmp/mo` recipe below).
+- **nqp-m is on this box** (`~/.rakubrew/versions/moar-2026.07/bin/nqp-m`):
+  ground truth for NQP semantics. Use it before calling anything a bug.
+- **NQP's Test setting speaks TAP**: `plan`/`ok`/`is` from
+  `nqp/src/core/testing.nqp`; new coverage goes in `nqp/t/nqp/NNN-*.t`.
 
 ## Where we are
 
-Committed resume point: **nqp `7b54c37f6`** (pushed). NOT green — deliberately
-mid-campaign. rakudo tree was rebased onto latest `origin/main` (200 commits,
-local; force-push is the user's).
+**nqp `8f9640095` (this branch, unpushed): the nqp bootstrap builds with
+`NQP_CODE_STRICT=1` end to end — zero Truffle-compiler refusals — and the
+resulting compiler runs.** `BUILD SUCCESSFUL in 9m54s` (clean, strict).
+`t/nqp/121-for-controls.t` passes 16/16 on it under strict.
 
-`NQP_CODE_STRICT=1` makes an encoder refusal a HARD ERROR (no bytecode
-fallback), naming the block+op. It is the campaign tool and it dissolves the
-"commit-before-refusal" trap (a committing op like preinc's `bind`, encoded
-into a block that then refuses for another op, corrupts the bytecode
-fallback → `obtain` NPE at `Compiler.nqp:3994`). Off by default.
+What closed the campaign today:
 
-**Loop:** `tmp/strict-build.sh` = `NQP_CODE_STRICT=1` clean `buildJvm`.
-stage1 builds via old stage0 (ignores the knob); stage2's strict encoder
-hard-errors at the first uncovered op (~2.5 min). Cover, rebuild, repeat.
-
-**Covered (11 ops; each validated by the build advancing past it):**
-`falsey` (`not_i(istrue)`), `stringify`/`intify` (`encode_child` → smart_*
-coercion), `numify` (pre-existing, reconciled), `preinc`/`predec`
-(bind+add_i/sub_i, object-var null→0 auto-viv, fresh-tree clones),
-`register`/`delegate`/`track`/`guard` (desugar to `dispatch('boot-syscall',
-'dispatcher-<kind>', …)`), `savecapture` (new wire op W_SAVECAPTURE=31,
-mirrors usecapture across NqpWire/NqpProgramBuilder/NqpOps/NqpRootNode).
+- `for` → new wire op **W_FORLOOP (32)**: a handled loop whose per-iteration
+  fetch runs OUTSIDE the redo loop and only the block call inside it
+  (Compiler.nqp's redo label sits between fetch and call). Zero allocation
+  per iteration. The previous desugar through `handle` could never work: a
+  handle's handler is a nested block, a separate frame that cannot see the
+  enclosing block's locals — hence "unknown local for_redo". `:nohandler`
+  is a plain W_LOOP over fetch+call. Labeled `for` still refused (nothing
+  emits one: NQP has no loop labels, Raku's `for` is its own loop).
+- `postinc`/`postdec`: old value into a scratch local, rebind ±1, answer the
+  local; same fresh-tree clones and null→0 auto-viv as preinc.
+- `indexingoptimized`: operand wanted as str.
+- **The runtime bug the campaign exposed**: `NqpOps.AttrSite` (the getattr/
+  bindattr inline cache) guarded on the storage class only. `BUILDALL`
+  (NQPMu.nqp) binds every attribute of an object through ONE `bindattr`
+  with a computed name; once it encoded (it used to refuse), the site
+  resolved for `@!stack` and then wrote `@!spill_locals`'s empty list into
+  the `@!stack` field. First symptom: the stage2 compiler's `obtain` died
+  with an NPE in `bindpos` on the very first compile. Fix: the site records
+  class handle + name and the fast path requires both (two reference
+  compares). `bindpos` on a null array now dies with the block name.
+- Semantics checked against nqp-m: a `redo` in a `for` body does NOT re-run
+  the body on any backend (moar, JVM bytecode, JVM Truffle all answer
+  `7,8 n=2`), and a control thrown from a *called sub* has no handler on
+  any of them. The new test pins what all three answer.
 
 ## The exact next step
 
-`for` (`encode_for` in `TruffleEncoder.nqp`) is the current blocker. It
-desugars to `iterator`+`while` (last/next ride the while's own regions) with
-a redo-loop around only the `call` so `redo` re-runs the call, not the fetch.
-Strict build currently hard-errors:
+1. **Read the t/nqp result** (`$CLAUDE_JOB_DIR/tmp/nqp-tests.log` or rerun:
+   `raku tools/build/watched-run.raku -t=nqp/t/nqp --jobs=3 -- nqp/nqp-j-gradle`
+   with `NQP_JVM_MAXHEAP=2g`). Every FAIL is either a runtime gap in one of
+   the ~374 blocks that now encode for the first time, or a test that needs
+   `cd nqp` for relative paths. Compare against nqp-m before calling it a bug.
+2. **Rakudo build on the new nqp**: `raku tools/build/watched-run.raku
+   --log=build.log --show='Compiling|Generating' -- make` (the Makefile
+   exports the knobs), then `t/01-sanity` as the gate. Rakudo's own
+   compile (CORE.c etc.) will hit refusals of its own; run it WITHOUT
+   strict first, then census with `NQP_CODE_BAIL=1` on a controlled
+   `--output` compile.
+3. Then `jast2bc`'s bytecode FALLBACK is deletable for nqp (plan items 5-6
+   in `docs/jvm-truffle-only-plan.md`).
+4. Open task: name anonymous blocks in backtraces (`<anon>` → at least
+   `anon_N`, via RakuAST/QAST block naming).
 
-    code-bail unknown local for_redo_1   (in encode_var)
+## Recipes (the tmp/ artifacts of the previous session are gone)
 
-The redo-flag local (`for_redo_*`) is not registering where the inner `while`
-condition / `handle` handler read it, whereas the `for_v` temps (read only in
-the `call`) register fine. **First job: find why a local read inside a
-while-condition or handle-handler doesn't see an enclosing-scope local decl,
-and fix it** (candidates: declare all for-locals at the top Stmts; make the
-redo flag a native-int local; or the while-cond/handle-handler encode path
-loses the local). Then runtime-verify redo/next/last (the semantics are not
-yet tested), then cover `postinc`/`postdec` (~29, old-value temp with the same
-null→0 auto-viv) and any `indexingoptimized`. Then strict should go green,
-and jast2bc's fallback becomes deletable (its stub + sidecar hats stay for
-plan items 5-6).
+- Strict loop: `NQP_CODE_STRICT=1 RAKUDO_RAKUAST=1 NQP_CODE_RUN=1
+  NQP_CODE_PRECOMP=1 raku tools/build/watched-run.raku --log=strict.log
+  --show='> Task :stage' --show='code-bail' --show='BUILD' --show='rror'
+  -- ./nqp/gradlew -p nqp clean buildJvm` (≈5 min to the first stage2
+  error, ≈10 min green).
+- Stage1 runner (old-encoder compiler, NEW encoder for what it compiles):
+  copy `nqp/nqp-j-gradle`, point its lib dir at `nqp/build/jvm/stage1`, add
+  `--module-path=<stage1> --setting-path=<stage1>`. Tests a new encoder
+  op in seconds without a stage2 build.
+- Isolating a stage2 runtime failure: compile `nqp/build/jvm/stage2/nqpmo.nqp`
+  and `.../NQPCORE.setting` (the gen-cat'd sources) with the stage1 runner
+  (`--bootstrap --no-regex-lib --target=jar --setting=NULL`) into one dir,
+  point `--module-path`/`--setting-path` at it, and run probes; that pairs
+  new-encoder setting/HOW code with the old compiler.
+- Runtime-only rebuild: `./nqp/gradlew -p nqp :nqp-truffle:jar syncRuntimeJars`
+  (~10s), then rerun `nqp/nqp-j-gradle` — no stage recompile needed.
+- Tracing knobs: `NQP_CODE_TRACE=1` (block entries), `NQP_UNWIND_TRACE=1`
+  (loop unwind arms), `NQP_ATTR_TRACE=1` (slow-road @/% attribute reads).
 
-## Honest census (the real worklist)
+## Honest census (was)
 
-`tmp/hc-bail.out` (NQP_CODE_BAIL per module): ~374 ACTUAL refusals. Ranked by
-true reason: stringify 116, preinc 95, falsey 61, postinc 28, for 24, intify
-22, predec 10, then guard/track/savecapture/delegate/register/postdec/
-indexingoptimized (~18), regex 6. The op cluster IS the campaign; the survey's
-~42% and its `sole` ranking wildly over-count (hand-branch ops missing from
-`$extra_ops` show as bailing; regex counted per-block).
-
-## Artifacts
-
-- `tmp/strict-build.sh` — the strict loop.
-- `tmp/strict-campaign-wip.patch` — full WIP diff (== the committed 7b54c37f6).
-- `tmp/preinc-attempt.patch` — preinc/predec standalone (superseded).
-- `tmp/hc-bail.out`, `tmp/honest-census.sh` — the actual-refusal census.
-- Deeper background: `docs/jvm-jesp.md`, `docs/jvm-truffle-only-plan.md`,
-  `docs/jvm-truffle-migration.md`.
+`~374` actual refusals ranked stringify 116, preinc 95, falsey 61, postinc
+28, for 24, intify 22, predec 10, tail ~18, regex 6. All of the op cluster
+is now covered; the strict build proves the nqp bootstrap has none left.
+Deeper background: `docs/jvm-jesp.md`, `docs/jvm-truffle-only-plan.md`,
+`docs/jvm-truffle-migration.md`.
