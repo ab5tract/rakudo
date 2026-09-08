@@ -45,7 +45,10 @@ sub MAIN(
     # everything else alive on the box.
     my $avail-gb = '/proc/meminfo'.IO.lines.first(*.starts-with('MemAvailable')) ~~ /(\d+)/
                        ?? $0 div (1024 * 1024) !! 8;
-    my $budget = max(4, $avail-gb * 3 div 4);
+    # Reserve a fixed 3g for the clients, the harness and the rest of the
+    # box, not a quarter: a quarter of 19g refused the three servers the
+    # server's own guard (which works from MemAvailable directly) allows.
+    my $budget = max(4, $avail-gb - 3);
 
     # The server's own guard (rakudo-eval-server: "REFUSING to start") counts a
     # server as heap + 3g of off-heap (the Truffle compiler isolate, code
