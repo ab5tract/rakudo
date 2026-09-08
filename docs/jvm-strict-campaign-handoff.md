@@ -102,6 +102,16 @@ paths). The 26 regressed files had four causes, all fixed in `c131b8933`:
 - 114-pod-panic ("Too many positionals passed") went away with the above
   (its `error` callback throws from a frame-free block).
 
+The first Rakudo `make` on that nqp died in CORE.c's very first dispatch:
+"Argument 0 to the 'dispatcher-delegate' syscall is a obj, but should be a
+str". dispatchers.nqp delegates to `nqp::can($c, 'WRAPPERS') ??
+'raku-invoke-wrapped' !! 'raku-invoke'`; the encoder boxed both arms of an
+untyped `if` to object, so the callsite's argument flag said obj. Fixed
+(nqp `HEAD` after `c131b8933`): an untyped if/ternary takes the arms'
+common type (the condition's for the two-arm value form), object only when
+they differ -- Compiler.nqp's rule; `coerce_at` retro-fits a COERCE around
+an already encoded arm. `t/nqp/122-ternary-typing.t`.
+
 Lesson: "validated by the build advancing past it" is compile-time only.
 Every newly covered op turns ~hundreds of blocks from bytecode into engine
 programs, and the *runtime* of those blocks is what t/nqp tests. Run the
