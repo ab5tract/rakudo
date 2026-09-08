@@ -463,25 +463,28 @@ exception, as it already did within one language.
 
 `NQP_CODE_WHY` now prints `uses_hll=` with the verdict.
 
-**The bootstrap it broke, and why.** The first cut of the getattr change
-made the runtime's `Ops.getattr` read `tc.frame.codeRef` eagerly, on
-every call, to hand its language to the new `getattrIn`. The nqp
-bootstrap then failed in stage2 with "Missing or wrong version of
-dependency .../stage1/NQPCORE.setting": while a compiler loads a
-module's setting the current frame is a dummy without a code ref, the
-eager read threw inside the loader, and the module ended up bound to
-the compiler's own (stage1) setting instead of the stage2 one -- whose
+**The bootstrap it broke, and why -- the real story (2026-09-08).** The
+nqp bootstrap failed in stage2 with "Missing or wrong version of
+dependency .../stage1/NQPCORE.setting": stage2's NQPHLL came out bound
+to the compiler's own (stage1) setting instead of the stage2 one, whose
 handle differs by design (`--stable-sc=stage1` is spliced into stage1
-handles precisely so the two can coexist). The language is resolved
-lazily now, on the native-slot boxing branch only. The dead end on the
-way is worth recording: after the fix I re-ran the runner against the
-stage2 artifacts already on disk, saw the same error, and concluded the
-fix was wrong; the artifacts were the broken ones, and only a stage2
-rebuild could test the fix. Two runtime knobs came out of the hunt:
-`JESP_HLLFREE=0` keeps diamond 5's same-language rule, and
-`JESP_HLLFREE_TRACE=1` names each callee entered frame-free across
-languages. An NQP-only bootstrap has none: the rule only ever fires
-for Raku code calling NQP code, which is its target.
+handles so the two can coexist). The first diagnosis blamed an eager
+`tc.frame.codeRef` read that the getattr change had added (real, and
+made lazy, but not the cause), and the probes that "confirmed" the fix
+were run from scripts that did not export `NQP_CODE_RUN`/`NQP_CODE_PRECOMP`
+-- so they built a bytecode toolchain and never exercised the engine
+at all. On an engine toolchain, `JESP_HLLFREE_TRACE=1` during the stage2
+build named the culprits: `name`, `set_default_parent`,
+`ADD_NESTED_CODE`, `set_body_block` -- the World's own methods, NQP
+code "entered frame-free from caller language nqp". Same language
+name, yet the same-language check had said no: a bootstrap holds the
+compiler's `nqp` config and the compilee's `nqp` config as two distinct
+objects, diamond 5 framed every call between them, and the new bit let
+them through as "cross-language". The entry rule is now: only a
+different language *name* crosses; an unknown caller language and two
+configs of one language both stay framed. `JESP_HLLFREE=0` keeps
+diamond 5's rule outright; `JESP_HLLFREE_TRACE=1` names each callee
+entered frame-free across languages.
 
 **Result (nqp 56b905fcf, full engine rebuild).** `JESP_HLLFREE_TRACE=1`
 on the loop names exactly one callee entered frame-free across
@@ -494,6 +497,24 @@ code are Raku-language callers of NQP-language helpers all day, so
 inside `make` CORE.c parsed in 224.7 s (270 s on the same nqp sources
 before this diamond, 247 s before the stage0 refresh), BOOTSTRAP
 compiled in 263 s (325 s), and the whole `make` took 727 s (935 s).
+**Withdrawn, 2026-09-08:** those compile-time numbers are confounded.
+The nqp rebuild that preceded this `make` ran from a script that did
+not export `NQP_CODE_RUN`/`NQP_CODE_PRECOMP`, and gradle only inherits
+them, so the compiler toolchain jars it produced (`nqp.jar`,
+`NQPHLL.jar`, `QAST.jar`) carried no engine programs: the 225 s build
+ran the compiler as JVM bytecode, the 270 s builds ran it on the
+engine. The loop numbers are unaffected (the loop is rakudo code in
+blib, which is encoded). Redone on an engine-encoded toolchain with the
+fixed diamond 7 (nqp 53de71f1a): the whole `make` 995 s (935 s on the
+engine toolchain without this diamond), CORE.c parse inside `make`
+300.6 s (265-270 s), cold `t/01-sanity` at 4 jobs 139 s (126-131 s).
+Every compiler-side number moved the wrong way; whether that is this
+diamond or noise is what the runtime-knob A/B below settles (the same
+build, `JESP_HLLFREE` on and off, back to back). And a finding that
+outranks the diamond: the toolchain compiles CORE.c in 225 s as
+bytecode and 265-300 s on the engine. The DSL interpreter tier is
+slower than JVM bytecode for compiler-shaped code, which is the
+2026-09-07 parse-regression finding again, now measured directly.
 Gates at 4: cold `t/01-sanity` 25 of 25 in 126 s (131 s on the previous
 build; the cold gate has sat at 126-135 s since the stage0 refresh
 against 98 s once before it, which is the refresh's still-open
@@ -522,7 +543,11 @@ before, within noise, because those samples were interpreter-tier and
 the compiled loop had already inlined through. It shows where the
 interpreter tier lives: the cold `t/01-sanity` gate went from 126 s to
 98 s (4 jobs, 25 of 25), the best cold time measured on any build; the
-warm sweep 81 s (74-81 s, 25 of 25); the smoke script unchanged. The
+warm sweep 81 s (74-81 s, 25 of 25); the smoke script unchanged.
+**Caveat, 2026-09-08:** the 126 s ran an engine-encoded compiler
+toolchain and the 98 s a bytecode one (see the withdrawal under
+diamond 7), so that pair is not a clean A/B; the CORE.c A/B below was
+back to back on the same jars and stands. The
 CORE.c parse A/B, back to back on the same build: 223.2 s with the
 boundary-free jars, 230.3 s with the previous `NqpOps.java` rebuilt
 into the jars, a 3% cut on the compiler for a change of forty lines.
@@ -565,6 +590,36 @@ process start, which a hundred cold starts show and one five-minute
 compile cannot. Warm sweep on 4 servers at 2 GB: 25 of 25 in 67 s, the
 fastest yet (67-81 s). (`NQP_SIDECAR_STATS=1` writes to stderr, so it fails
 the trace test that compares a child's stderr; a knob artifact.)
+
+## Census: what still runs as bytecode (2026-09-08)
+
+Block methods in the built class versus engine programs in the unit's
+sidecar, from `javap` and the loader's `NQP_SIDECAR_STATS=1`:
+
+| Unit | Block methods | Engine programs | Bytecode fallback |
+|---|---|---|---|
+| CORE.c | 19,817 | 18,546 | 6% |
+| BOOTSTRAP | 4,636 | 4,132 | 11% |
+| CORE.d | 78 | 72 | 8% |
+
+The fallbacks are the encoder's unconditional refusals (exit handlers,
+`raw`/`immediate` blocks, `custom_args`, the 60,000-character program
+gate) and its ~90 bail sites; a refused block gets full bytecode. Every
+block, encoded or not, is still a JVM method with the frame prelude,
+postlude, annotation and handler table; CORE.c's class file is 10 MB
+in the engine build next to its 2 MB program sidecar. The full
+inventory of what remains of the bytecode path, ranked, is in
+`docs/jvm-truffle-migration.md` under Phase 5.
+
+**The toolchain trap.** The gradle stage build sets none of the engine
+knobs; it only inherits them from the invoking shell (rakudo's
+`Makefile` exports them, a bare `./nqp/gradlew -p nqp buildJvm` from a
+plain shell does not). A rebuild from a script without the export
+produces compiler jars with no program sidecar at all, so the compiler
+toolchain runs as bytecode while every rakudo unit runs on the engine.
+That happened on 2026-09-08 and went unnoticed for two hours; check
+after every nqp build with
+`unzip -l nqp/build/jvm/share/lib/nqp.jar | grep -c codeprograms`.
 
 ## Where the code is
 
