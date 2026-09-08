@@ -112,6 +112,20 @@ common type (the condition's for the two-arm value form), object only when
 they differ -- Compiler.nqp's rule; `coerce_at` retro-fits a COERCE around
 an already encoded arm. `t/nqp/122-ternary-typing.t`.
 
+With that, `make` built Rakudo end to end (BOOTSTRAP v6c 325 s; CORE.c
+494 s: parse 370, optimize 35, jast 36 -- the parse was 206 s on
+2026-09-06, so the ~374 newly encoded compiler blocks cost real compile
+time). The first `t/01-sanity` sweep: 21/25, the four `use`-ing files
+died in the `List:D` return check of `Parameter.constraint_list` called
+from RakuAST's duplicate-multi check. `NQP_RV_TRACE=1` (RakOps) showed
+the value was an un-hllized NQPArray: the engine's hllize site is
+cu-based on its identity fast path only, and its miss road went to
+`Ops.hllize`, which reads the FRAME's language -- the caller's, for a
+frame-free callee entered across languages. Fixed runtime-only (nqp
+`ca71c19cb`): `Ops.hllizeIn` takes the language, both engine roads pass
+`NqpRaw.hll(cu)`. Of all frame-HLL-reading ops in Ops.kt, hllize was the
+one missing from the encoder's `%hll_ops`/`%frame_forcing_ops`.
+
 Lesson: "validated by the build advancing past it" is compile-time only.
 Every newly covered op turns ~hundreds of blocks from bytecode into engine
 programs, and the *runtime* of those blocks is what t/nqp tests. Run the
