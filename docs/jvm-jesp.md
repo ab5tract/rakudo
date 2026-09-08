@@ -508,13 +508,22 @@ blib, which is encoded). Redone on an engine-encoded toolchain with the
 fixed diamond 7 (nqp 53de71f1a): the whole `make` 995 s (935 s on the
 engine toolchain without this diamond), CORE.c parse inside `make`
 300.6 s (265-270 s), cold `t/01-sanity` at 4 jobs 139 s (126-131 s).
-Every compiler-side number moved the wrong way; whether that is this
-diamond or noise is what the runtime-knob A/B below settles (the same
-build, `JESP_HLLFREE` on and off, back to back). And a finding that
-outranks the diamond: the toolchain compiles CORE.c in 225 s as
-bytecode and 265-300 s on the engine. The DSL interpreter tier is
-slower than JVM bytecode for compiler-shaped code, which is the
-2026-09-07 parse-regression finding again, now measured directly.
+Every compiler-side number moved the wrong way, so the runtime knob
+was A/B'd on that exact build, three standalone CORE.c compiles back
+to back: rule on 293.5 s, rule off (`JESP_HLLFREE=0`, diamond 5's rule)
+284.3 s, rule on again 285.0 s. The two on arms bracket the off arm;
+the rule costs the compiler nothing measurable, and the 300 s was the
+make's context. Diamond 7 is cleared on correctness and on compile
+time; its claimed compile-time *win* stays withdrawn. And a finding
+that outranks the diamond: the toolchain compiles CORE.c in 225 s as
+bytecode and 285-295 s on the engine. The DSL interpreter tier is
+slower than JVM bytecode for compiler-shaped code (run-once blocks
+that never get hot enough to compile), which is the 2026-09-07
+parse-regression finding again, now measured directly; the compile is
+being profiled with perf and the JVM's perf map to split it into
+interpreter tier, compiled roots, JIT threads and GC, and that split
+decides the plan. From here on every diamond carries a compile-time
+gate on the engine toolchain next to the loop bench.
 Gates at 4: cold `t/01-sanity` 25 of 25 in 126 s (131 s on the previous
 build; the cold gate has sat at 126-135 s since the stage0 refresh
 against 98 s once before it, which is the refresh's still-open
