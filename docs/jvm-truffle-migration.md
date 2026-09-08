@@ -334,6 +334,70 @@ JAST layer for that tier. This is the payoff beyond speed: three of the
 five bugs fixed in the 2026-08-31..09-01 session lived in code this
 phase retires.
 
+*Inventory of what remains of the bytecode path (2026-09-08), ranked
+by how load-bearing it is.* Every block is still emitted as a JVM
+method: an encodable block's body is one `CodeEngines.codeRun` call, a
+refused block's body is full bytecode, and the CallFrame prelude, the
+postlude, the `@CodeRefAnnotation`, the local slots and the handler
+table are emitted identically either way (`Compiler.nqp:4642-4687`,
+`:4875-4911`). Census from the built jars: CORE.c 19,817 block methods
+against 18,546 engine programs (6% bytecode), BOOTSTRAP 4,636 against
+4,132 (11%), CORE.d 78 against 72; CORE.c's class file is still 10 MB.
+
+1. The emitted class file itself: `CompilationUnit.kt:44-51,201-240`
+   reflects the annotated methods into method handles and CodeRefs, and
+   the engine's own nested-block operation resolves a block through
+   that table (`NqpRootNode.java:571`). Nothing else can go first.
+2. `nqp/src/vm/jvm/QAST/Compiler.nqp` (6317 lines) and `JASTNodes.nqp`
+   (679): run in full on every compile to produce the stubs; sole
+   codegen for the refused shapes (exit handlers, `raw`/`immediate`,
+   `custom_args`, programs over the 60,000-character gate, ~90 bail
+   sites) and for the 258-line `engine_jast` regex wrapper.
+3. `jast2bc` (3078 lines): `JASTCompiler.kt` (969) runs in-process on
+   every compile and is the only writer of the `.codeprograms.lz4`
+   sidecar; `AutosplitMethodWriter.kt` (1772) is the 64 KB-method
+   fallback, gone with the class file.
+4. The calling convention: `ArgsExpectation` (146), `StaticCodeInfo.mh`
+   / `mhResume` (284), `CallFrame` (461). The engine's direct road is
+   gated on `argsExpectation == USE_BINDER` (`NqpDispatch.kt:673, 774,
+   1078`), so the enum is load-bearing for the engine today.
+5. `Ops.kt` (9504) as the shared classlib, reached from the engine by
+   `Class.forName` + `findStatic` (`NqpOps.java:868-901`) or hand cases
+   (`:173-800`); every op crosses a boundary unless it has a dedicated
+   operation (on the classlib road, only `hllize` so far).
+6. `IndyBootstrap.kt` (587): dead, nothing emits it; deletable today.
+7. `LibraryLoader.java` (529), `ByteClassLoader.kt` (60),
+   `EvalResult.kt` (9): class-file loading for jars and EVAL.
+8. `stage0/*.jar` and `nqp/build.gradle.kts:264-265`: the bootstrap is
+   bytecode by construction, and gradle sets none of the engine knobs
+   (it inherits them; a bare `buildJvm` from a plain shell produces an
+   all-bytecode nqp -- it did, on 2026-09-08).
+9. Build plumbing assuming class-file output: `Makefile:284,
+   1249-1352`, `tools/build/jvm-build.sh:56-114`, `rakudo-j-build`,
+   `HLL/Backend.nqp:38-90`, asm-tree on the runner classpath.
+10. ASM outside jast2bc, on no deletion plan: `P6Opaque.kt:282-638`
+    generates attribute-storage classes at run time (the engine's
+    fastest attribute read depends on them, `NqpOps.java:1331`), and
+    the two Java-interop layers generate interop classes.
+
+What the engine still calls into: the classlib method handles, ~100
+direct `Ops.*` cases, `RakOps` by reflection (`NqpOps.java:1614-1661`),
+`Ops.invokeDirect` for any callee without an `engineTarget`
+(`NqpDispatch.kt:1046`), `cu.lookupCodeRef(qbid)` for every nested
+block, `Ops.wval`, and the storage classes' field handles. A callee's
+`engineTarget` is set only after its stub has run once
+(`CodeEngine.kt:99-105`): the stub is still the bootstrap of every code
+object. The regex side is done: the classic bytecode regex codegen was
+deleted (nqp `10146d022`), `NQP_RX_STRICT` no longer exists in code.
+
+Truffle-only in dependency order: a program-and-SC artifact per unit
+with no class file; a `CompilationUnit` that maps block ids to code
+objects without reflection; the encoder taking over the refused
+shapes; the calling convention rewritten so the engine reads no
+`ArgsExpectation` and parks no arguments; then JAST, jast2bc, the
+splitter, the class loaders and the ASM dependency deleted in that
+order. The two ASM users outside jast2bc are a separate workstream.
+
 *What this phase found first: the coverage number was wrong.* The
 survey's covered-tag set was a hand-written op list, and it had drifted
 from the encoder in both directions -- still claiming
