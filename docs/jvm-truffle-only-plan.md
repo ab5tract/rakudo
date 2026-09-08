@@ -18,23 +18,22 @@ standalone, `+` loop 82 ns, cold `t/01-sanity` 139 s at 4 jobs, warm
 
 ## The list
 
-1. **Arguments in registers** (in progress). Truffle already inlines
-   the direct-road callees into the caller's compilation, but every
-   argument array still materializes: the prologue parked it on the
-   thread context, and a heap store defeats escape analysis. The
-   thread-context store is gone (FlatArgs reads the frame's own array),
-   and it was not enough: JFR still shows ~200 bytes of `Object[]` per
-   iteration and the loop is unchanged at 80-82 ns, so another path
-   forces the arrays to materialize. Remaining suspects, in order: the
-   call itself (`DirectCallNode.call` hands the callee a fresh frame
-   arguments array and profiles it -- `profileArguments` was an
-   allocation site in the JFR), the dispatch's variadic argument array
-   flowing into the slow-road boundary, and the bind-failure boundary
-   that takes `args` on the exception path. Measure by JFR allocation
-   rate (bytes per iteration), never by the expansion tree's allocation
-   count, which keeps a node for any slow-path materialization. Payoff
-   when it lands: ~13 arrays and ~200 bytes per call gone, the GC share
-   with them.
+1. **Arguments in registers, which turned out to mean the plain call.**
+   The loop bench's `+` and assign run on special roads and had hidden
+   what an ordinary sub call costs: 462 ns and ~1 KB per call, none of
+   it the argument arrays. Landed so far: the sink of a statement's
+   value as a sited op (the value's `sink` was called through the
+   generic method-dispatch road, building a descriptor, a string key and
+   a frame per call: sub loop 462 → 239-249 ns), and outer lexical reads
+   that no longer force a frame (the program gets its code ref; a block
+   whose only lexical traffic is with its outers runs frame-free). Still
+   open on this item: the `+` loop's own `Object[]` (~200 B/iter, not the
+   thread-context store, not the catch handlers -- both tried), with the
+   call node's own frame-arguments array and its argument profiling as
+   the remaining suspect; and the mainline shape of the bench, which
+   only ever compiles by on-stack replacement onto the interpreter's
+   real frame. Measure by JFR allocation rate, never by the expansion
+   tree's allocation count.
 
 2. **A two-valued language id instead of `HLLConfig` identity.** The
    only languages that exist are `nqp` and `Raku`; NQP cannot go
