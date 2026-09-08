@@ -600,6 +600,32 @@ compile cannot. Warm sweep on 4 servers at 2 GB: 25 of 25 in 67 s, the
 fastest yet (67-81 s). (`NQP_SIDECAR_STATS=1` writes to stderr, so it fails
 the trace test that compares a child's stderr; a knob artifact.)
 
+## Arguments in registers, first cut: the thread-context store (2026-09-08)
+
+Truffle's inlining trace shows `infix:<+>` and the assign handler
+inlined into the loop's compiled root, yet the JFR allocation profile
+put ~156 bytes of `Object[]` per iteration on the loop: the argument
+arrays materialize although the calls are gone. An inlined call lets
+escape analysis delete an array only if nothing stores a reference to
+it on the heap, and the prologue's arity check stored the array on
+`tc.flatArgs` for the parameter fetches to read back. `FlatArgs` now
+takes the callsite the arity check answered and, when it is the
+frame's own (nothing flattened), reads the frame's own argument array;
+the fast path stores nothing on `tc`. Necessary, and not sufficient:
+JFR after the change still shows ~200 bytes of `Object[]` per
+iteration and the loop is unchanged at 80-82 ns, so another path
+forces the arrays -- see item 1 of `docs/jvm-truffle-only-plan.md` for
+the remaining suspects. Gates, now at 3 (decision 2026-09-08: the eval
+server's guard counts a server as heap + 3 GB off-heap and refuses a
+4th on this box, which surfaced twice as a chunk with no TAP and a
+120 s token timeout; the sweep budgets the same way now and prints a
+failed chunk's raw tail): cold `t/01-sanity` at 3 jobs 25 of 25 in
+111 s (110 s at 4 jobs on this build, 139 s at 4 on the last compile),
+warm sweep on 3 servers 25 of 25 in 75 s, smoke unchanged.
+One lesson for the record: the expansion tree's allocation column
+cannot show this, since partial escape analysis keeps an allocation
+node for any slow-path materialization; only an allocation rate can.
+
 ## Census: what still runs as bytecode (2026-09-08)
 
 Block methods in the built class versus engine programs in the unit's

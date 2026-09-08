@@ -22,13 +22,19 @@ standalone, `+` loop 82 ns, cold `t/01-sanity` 139 s at 4 jobs, warm
    the direct-road callees into the caller's compilation, but every
    argument array still materializes: the prologue parked it on the
    thread context, and a heap store defeats escape analysis. The
-   thread-context store is gone (FlatArgs reads the frame's own array);
-   the allocation column did not move, so another path still forces
-   the arrays -- the remaining suspects are the bind-failure boundary
-   that takes `args` on the exception path, the dispatch slow road, and
-   the callee frame's own argument array. Measure by JFR allocation
-   rate, not by the expansion tree's allocation count. Payoff: ~13
-   arrays and ~150 bytes per call gone, the GC share with them.
+   thread-context store is gone (FlatArgs reads the frame's own array),
+   and it was not enough: JFR still shows ~200 bytes of `Object[]` per
+   iteration and the loop is unchanged at 80-82 ns, so another path
+   forces the arrays to materialize. Remaining suspects, in order: the
+   call itself (`DirectCallNode.call` hands the callee a fresh frame
+   arguments array and profiles it -- `profileArguments` was an
+   allocation site in the JFR), the dispatch's variadic argument array
+   flowing into the slow-road boundary, and the bind-failure boundary
+   that takes `args` on the exception path. Measure by JFR allocation
+   rate (bytes per iteration), never by the expansion tree's allocation
+   count, which keeps a node for any slow-path materialization. Payoff
+   when it lands: ~13 arrays and ~200 bytes per call gone, the GC share
+   with them.
 
 2. **A two-valued language id instead of `HLLConfig` identity.** The
    only languages that exist are `nqp` and `Raku`; NQP cannot go
