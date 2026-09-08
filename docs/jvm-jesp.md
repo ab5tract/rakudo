@@ -38,6 +38,7 @@ message; its output must not change:
 | diamond 5 with bare implicit magicals not forcing a frame: the `+` candidate runs frame-free (quiet machine; 169-215 while other JVMs were exiting) | 142 | 90M | 8k |
 | diamond 6, `hllize` as a sited operation, `checkarity`/`flatArgs` off the boundary (quiet machine) | 123-124 | 90M | 8k |
 | diamond 7, frame-free across languages for blocks that read no current language: the `raku-assign` handler runs frame-free from Raku (quiet machine) | 83-92 | 90M | 8k |
+| the prologue and return boundaries gone (`storeReturnTyped`, `posparam`, `truthy`): loop unchanged, cold gate 126 → 98 s, CORE.c parse 230 → 223 s | 82-83 | 90M | 8k |
 
 The cold-runner `t/01-sanity` (4 jobs) went from 167 s to 119 s over the
 same steps: the compiler runs on the same engine, so the diamonds speed up
@@ -500,6 +501,32 @@ in 74 s (81 s). One operational note: the harness's low-memory watchdog
 killed two gate chains at the seam between steps, after each step's
 result was already in the log; four cold runners exiting while four
 servers start is the peak to avoid, so let one settle before the other.
+
+## The prologue and return boundaries (nqp ecacdbece)
+
+The diamond 7 recording, with frames gone, put a fifth of its visible
+samples on three `@TruffleBoundary` calls that sit on every block entry
+or exit: `storeReturnTyped` (four field writes into the caller's
+registers, on every framed return), `posparam` (the positional fetch,
+framed and frame-free) and `truthy` (a native compare). Each is plain
+inlinable code now, the checkarity recipe of diamond 6: what stays
+behind a boundary is the caller-less return, the optional and
+converting fetches (decont, box, arity error) and an object's truth,
+which may run its boolification. A required parameter whose argument
+already has its kind is one flag read and one array read; the value is
+returned as it sits in the argument array.
+
+**Where it shows.** Not in the loop: 81.6 and 83.3 ns against 83-92
+before, within noise, because those samples were interpreter-tier and
+the compiled loop had already inlined through. It shows where the
+interpreter tier lives: the cold `t/01-sanity` gate went from 126 s to
+98 s (4 jobs, 25 of 25), the best cold time measured on any build; the
+warm sweep 81 s (74-81 s, 25 of 25); the smoke script unchanged. The
+CORE.c parse A/B, back to back on the same build: 223.2 s with the
+boundary-free jars, 230.3 s with the previous `NqpOps.java` rebuilt
+into the jars, a 3% cut on the compiler for a change of forty lines.
+Reading the recording right is the lesson: an interpreter-tier share in
+JFR predicts cold-start and compile-time wins, not loop wins.
 
 ## Where the code is
 
