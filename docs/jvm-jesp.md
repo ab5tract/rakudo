@@ -626,6 +626,58 @@ One lesson for the record: the expansion tree's allocation column
 cannot show this, since partial escape analysis keeps an allocation
 node for any slow-path materialization; only an allocation rate can.
 
+## The plain sub call (2026-09-08): p6sink sited, outer reads without a frame
+
+**What the loop bench had hidden.** `$s = $a + $b` in a loop runs on two
+special roads, the multi candidate's resumable road and the assign
+handler's mapped road. Put the same statement in a sub called per
+iteration (`docs/bench/jesp/plussub.raku`) and the call cost 462 ns
+and ~1 KB of allocation: two CallFrames, a callsite descriptor, a
+string and its byte array per call. JFR named them. One frame was the
+sub's own (framed by its three outer-lexical reads); the other frame,
+the descriptor, the string and the bytes were the statement's *sink*:
+`step()` in void context runs `p6sink`, which called the value's `sink`
+method through `Ops.invokeMethodViaDispatch` -- a callsite descriptor
+built by array copy, a string key hashed for a concurrent-map lookup,
+then the method invoked through the bytecode road with a frame of its
+own -- to run Mu's empty `sink`. The dispatch statistics cleared the
+call itself: 45 million invokes, 45 million on the engine's direct
+road.
+
+**`p6sink` as a sited operation (nqp).** The verdict is a function of
+the STable: a container is never sunk (the raku-sink dispatcher looks
+at the sinkee without decontainerizing), and a type whose `sink`
+resolves to Mu's (found once through the Raku language's null value,
+which is Mu) or to none needs no call. `NqpTypeOps.SinkSite`, wired
+from the builder on the op's table id; the runtime's `p6sink` stays as
+the slow road through the Rak bridge. The sub loop: 462 → 239-249 ns;
+`Object[]` 396 → 24 bytes per iteration, the strings, byte arrays,
+descriptors and the sink's frame gone. The plain loop unchanged at
+79 ns (its statement value is a container). Gates at 3: cold 25 of 25
+in 113 s, warm 25 of 25 in 80 s.
+
+**Outer lexical reads without a frame (nqp, encoder + runtime).** The
+sub's own frame remained, and it existed for nothing but a place to
+start the outward walk to `$s`, `$a`, `$b`. The program now receives its
+code ref as a frame argument, two wire ops (`LEXGET_OUTER`,
+`LEXBIND_OUTER`) resolve from the frame the code ref's outer resolves
+to (captured outer, else the outer block's live or prior invocation --
+the CallFrame constructor's decision, shared as `CallFrame.outerFor`),
+and the encoder emits them for a lexical declared in an enclosing block
+and found statically, without forcing a frame. The block's own
+lexicals and anything unresolved keep the framed road. An encoder
+change, so the toolchain and the setting rebuilt (BOOTSTRAP 336 s,
+CORE.c parse 283.7 s inside `make`, against 270.5 s standalone on the
+last compile: the compile side neither gained nor lost). The verdict
+trace then says what the change did and did not do: `code frame step
+-> framed frame_op=1 fdecls=0 dispatches=2` -- the outer reads no
+longer count, and the sub is still framed, now by the rule that a
+block with dispatches needs a frame, which diamond 5 deferred. The sub
+loop is unchanged (258-260 ns) and the plain loop 81.9 ns. So this
+change frees leaf closures that read their outers and call nothing;
+the plain sub needs the next rule lifted: a caller of dispatches
+without a frame of its own. That is the calling-convention item.
+
 ## Census: what still runs as bytecode (2026-09-08)
 
 Block methods in the built class versus engine programs in the unit's
