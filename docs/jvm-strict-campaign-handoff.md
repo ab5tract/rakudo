@@ -74,19 +74,50 @@ What closed the campaign today:
   `7,8 n=2`), and a control thrown from a *called sub* has no handler on
   any of them. The new test pins what all three answer.
 
+## Runtime regressions of the first strict-green build (nqp `c131b8933`)
+
+The first strict-green build passed 85/113 t/nqp files; the stage0
+bootstrap runner passes all but 019-file-ops and 063-slurp (cwd-relative
+paths). The 26 regressed files had four causes, all fixed in `c131b8933`:
+
+- **numify used `encode_node`** (18 files): the node road only passes the
+  want down and answers the child's own type, so `numify(~$/)` answered a
+  str and `dec_number` handed `QAST::NVal.new` a P6str. Rule: an op that
+  *coerces* goes through `encode_child`, as stringify/intify already did.
+- **Frame-free blocks vs frame-reading ops.** `getlexdyn`/`bindlexdyn`
+  walked from `tc.frame.caller`; a frame-free block runs on its caller's
+  frame, so the declaring frame right above was skipped ("Dynamic variable
+  '$*NEXT_QBID' not found" on every runtime compile: roles, regex
+  interpolation, build-tweak). The walk now starts at the current frame,
+  which is what MoarVM's `MVM_frame_getdynlex` does (interp.c hands it
+  `tc->cur_frame`). The throw family and the loop controls read `cf` for a
+  resumed handler's result and NPE'd on `cf == null` (044-try-catch,
+  112-continuations): `die/die_s/throw/rethrow/throwextype/throwpayloadlex*/
+  control/continuation*/ctx` now force a frame (`%frame_forcing_ops`).
+- **W_LOOP repeat pre-run emitted outside the loop's Block**: a second,
+  void operation where the parent expected one value child ("StoreLocal
+  expected a value-producing child", every `repeat {} while` in
+  014-while.t). Pre-existing builder bug, exposed because mainlines with
+  `repeat` only now encode.
+- 114-pod-panic ("Too many positionals passed") went away with the above
+  (its `error` callback throws from a frame-free block).
+
+Lesson: "validated by the build advancing past it" is compile-time only.
+Every newly covered op turns ~hundreds of blocks from bytecode into engine
+programs, and the *runtime* of those blocks is what t/nqp tests. Run the
+suite after every coverage step, against the stage0-runner baseline.
+
 ## The exact next step
 
-1. **Read the t/nqp result** (`$CLAUDE_JOB_DIR/tmp/nqp-tests.log` or rerun:
-   `raku tools/build/watched-run.raku -t=nqp/t/nqp --jobs=3 -- nqp/nqp-j-gradle`
-   with `NQP_JVM_MAXHEAP=2g`). Every FAIL is either a runtime gap in one of
-   the ~374 blocks that now encode for the first time, or a test that needs
-   `cd nqp` for relative paths. Compare against nqp-m before calling it a bug.
-2. **Rakudo build on the new nqp**: `raku tools/build/watched-run.raku
-   --log=build.log --show='Compiling|Generating' -- make` (the Makefile
-   exports the knobs), then `t/01-sanity` as the gate. Rakudo's own
-   compile (CORE.c etc.) will hit refusals of its own; run it WITHOUT
-   strict first, then census with `NQP_CODE_BAIL=1` on a controlled
-   `--output` compile.
+1. **t/nqp on `c131b8933`** (rerun: `raku tools/build/watched-run.raku
+   -t=nqp/t/nqp --jobs=3 -- nqp/nqp-j-gradle` with `NQP_JVM_MAXHEAP=2g`).
+   Anything beyond 019/063 is a regression to triage as above.
+2. **Rakudo build on the new nqp**: `perl Configure.pl --backends=jvm
+   --gen-nqp`, then `raku tools/build/watched-run.raku --log=build.log
+   --show='Compiling|Generating' -- make` (the Makefile exports the
+   knobs), then `t/01-sanity` as the gate. Rakudo's own compile (CORE.c
+   etc.) will hit refusals of its own; run it WITHOUT strict first, then
+   census with `NQP_CODE_BAIL=1` on a controlled `--output` compile.
 3. Then `jast2bc`'s bytecode FALLBACK is deletable for nqp (plan items 5-6
    in `docs/jvm-truffle-only-plan.md`).
 4. Open task: name anonymous blocks in backtraces (`<anon>` → at least
