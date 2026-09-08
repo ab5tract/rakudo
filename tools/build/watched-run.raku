@@ -16,6 +16,10 @@
 #            tailing the log from outside just to see progress markers.
 # --show-rx  the same, matching a Raku regex (quote the argument; `=` and
 #            spaces are metacharacters to the regex parser).
+# --relay    also echo the markers of nested watched-runs (lines with a
+#            leading [Ns]); for a chain script whose every long step runs
+#            under its own watched-run. Never filter a step's output with
+#            grep in a pipe: it block-buffers and hides the markers.
 # -t         a test file to run as `cmd args... FILE`; repeatable. Each run
 #            gets its own watchdog and its own log under --log-dir.
 # --jobs     how many -t runs may be in flight at once (default 5)
@@ -159,6 +163,7 @@ sub MAIN(
     Int  :$jobs    = 5,
     :@show,
     RegexArg :@show-rx,
+    Bool :$relay = False,
     :@t
  ) {
     @cmd or die "nothing to run: pass the command after --\n";
@@ -171,6 +176,11 @@ sub MAIN(
             my $rx = try "anon regex \{ $s \}".EVAL;
             $rx // die "bad --show-rx pattern '$s': { $!.message }\n";
         };
+    # A chain script runs each long step under its own watched-run; the
+    # outer run relays those steps' markers (their leading [Ns]) without
+    # the caller repeating every pattern -- and without a grep in the
+    # pipe, which block-buffers and hides the markers until the step ends.
+    @pats.push(/^ '[' \d+ 's]' /) if $relay;
 
     if @t {
         # A -t argument may name a directory; it stands for every test file
