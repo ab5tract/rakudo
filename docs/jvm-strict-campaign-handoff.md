@@ -74,6 +74,8 @@ What closed the campaign today:
   `7,8 n=2`), and a control thrown from a *called sub* has no handler on
   any of them. The new test pins what all three answer.
 
+**Unit artifact milestone 1 DONE 2026-09-09: nqp stage2 as artifacts (nqp `57460ccd7`), all 21 stage2/share-lib jars `unit.meta`-only (zero `.class`), t/nqp 115/115 through `nqp-j-gradle` (113/115 from the rakudo root: 019-file-ops and 063-slurp are cwd-relative); clean build 273 s, suite 487 s at 3 jobs**
+
 ## Runtime regressions of the first strict-green build (nqp `c131b8933`)
 
 The first strict-green build passed 85/113 t/nqp files; the stage0
