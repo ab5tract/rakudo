@@ -25,6 +25,11 @@
 #            tailing the log from outside just to see progress markers.
 # --show-rx  the same, matching a Raku regex (quote the argument; `=` and
 #            spaces are metacharacters to the regex parser).
+# --show-file PATH that receives only the --show/--show-rx matches (elapsed
+#            prefixed, file-tagged in -t mode) and each run's "=== EXIT" line,
+#            so the log stays the complete, unfiltered record and this file is
+#            the progress digest. Without it the markers are mirrored into
+#            the log itself, as before. --follow reads either file.
 # --relay    also echo the markers of nested watched-runs (lines with a
 #            leading [Ns]); for a chain script whose every long step runs
 #            under its own watched-run. Never filter a step's output with
@@ -55,7 +60,7 @@ $*OUT.out-buffer = False;
 $*ERR.out-buffer = False;
 
 my sub run-one(@cmd, Str :$log!, Int :$stall!, Int :$max!, :@pats, Str :$tag,
-               Bool :$interruptible) {
+               Bool :$interruptible, :$show-fh) {
     my $fh = open $log, :w, :out-buffer(0);
     # Say so plainly: a bad path otherwise surfaces as a Failure being
     # printed to, several frames away from the cause.
@@ -88,13 +93,15 @@ my sub run-one(@cmd, Str :$log!, Int :$stall!, Int :$max!, :@pats, Str :$tag,
             my $who = $tag ?? " $tag" !! '';
             for @pats -> $pat {
                 whenever $lines.grep($pat) -> $l {
-                    # Prefix the elapsed seconds and mirror the marker into
-                    # the log, so a detached run (terminal discarded) still
-                    # carries the timing -- greppable as a leading [Ns].
+                    # Prefix the elapsed seconds and keep the marker on disk,
+                    # so a detached run (terminal discarded) still carries the
+                    # timing -- greppable as a leading [Ns]: in the --show-file
+                    # when there is one (the log stays unfiltered), otherwise
+                    # mirrored into the log itself.
                     my Str() $duration = (now - $started).Int;
                     my $mark = "[{$duration}s]{" " x 3 - $duration.comb}$who $l";
                     note $mark;
-                    $fh.say: $mark;
+                    ($show-fh // $fh).say: $mark;
                 }
             }
         }
@@ -153,9 +160,13 @@ my sub run-one(@cmd, Str :$log!, Int :$stall!, Int :$max!, :@pats, Str :$tag,
         default          { 124 }
     };
 
-    $fh.say: "=== EXIT=$code verdict=$verdict elapsed={(now - $started).Int}s ===";
+    my $exit-line = "=== EXIT=$code verdict=$verdict elapsed={(now - $started).Int}s ===";
+    $fh.say: $exit-line;
     $fh.say: "=== finished { DateTime.now } ===";
     $fh.close;
+    # The digest gets the verdict too, tagged in -t mode, so a follower or a
+    # waiter on that file alone knows the run ended and how.
+    $show-fh.say: ($tag ?? "$tag " !! '') ~ $exit-line if $show-fh;
     ($code, $verdict)
 }
 
@@ -227,6 +238,7 @@ sub MAIN(
     :@show-rx where { .elems == 0 || .elems == .grep(RegexInput) },
     Bool :$relay = False,
     Str  :$follow,
+    Str  :$show-file,
     :@t
  ) {
     @cmd or $follow or die "nothing to run: pass the command after --, or --follow=LOG\n";
@@ -244,6 +256,17 @@ sub MAIN(
         die "--follow takes no command\n" if @cmd;
         note "following: { $follow.IO.absolute }";
         exit follow-log($follow, :@pats, :$max);
+    }
+
+    # The progress digest: one handle for the whole invocation (every -t
+    # run writes its tagged markers into it), unbuffered so a follower sees
+    # each line as it lands.
+    my $show-fh;
+    if $show-file {
+        $show-fh = open $show-file, :w, :out-buffer(0);
+        die "cannot write --show-file '$show-file': { $show-fh.exception.message }\n"
+            if $show-fh ~~ Failure;
+        note "markers: { $show-file.IO.absolute }";
     }
     # A chain script runs each long step under its own watched-run; the
     # outer run relays those steps' markers (their leading [Ns]) without
@@ -270,7 +293,7 @@ sub MAIN(
             my $name = $file.trans('/.' => '__');
             my ($code, $verdict) =
                     run-one([|@cmd, $file], :log("$log-dir/$name.log"), :$stall, :$max,
-                            :@pats, :tag($file.IO.basename));
+                            :@pats, :tag($file.IO.basename), :$show-fh);
             note "{ $code == 0 ?? 'ok  ' !! 'FAIL' } $file (exit $code, $verdict)";
             $file => ($code, $verdict)
         };
@@ -296,7 +319,7 @@ sub MAIN(
         note "log: { $log.IO.absolute }";
         my $start = now;
         my ($code, $verdict) =
-                run-one(@cmd, :$log, :$stall, :$max, :@pats, :interruptible);
+                run-one(@cmd, :$log, :$stall, :$max, :@pats, :interruptible, :$show-fh);
         note "$verdict, exit $code, log: $log";
         exit $code;
     }
