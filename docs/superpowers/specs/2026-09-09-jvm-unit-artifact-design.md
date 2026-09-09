@@ -23,14 +23,16 @@ JVM class. This design replaces the unit; deletion (item 8) follows.
 |---|---|
 | sequencing | bilingual loader first: the class road keeps working while the artifact road is built; stage0 flips last, once a stage2 compiler can regenerate it |
 | container | a zip with fixed entry names (`unit.meta`, `unit.programs`, `unit.serialized.lz4`, `nested/<id>.*`), no class entries; the `.jar` extension and every jar consumer stay as they are |
-| milestone 1 | nqp stage2 as artifacts, t/nqp green through the eval server |
+| milestone 1 | nqp stage2 as artifacts, t/nqp green through the runner (the eval server is milestone 3's vehicle) |
 | approach | artifact-native unit; Compiler.nqp remains the driver for milestone 1 and the JAST tree is read as a record; a direct QAST walk and the JAST deletion are a later step |
 | language | Kotlin for everything new (user rule) |
 | framing | by byte, never by grapheme (the sidecar lesson) |
 
 ## 1. The artifact format
 
-A unit is a zip. Entries, by fixed name:
+A unit is a zip. Entries, by fixed name, and `unit.meta` is always the
+FIRST entry: an in-memory sniff reads only the first local file header to
+tell an artifact from a class-road jar (final review, 2026-09-09):
 
 - `unit.meta`: a binary record, little-endian, with a magic and a format
   version. Fields: the unit id (the sha1 or `--javaclass` name; the unit's
@@ -97,8 +99,11 @@ function and to its own `StaticCodeInfo`, so:
 The engine call target is parsed lazily on first entry, but
 `StaticCodeInfo` can materialize it on demand from the unit and program
 index, so the dispatchers' direct road opens at load time rather than after
-a first run through the stub. The continuation resume road keeps its
-resume handle through the same entry function.
+a first run through the stub. The continuation resume road does NOT go
+through the entry function: an engine program that suspends pushes the
+engine's own resume handle (`NqpCodeEngine.RESUME`) onto the save stack,
+so the block's `mhResume` is never invoked; `ProgramEntry`'s doc is the
+accurate description (final review, 2026-09-09).
 
 ### Deserialize, load and main are ordinary programs
 
@@ -111,10 +116,13 @@ are declaration blocks that the encoder takes like any other, and their
 qbids are recorded in the meta as the deserialize, load and entry ids. The
 loader invokes them through the entry function. Nothing about
 deserialization is reimplemented in Kotlin. The `deserialize` op reads the
-blob from the unit object instead of a class resource. Ops those blocks use
-that lack an encoding today (`createsc`, `scsetdesc`, `deserialize`,
-`jvm-claim-nested`, `jvm-finish-nested`, `setcodeobj`, `setup_blv`) get
-one; `setup_blv` reads the meta table rather than a string program.
+blob from the unit object instead of a class resource. The ops those blocks use (`createsc`, `scsetdesc`, `deserialize`,
+`jvm-claim-nested`, `jvm-finish-nested`, `setcodeobj`) turned out to need
+no new encoding: the encoder's generic classlib road covers them; the one
+addition the build forced was `QAST::VM` nodes (the `jvm` alternative, as
+`as_jast` takes it). `setup_blv` is not emitted on the artifact road; its
+rows go to the meta table, built right after the deserialize wrapper
+compiles (after `nqp::serialize`).
 
 ### The loader
 
@@ -150,13 +158,19 @@ reads the tree as a record and writes the zip. It reads:
 Instruction lists are ignored. The wrapper blocks are emitted as
 declaration blocks on this road.
 
-Eligibility: a unit takes the artifact road when the knob (`NQP_UNIT=1`
-during the bilingual period) is on and every block encoded, tracked by a
-counter at Compiler.nqp's fallback junction. A unit with any fallback body
-takes the class road unchanged, so Rakudo keeps building on class files
-while nqp flips. Under `NQP_CODE_STRICT` a fallback is a compile error. The
-road taken is reported by the existing env-gated census verdict line,
-which gains one verdict, `artifact`.
+Eligibility: the knob (`NQP_UNIT=1` during the bilingual period) is
+all-or-nothing. With it on, a jar-bound comp-mode unit is written as an
+artifact, and a block that would fall back to bytecode is a compile error
+at Compiler.nqp's fallback junction, naming the block and cuid and
+pointing at `NQP_CODE_BAIL`/`NQP_CODE_WHY` for the reason (the same rule
+`NQP_CODE_STRICT` applies). The class road is chosen by leaving the knob
+off, which is how Rakudo builds in milestone 1. There is no per-unit
+fallback from the artifact road to the class road: the road is decided
+before the unit's blocks compile, and a class file produced after the
+artifact-road decisions (no sidecar string, no `setup_blv`) would be a
+silently broken jar (review finding, 2026-09-09). The road taken is
+reported by the existing env-gated census verdict line, which gains one
+verdict, `artifact`.
 
 A BEGIN-time nested unit compiled while its parent compiles is held in
 memory as a record (meta plus programs) and written under `nested/` in the
@@ -188,10 +202,12 @@ the writer. stage2 (built by the stage1 compiler with the knob on) is all
 ten targets as artifacts. The runner generation task emits the new main
 class.
 
-Backtraces: attribution for artifact blocks comes from the block record's
-source fields and the engine root nodes' source sections; the Java-stack
-correlation in `ExceptionHandling.backtrace` stays as the class road's
-mechanism until that road is gone.
+Backtraces: NOT delivered by milestone 1, on either road (final review,
+2026-09-09): an engine-bodied block prints `in <name> (<file>)` with no
+line on the class road too, and the Java-stack correlation in
+`ExceptionHandling.backtrace` never fires for a `ProgramUnit`. The block
+record carries `sourceFile`/`sourceLine`; a fallback to the block's start
+line when no Java frame correlates would improve both roads. Open item.
 
 Identity: the unit id string replaces the Class object in the eval server's
 shared map, load dedupe, and debug and stats keys.
@@ -236,12 +252,13 @@ Per-change gate (every change on the artifact road, through watched-run):
    `.class` entries (replaces the old sidecar count as the one-compile
    sanity check).
 2. `nqp-j-gradle -e` smoke through the new entry main.
-3. Full t/nqp through the eval server on the artifact units, against the
-   strict-green baseline (113/113 from the nqp directory). This needs an
-   eval-server harness for nqp's suite (the Rakudo sweep tool is
-   harness5-specific); that harness is a milestone-1 deliverable, and the
-   eval server must serve artifact units (section 4). Anything below the
-   baseline is a runtime regression to triage the way the campaign did.
+3. Full t/nqp on the artifact units through the runner (the campaign's
+   `watched-run.raku -t=nqp/t/nqp --jobs=3 -- nqp/nqp-j-gradle`), against
+   the strict-green baseline (113/113 from the nqp directory). Anything
+   below the baseline is a runtime regression to triage the way the
+   campaign did. The eval server is not a milestone-1 vehicle (user,
+   2026-09-09): it serves artifact units from milestone 3 on, where
+   Rakudo's harness already drives it.
 
 Post-completion gate (once, on the whole green milestone-1 changeset, not
 per change): Rakudo `make` on that nqp and `t/01-sanity` 25/25, proving
@@ -257,7 +274,9 @@ and the t/nqp sweep are recorded as the new baseline (forward only).
    string-constant road, its size gate, and `ByteClassLoader`'s define
    road go.
 3. Rakudo units as artifacts, after custom_args bodies and exit-handler
-   blocks encode (item 7's last two shapes).
+   blocks encode (item 7's last two shapes); the eval server serves
+   artifact units and the suites (t/nqp, t/01-sanity, t/spec) run through
+   it here.
 4. stage0 regenerated as artifacts; the class road, jast2bc, JAST, the
    class loaders, the indy budget and the class-file build plumbing
    deleted (item 8), with the direct QAST walk replacing Compiler.nqp as
