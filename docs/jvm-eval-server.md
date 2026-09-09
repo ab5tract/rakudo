@@ -52,11 +52,12 @@ per-server ceiling reaches the launcher through `RAKUDO_EVALSERVER_HEAP`
 (default 8g).
 
 Usage: directories are expanded to their `.t` and `.rakutest` files,
-files are taken as given, and every run needs the engine-build
-environment exported (the script exports `RAKUDO_RAKUAST=1` itself;
-`NQP_CODE_RUN`/`NQP_CODE_PRECOMP` come from the caller):
+files are taken as given. Since milestone 3 of the unit artifact
+(2026-09-09) the encoder and the unit road are on by default; nothing
+needs exporting beyond `RAKUDO_RAKUAST=1`, which the script exports
+itself. `NQP_UNIT=0`, `NQP_CODE_RUN=0`, `NQP_CODE_PRECOMP=0` opt out.
 
-    RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 \
+    RAKUDO_RAKUAST=1 \
         raku tools/build/evalserver-sweep.raku t/01-sanity t/02-rakudo/some.t
 
     --heap=N      GB of heap per server (default 6, less on a tight box)

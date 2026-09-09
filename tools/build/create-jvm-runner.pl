@@ -51,6 +51,11 @@ my $rakudo_jars = join( $cpsep,
     File::Spec->catfile($jardir, 'rakudo-runtime.jar'),
     File::Spec->catfile($jardir, $debugger ? 'rakudo-debug.jar' : 'rakudo.jar'));
 
+# The app unit: a unit artifact since milestone 3 (no generated main class),
+# entered through the runtime's UnitMain with the unit path as first argument.
+my $app  = File::Spec->catfile($jardir, $debugger ? 'rakudo-debug.jar' : 'rakudo.jar');
+my $main = "org.raku.nqp.runtime.unit.UnitMain $app";
+
 my $NQP_LIB = $type eq 'install' ? '' : ': ${NQP_LIB:="blib"}';
 
 my $preamble_unix = <<'EOS';
@@ -230,14 +235,14 @@ my $userjvm = $^O eq 'MSWin32' ? ''
             : ' -Xmx${RAKUDO_JVM_HEAP:=4g} ${RAKUDO_JVM_XOPTS}';
 
 if ($debugger) {
-    install "rakudo-debug-j", "java $jopts rakudo-debug";
-    install "perl6-debug-j", "java $jopts rakudo-debug";
+    install "rakudo-debug-j", "java $jopts $main";
+    install "perl6-debug-j", "java $jopts $main";
 }
 else {
-    install "rakudo-j", "java$userjvm $jopts perl6";
-    install "perl6-j", "java$userjvm $jopts perl6";
-    install "rakudo-jdb-server", "java $jdbopts $jopts perl6";
-    install "perl6-jdb-server", "java $jdbopts $jopts perl6";
+    install "rakudo-j", "java$userjvm $jopts $main";
+    install "perl6-j", "java$userjvm $jopts $main";
+    install "rakudo-jdb-server", "java $jdbopts $jopts $main";
+    install "perl6-jdb-server", "java $jdbopts $jopts $main";
     # The server keeps one JVM for many runs, and each run builds a whole
     # GlobalContext with its own copy of the setting. Several of those are live
     # at once before the collector catches up, so 3000m runs out after a
