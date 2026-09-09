@@ -588,7 +588,7 @@ From the rakudo worktree root, as a background job:
 NQP_UNIT=1 RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 NQP_CODE_STRICT=1 raku tools/build/watched-run.raku --log=/home/longwalker/.claude/jobs/3420e344/tmp/build-task2.log --show='> Task :stage' --show='BUILD' --show='rror' -- ./nqp/gradlew -p nqp clean buildJvm
 ```
 
-Expected: `=== EXIT=0 verdict=ok elapsed=<about 300>s ===`. Then every stage2 jar is an artifact: for `nqp/build/jvm/share/lib/*.jar`, `unzip -l <jar> | grep -c unit.meta` is 1 and `unzip -l <jar> | grep -c '\.class'` is 0 (12 jars; write the loop as plain separate commands or a Raku one-liner, the worktree guard refuses shell loops over computed names). If the build fails inside a stage, read the log's first `rror` context: a die from Step 1's knob check means the gradle stage task lacks one of the three env vars; an "unknown tag" in a t/nqp file after the build means a splice_code site got the wrong `$at`.
+Expected: `=== EXIT=0 verdict=ok elapsed=<about 300>s ===`. Then every stage2 jar is an artifact: for `nqp/build/jvm/share/lib/*.jar`, `unzip -l <jar> | grep -c unit.meta` is 1 and `unzip -l <jar> | grep -c '\.class'` is 0 (11 jars; write the loop as plain separate commands or a Raku one-liner, the worktree guard refuses shell loops over computed names). If the build fails inside a stage, read the log's first `rror` context: a die from Step 1's knob check means the gradle stage task lacks one of the three env vars; an "unknown tag" in a t/nqp file after the build means a splice_code site got the wrong `$at`.
 
 - [ ] **Step 7: Smoke the record road**
 
@@ -600,7 +600,7 @@ NQP_UNIT=1 RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 NQP_CODE_WHY=1 ./n
 Expected: one `unit record <sha1> (...)` line and `42`.
 
 ```
-NQP_UNIT=1 RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 ./nqp/nqp-j-gradle -e 'say(nqp::getcomp("nqp").eval("my $y := 5; $y * 3"))'
+NQP_UNIT=1 RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 ./nqp/nqp-j-gradle -e "say(nqp::getcomp('nqp').eval('my \$y := 5; \$y * 3'))"
 ```
 Expected: `15`.
 
@@ -768,7 +768,7 @@ Claude-Session: https://claude.ai/code/session_011k7PcwZi8KjqW3yLn4GNvi"
 
 - [ ] **Step 1: Confirm the artifacts of the standing build**
 
-For each of the 12 jars in `nqp/build/jvm/share/lib/`: `unzip -l nqp/build/jvm/share/lib/nqp.jar | grep -c unit.meta` is 1 and `... | grep -c '\.class'` is 0 (repeat per jar as plain commands, or `raku -e 'for dir("nqp/build/jvm/share/lib", test => /\.jar$/) { say .basename, " ", run(<unzip -l>, $_, :out).out.slurp.lines.grep(/unit\.meta/).elems, " ", run(<unzip -l>, $_, :out).out.slurp.lines.grep(/"." class/).elems }'`).
+For each of the 11 jars in `nqp/build/jvm/share/lib/`: `unzip -l nqp/build/jvm/share/lib/nqp.jar | grep -c unit.meta` is 1 and `... | grep -c '\.class'` is 0 (repeat per jar as plain commands, or `raku -e 'for dir("nqp/build/jvm/share/lib", test => /\.jar$/) { say .basename, " ", run(<unzip -l>, $_, :out).out.slurp.lines.grep(/unit\.meta/).elems, " ", run(<unzip -l>, $_, :out).out.slurp.lines.grep(/"." class/).elems }'`).
 
 - [ ] **Step 2: t/nqp on the record road (the milestone's coverage)**
 
