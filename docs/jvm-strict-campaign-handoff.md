@@ -181,19 +181,84 @@ CompilationUnit + unit artifact without a class file) come BEFORE the
 rest of the strict work.** Design in progress; see
 docs/superpowers/specs/ when written.
 
+## The Rakudo-side census (2026-09-09, morning)
+
+Every unit the Makefile compiles, replayed from its recipe into a scratch
+dir with `NQP_CODE_REPORT=1 NQP_CODE_BAIL=1 NQP_CODE_WHY=1` (the driver:
+`make -n -B j-all`, one `--output` per unit, blib untouched). NQP_CODE_WHY
+is the honest knob: it prints EVERY verdict, including the silent
+fallbacks the bail knob and strict mode never saw (exit handler, raw and
+immediate blocktype, the size gate). Results:
+
+| unit | verdicts | real bails | other non-encoded |
+|---|---|---|---|
+| Pod, ModuleLoader, Ops, SysConfig, Metamodel, Compiler, Actions, Grammar, rakudo.nqp | 4,000 | 0 | wrappers only |
+| Optimizer | 238 | 1 (`p6trialbind`) | wrappers |
+| BOOTSTRAP v6c | 9,330 | 9 (`p6trialbind` 6, `p6setbinder` 3) | 12 size gate, wrappers |
+| CORE.c | 23,777 | **0** | 14 exit handler, 1 size gate, 1195 orphaned immediates, wrappers |
+| CORE.d / CORE.e | 770 | 0 | wrappers |
+
+"Wrappers" = the class-file scaffolding Compiler.nqp adds per unit (a raw
+deserialize/load/main block, their immediate children) and the same for
+every runtime compile during BEGIN (comp_mode 0). That is plan item 5-6
+territory (the unit artifact), not coverage.
+
+What the census could NOT count: **custom_args blocks**. Compiler.nqp
+bypassed the encoder for them without a verdict. A custom_args block is a
+Raku routine whose signature needs the full runtime Binder (sub-
+signature, generic or coercive parameter, capture slurpy, role
+parametric signature): RakuAST emits no lowered parameters, only the
+prologue `if p6bindwillresume { assertparamcheck(p6trybindsig) } else
+{ p6bindsig }`. Dispatch to such a routine is on the Truffle dispatch
+programs like any other; its BODY ran as bytecode. The 1195 orphaned
+immediates in CORE.c (immediate blocks whose parent never encoded, so
+they could not be inlined) are those routines' loop and conditional
+bodies, so the count is in the hundreds at least.
+
+Fixed in this pass (nqp `b6f9e033b` + the custom_args commit, rakudo
+`4427bb935e`):
+
+- `p6trialbind`/`p6setbinder`: `register_op_desugar` in src/vm/jvm/Raku/
+  Ops.nqp (a call of the module's proto), so the encoder reaches them.
+- The size gate is the string road's alone: a jar-bound unit ships
+  programs in the LZ4 sidecar by index (Compiler.nqp passes `:sidecar`).
+- **custom_args on the engine**: wire ops P6BINDSIG 33 (a statement:
+  bind, or return from the program when the binder auto-threaded -- the
+  autothreader already stored the result on the caller and the direct
+  road ignores a framed program's value) and P6TRYBINDSIG 34 (1/0 for the
+  assertparamcheck around it). Both frame-forcing; NqpOps reaches
+  RakOps.p6bindsig/p6trybindsig through the same reflective handles as
+  p6argvmarray and puts the flattened csd/args back on the frame.
+  patch_params emits an empty header (required 0, accepted -1, no
+  params) for a custom_args block: the arity check still runs because it
+  is what stores csd/args on the frame for the binder. Compiler.nqp no
+  longer bypasses the encoder; `TruffleEncoder.why` is a class method so
+  a bypass verdict could be printed from there (kept for the census).
+
+**The CORE.c parse regression (206 s -> 370-389 s) is accepted as
+compile-time cost** (user priority 2026-09-07: runtime over compile
+time). The mechanism is known -- ~374 newly encoded compiler blocks run
+as engine programs, interpreted until the JIT takes them -- and it is
+plan item 4 (tier policy for run-once compiler code), not a coverage
+bug. Warm t/01-sanity sweeps show per-chunk parity, so nothing at runtime
+got slower.
+
 ## The exact next step
 
-1. **t/nqp on `c131b8933`** (rerun: `raku tools/build/watched-run.raku
-   -t=nqp/t/nqp --jobs=3 -- nqp/nqp-j-gradle` with `NQP_JVM_MAXHEAP=2g`).
-   Anything beyond 019/063 is a regression to triage as above.
-2. **Rakudo build on the new nqp**: `perl Configure.pl --backends=jvm
-   --gen-nqp`, then `raku tools/build/watched-run.raku --log=build.log
-   --show='Compiling|Generating' -- make` (the Makefile exports the
-   knobs), then `t/01-sanity` as the gate. Rakudo's own compile (CORE.c
-   etc.) will hit refusals of its own; run it WITHOUT strict first, then
-   census with `NQP_CODE_BAIL=1` on a controlled `--output` compile.
-3. Then `jast2bc`'s bytecode FALLBACK is deletable for nqp (plan items 5-6
-   in `docs/jvm-truffle-only-plan.md`).
+1. **Rakudo `make` on the custom_args nqp** (strict nqp build was green
+   before the custom_args commit; rerun it after), then `t/01-sanity`.
+   Expect the first failures in routines with full-binder signatures:
+   coercive params (`Int() $x`), sub-signatures, `|c` captures. A bind
+   failure that used to resume through the bytecode prologue now goes
+   through the engine's assertparamcheck.
+2. **Rerun the census** (`$CLAUDE_JOB_DIR/tmp/census/census.sh` of the
+   2026-09-09 job, or rebuild it from `make -n -B j-all`): the custom_args
+   verdict line makes the CORE.c count exact; the 14 exit-handler
+   routines (LEAVE-phaser bodies: protect, spurt, slurp-rest, unlock,
+   compile-rakuast-comp-unit, run-with-updated-recursion-list) are the
+   last real coverage item on the Raku side.
+3. Then the bytecode FALLBACK (compile_all_the_stmts for a refused block)
+   is deletable; the wrapper shells wait for plan items 5-6.
 4. Open task: name anonymous blocks in backtraces (`<anon>` → at least
    `anon_N`, via RakuAST/QAST block naming).
 
