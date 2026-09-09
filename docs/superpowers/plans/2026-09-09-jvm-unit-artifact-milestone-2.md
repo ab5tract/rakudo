@@ -651,7 +651,10 @@ Model: `nqp/t/nqp/123-unit-artifact.t` (child processes because the road is chos
 # built in memory as a ProgramUnit, no class defined. A sub, a closure
 # over the mainline, a handler, a regex, and two runtime EVALs (records
 # themselves) must run; NQP_CODE_WHY must show the road was taken; the
-# knob must refuse to run without the encoder switches.
+# knob must refuse to run without the encoder switches. Two separate runs
+# do the output and marker checks: NQP_CODE_WHY also prints the encoder's
+# per-block trace on stdout, so the marker run cannot double as the
+# output run.
 
 plan(11);
 
@@ -703,7 +706,7 @@ else {
         run-command(nqp::list('/bin/sh', '-c', $command), :stdout, :stderr)
     }
 
-    my @ran := sh("NQP_UNIT=1 NQP_CODE_WHY=1 $runner $script");
+    my @ran := sh("NQP_UNIT=1 $runner $script");
     my @out := nqp::split("\n", @ran[1]);
     unless nqp::elems(@out) >= 7 {
         say('# ' ~ @ran[1]);
@@ -718,13 +721,16 @@ else {
     is(@out[6] // '', '42',            'a class (a static lexical value) from a record unit resolves');
 
     # The positive marker: NQP_CODE_WHY names each record as loadcompunit
-    # builds it -- the script and its two EVALs.
+    # builds it -- the script and its two EVALs. A separate run: NQP_CODE_WHY
+    # also prints the encoder's per-block trace on stdout, which would
+    # clobber the positional @out checks above.
+    my @why := sh("NQP_UNIT=1 NQP_CODE_WHY=1 $runner $script");
     my int $records := 0;
-    for nqp::split("\n", @ran[2]) {
+    for nqp::split("\n", @why[2]) {
         $records := $records + 1 if nqp::index($_, 'unit record ') == 0;
     }
     ok($records >= 3, 'the script and both EVALs went down the record road (' ~ $records ~ ' records)');
-    ok(nqp::index(@ran[2], '.class') < 0 && nqp::index(@ran[2], 'defineClass') < 0,
+    ok(nqp::index(@why[2], '.class') < 0 && nqp::index(@why[2], 'defineClass') < 0,
         'nothing on stderr mentions a class');
 
     my @knob := sh("env -u NQP_CODE_RUN NQP_UNIT=1 $runner -e 'say(1)'");
