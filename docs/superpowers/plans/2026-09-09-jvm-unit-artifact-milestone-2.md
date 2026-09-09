@@ -780,11 +780,9 @@ NQP_UNIT=1 RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 raku tools/build/w
 
 Expected: the SUMMARY shows 113 of 115 passing from the rakudo root (019-file-ops and 063-slurp are cwd-relative, milestone-1 baseline), then those two from the nqp directory: `cd .../nqp && NQP_UNIT=1 RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 ./nqp-j-gradle t/nqp/019-file-ops.t` and `063-slurp.t`, both all-ok. Anything else failing is a record-road regression: rerun the file alone with `NQP_CODE_WHY=1`, and compare against the knob-off run of the same file; triage the way the campaign did (the block named in the die, `NQP_CODE_BAIL=1` for the reason).
 
-- [ ] **Step 3: t/nqp on the class road (the regression check)**
+The sweep's elapsed time against milestone 1's 487 s (class-road test compiles on the same artifact stage2 jars) is the record road's compile-cost reading; no separate knob-off sweep (user, 2026-09-09: the Rakudo gate below already covers the class road).
 
-Same command without `NQP_UNIT=1`, log `sweep-class.log`. Expected: the same 113 + 2. This is not an A/B build: it is the same build, run the way Rakudo's harness runs it.
-
-- [ ] **Step 4: Rakudo post-completion gate (class road) and the record-road probes**
+- [ ] **Step 3: Rakudo post-completion gate (class road) and the record-road probes**
 
 Rakudo's units compile through the changed Compiler.nqp and Backend.nqp, so its build is the gate that the class road is untouched. From the rakudo worktree root, background jobs, one after the other:
 
@@ -810,9 +808,9 @@ unzip -l /home/longwalker/.claude/jobs/3420e344/tmp/probe/BeginMod.jar
 ```
 Expected if it gets that far: a `unit record` line for the BEGIN block, a `unit artifact ... 1 nested` line, and the listing shows `unit.meta`, `unit.programs`, `unit.serialized.lz4`, `nested/<id>.meta`, `nested/<id>.programs`, no `.class`. Loading it back through `use` needs the precomp store and is milestone 3's business; stop at the listing.
 
-- [ ] **Step 5: Record timings**
+- [ ] **Step 4: Record timings**
 
-Note in the report: Task 2 build elapsed, both sweep elapsed values, make elapsed, sanity elapsed. These are the next baseline (forward only).
+Note in the report: Task 2 build elapsed, the sweep elapsed (against 487 s), make elapsed, sanity elapsed. These are the next baseline (forward only).
 
 ---
 
