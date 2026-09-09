@@ -651,14 +651,13 @@ Model: `nqp/t/nqp/123-unit-artifact.t` (child processes because the road is chos
 # built in memory as a ProgramUnit, no class defined. A sub, a closure
 # over the mainline, a handler, a regex, and two runtime EVALs (records
 # themselves) must run; NQP_CODE_WHY must show the road was taken; the
-# knob must refuse to run without the encoder switches; --target=jar with
-# no --output must take the road rather than die.
+# knob must refuse to run without the encoder switches.
 
-plan(12);
+plan(11);
 
 my $is-windows := nqp::backendconfig()<osname> eq 'MSWin32';
 if nqp::getcomp('nqp').backend.name ne 'jvm' || $is-windows {
-    skip('the unit record road is JVM-only and driven through /bin/sh', 12);
+    skip('the unit record road is JVM-only and driven through /bin/sh', 11);
 }
 else {
     my $dir := nqp::cwd() ~ '/t/nqp/124-unit-record.tmp';
@@ -733,21 +732,17 @@ else {
         'the road refuses to run without the encoder switches, once');
     ok(nqp::index(@knob[1], '1') < 0, 'and runs nothing');
 
-    my @jar := sh("NQP_UNIT=1 $runner --target=jar $script");
-    ok(nqp::index(@jar[2], 'rror') < 0 && nqp::index(@jar[2], 'nqpp:') < 0,
-        '--target=jar without --output takes the record road without complaint');
-
     nqp::unlink($script) if nqp::stat($script, nqp::const::STAT_EXISTS);
     nqp::rmdir($dir) if nqp::stat($dir, nqp::const::STAT_EXISTS);
 }
 ```
 
-Note on the `--target=jar` case: `run-command` returns `[exit, stdout, stderr]`; a die would put its text on stderr. If `run-command`'s exit status is exposed as `@jar[0]`, prefer `ok(@jar[0] == 0, ...)`; check `nqp/src/core/testing.nqp` for the shape and use the stronger form when it is there.
+Note: the `--target=jar`-without-`--output` case is not tested here. It takes the record road (Task 2's routing, verified by review), but with no output the stage loop stops at `jar` and `HLL::Compiler` dumps the result, which dies in `dumper` on an uninitialized `st` on either road (pre-existing, Task 2 review 2026-09-09); nothing observable distinguishes the roads from a child process.
 
 - [ ] **Step 2: Run it**
 
 From the rakudo worktree root: `RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 ./nqp/nqp-j-gradle nqp/t/nqp/124-unit-record.t`
-Expected: `1..12`, twelve `ok`. A `not ok` on the record count means the marker line changed or `NQP_CODE_WHY` did not reach the child; on the knob test it means Task 2 Step 1's message text differs.
+Expected: `1..11`, eleven `ok`. A `not ok` on the record count means the marker line changed or `NQP_CODE_WHY` did not reach the child; on the knob test it means Task 2 Step 1's message text differs.
 
 Also run it from the nqp directory as the suite does: `cd /home/longwalker/code/raku/x.core/rakudo/.claude/worktrees/jesp-direct-lazy-records/nqp && RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 ./nqp-j-gradle t/nqp/124-unit-record.t` -- expected the same.
 
