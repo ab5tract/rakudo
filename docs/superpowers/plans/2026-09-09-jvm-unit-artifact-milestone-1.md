@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** nqp's stage2 jars become zip artifacts holding engine programs, the serialized context and a block table, with no class file, loaded by a reflection-free `ProgramUnit`, and t/nqp stays green through the eval server.
+**Goal:** nqp's stage2 jars become zip artifacts holding engine programs, the serialized context and a block table, with no class file, loaded by a reflection-free `ProgramUnit`, and t/nqp stays green through the runner. (The eval server is milestone 3's vehicle, user decision 2026-09-09; Task 4's road-agnostic app load keeps it working, nothing more.)
 
 **Architecture:** A Kotlin `UnitFormat`/`UnitZip` pair defines the artifact; `ProgramUnit` (a `CompilationUnit` subclass) builds its code-ref table from the block table and enters every block through one shared Kotlin entry function; `LibraryLoader` picks the artifact road whenever a jar carries `unit.meta`, the class road otherwise (the bilingual switch). On the compiler side Compiler.nqp stays the driver: under `NQP_UNIT=1` it records the per-block fields it already has on the JAST record, and `HLL::Backend::JVM` hands that record to a Kotlin `UnitWriter` through a syscall instead of the bytecode assembler.
 
@@ -1731,15 +1731,14 @@ EOF
 
 ---
 
-### Task 8: Runners and an eval server for nqp's suite
+### Task 8: Runners enter through UnitMain
 
 **Files:**
-- Modify: `nqp/buildSrc/src/main/kotlin/GenerateRunnerTask.kt:140` (main class), add a second output
+- Modify: `nqp/buildSrc/src/main/kotlin/GenerateRunnerTask.kt:140` (main class)
 - Modify: `nqp/tools/templates/jvm/nqp-j.in` (last line)
-- Modify: `nqp/build.gradle.kts:308-316` (`generateRunner` wiring)
 
 **Interfaces:**
-- Produces: `nqp/nqp-j-gradle` entering through `org.raku.nqp.runtime.unit.UnitMain "$LIB_DIR/nqp.jar"`; `nqp/nqp-eval-server-gradle <token-file>` starting `org.raku.nqp.tools.EvalServer -cookie <token-file> -app "$LIB_DIR/nqp.jar"` with the runner's java prefix.
+- Produces: `nqp/nqp-j-gradle` entering through `org.raku.nqp.runtime.unit.UnitMain "$LIB_DIR/nqp.jar"`.
 
 - [ ] **Step 1: The runner's main class**
 
@@ -1747,35 +1746,16 @@ In `GenerateRunnerTask.kt` line 140 change the tail of the exec line from `-cp "
 
 In `tools/templates/jvm/nqp-j.in`, the last line: replace `-cp "@cur_dir@@envvar(LIB_DIR)@" nqp "@sh_allparams@"` with `-cp "@cur_dir@@envvar(LIB_DIR)@" org.raku.nqp.runtime.unit.UnitMain "@cur_dir@@envvar(LIB_DIR)@/nqp.jar" "@sh_allparams@"`.
 
-- [ ] **Step 2: The eval-server runner**
-
-In `GenerateRunnerTask.kt` add an optional output property `evalServerOutput` (same type as `output`) and, when set, write a second script whose content is the runner's content with its final exec line replaced by:
-
-```
-exec java -Dnqp.execname="$EXEC" --enable-native-access=ALL-UNNAMED${TRUFFLE_NATIVE} --sun-misc-unsafe-memory-access=allow -Xmx"${NQP_JVM_MAXHEAP:-4g}" -Xss64m -XX:+AllowParallelDefineClass $TRUFFLE -Xbootclasspath/a:"<same boot entries>" -cp "$CP" org.raku.nqp.tools.EvalServer -cookie "$1" -app "${LIB_DIR}/nqp.jar"
-```
-
-built with the same `bootEntries` join the task already computes (keep the two exec lines generated from one shared prefix string so they cannot drift). In `build.gradle.kts`'s `generateRunner` registration add `evalServerOutput = layout.projectDirectory.file("nqp-eval-server-gradle")`.
-
-- [ ] **Step 3: Regenerate and smoke**
+- [ ] **Step 2: Regenerate and smoke**
 
 Run: `./nqp/gradlew -p nqp generateRunner 2>&1 | tail -3`, then `RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 ./nqp/nqp-j-gradle -e 'say(nqp::x("ab", 3))'`
-Expected: `ababab`. Then the eval server, from the rakudo worktree root:
+Expected: `ababab`.
+
+- [ ] **Step 3: Commit (nqp tree)**
 
 ```bash
-rm -f /home/longwalker/.claude/jobs/b945970f/tmp/nqp-token; NQP_JVM_MAXHEAP=2g RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 ./nqp/nqp-eval-server-gradle /home/longwalker/.claude/jobs/b945970f/tmp/nqp-token &
-until test -s /home/longwalker/.claude/jobs/b945970f/tmp/nqp-token; do sleep 1; done
-raku tools/build/eval-client.raku /home/longwalker/.claude/jobs/b945970f/tmp/nqp-token run -e 'say(2**10)'
-raku tools/build/eval-client.raku /home/longwalker/.claude/jobs/b945970f/tmp/nqp-token exit
-```
-
-Expected: `1024`. (`eval-client.raku` is rakudo's; the protocol is the server's, not Rakudo's.)
-
-- [ ] **Step 4: Commit (nqp tree)**
-
-```bash
-cd /home/longwalker/code/raku/x.core/rakudo/.claude/worktrees/jesp-direct-lazy-records/nqp && git add buildSrc/src/main/kotlin/GenerateRunnerTask.kt tools/templates/jvm/nqp-j.in build.gradle.kts && git commit -F - <<'EOF'
-runners enter through UnitMain (either road); nqp-eval-server-gradle for the suite
+cd /home/longwalker/code/raku/x.core/rakudo/.claude/worktrees/jesp-direct-lazy-records/nqp && git add buildSrc/src/main/kotlin/GenerateRunnerTask.kt tools/templates/jvm/nqp-j.in && git commit -F - <<'EOF'
+runners enter through UnitMain (either road)
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01YRn8gLyZjirBAKS6urb3n4
@@ -1808,23 +1788,23 @@ Expected: every line `meta=1 class=0` (NQPP5QRegex.jar included, it is compiled 
 `RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 ./nqp/nqp-j-gradle -e 'say("artifact ok")'`
 Expected: `artifact ok`.
 
-- [ ] **Step 3: Full t/nqp on the eval server**
+- [ ] **Step 3: Full t/nqp through the runner**
 
-Start the server as in Task 8 step 3 (token file in the job tmp dir, `NQP_JVM_MAXHEAP=2g`), then from the rakudo worktree root, with the eval client as the test executable:
+From the rakudo worktree root, the campaign's own command:
 
 ```bash
-raku tools/build/watched-run.raku --log=/home/longwalker/.claude/jobs/b945970f/tmp/tnqp-gate.log -t=nqp/t/nqp --jobs=1 -- raku tools/build/eval-client.raku /home/longwalker/.claude/jobs/b945970f/tmp/nqp-token run
+NQP_JVM_MAXHEAP=2g RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 raku tools/build/watched-run.raku --log=/home/longwalker/.claude/jobs/b945970f/tmp/tnqp-gate.log -t=nqp/t/nqp --jobs=3 -- nqp/nqp-j-gradle
 ```
 
-Expected: 113 files pass (019-file-ops and 063-slurp are cwd-relative: start the server from the `nqp/` directory, or accept those two as the known baseline from the campaign). Anything else failing is a runtime regression: triage with `NQP_CODE_WHY=1`/`NQP_CODE_TRACE=1` per the handoff doc's playbook, fix, rebuild (one compile per change), rerun. Stop the server with `eval-client.raku <token> exit`.
+Expected: 113 files pass (019-file-ops and 063-slurp are cwd-relative and pass only from the `nqp/` directory; 111/113 from the root is the campaign's baseline). Anything else failing is a runtime regression: triage with `NQP_CODE_WHY=1`/`NQP_CODE_TRACE=1` per the handoff doc's playbook, fix, rebuild (one compile per change), rerun.
 
 - [ ] **Step 4: Record**
 
-In `docs/jvm-truffle-only-plan.md`'s Position table, rows 5 and 6 become `milestone 1 DONE <date>: nqp stage2 as artifacts (nqp <hash>), t/nqp <n>/113 on the eval server; build <s> s, suite <s> s`. Append the same line under "Where we are" in `docs/jvm-strict-campaign-handoff.md`. Commit in the rakudo tree:
+In `docs/jvm-truffle-only-plan.md`'s Position table, rows 5 and 6 become `milestone 1 DONE <date>: nqp stage2 as artifacts (nqp <hash>), t/nqp <n>/113 through the runner; build <s> s, suite <s> s`. Append the same line under "Where we are" in `docs/jvm-strict-campaign-handoff.md`. Commit in the rakudo tree:
 
 ```bash
 git add docs/jvm-truffle-only-plan.md docs/jvm-strict-campaign-handoff.md && git commit -F - <<'EOF'
-docs: unit artifact milestone 1 landed (nqp stage2 as artifacts, t/nqp on the eval server)
+docs: unit artifact milestone 1 landed (nqp stage2 as artifacts, t/nqp through the runner)
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01YRn8gLyZjirBAKS6urb3n4

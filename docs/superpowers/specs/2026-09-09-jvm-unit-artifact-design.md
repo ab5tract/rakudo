@@ -23,7 +23,7 @@ JVM class. This design replaces the unit; deletion (item 8) follows.
 |---|---|
 | sequencing | bilingual loader first: the class road keeps working while the artifact road is built; stage0 flips last, once a stage2 compiler can regenerate it |
 | container | a zip with fixed entry names (`unit.meta`, `unit.programs`, `unit.serialized.lz4`, `nested/<id>.*`), no class entries; the `.jar` extension and every jar consumer stay as they are |
-| milestone 1 | nqp stage2 as artifacts, t/nqp green through the eval server |
+| milestone 1 | nqp stage2 as artifacts, t/nqp green through the runner (the eval server is milestone 3's vehicle) |
 | approach | artifact-native unit; Compiler.nqp remains the driver for milestone 1 and the JAST tree is read as a record; a direct QAST walk and the JAST deletion are a later step |
 | language | Kotlin for everything new (user rule) |
 | framing | by byte, never by grapheme (the sidecar lesson) |
@@ -236,12 +236,13 @@ Per-change gate (every change on the artifact road, through watched-run):
    `.class` entries (replaces the old sidecar count as the one-compile
    sanity check).
 2. `nqp-j-gradle -e` smoke through the new entry main.
-3. Full t/nqp through the eval server on the artifact units, against the
-   strict-green baseline (113/113 from the nqp directory). This needs an
-   eval-server harness for nqp's suite (the Rakudo sweep tool is
-   harness5-specific); that harness is a milestone-1 deliverable, and the
-   eval server must serve artifact units (section 4). Anything below the
-   baseline is a runtime regression to triage the way the campaign did.
+3. Full t/nqp on the artifact units through the runner (the campaign's
+   `watched-run.raku -t=nqp/t/nqp --jobs=3 -- nqp/nqp-j-gradle`), against
+   the strict-green baseline (113/113 from the nqp directory). Anything
+   below the baseline is a runtime regression to triage the way the
+   campaign did. The eval server is not a milestone-1 vehicle (user,
+   2026-09-09): it serves artifact units from milestone 3 on, where
+   Rakudo's harness already drives it.
 
 Post-completion gate (once, on the whole green milestone-1 changeset, not
 per change): Rakudo `make` on that nqp and `t/01-sanity` 25/25, proving
@@ -257,7 +258,9 @@ and the t/nqp sweep are recorded as the new baseline (forward only).
    string-constant road, its size gate, and `ByteClassLoader`'s define
    road go.
 3. Rakudo units as artifacts, after custom_args bodies and exit-handler
-   blocks encode (item 7's last two shapes).
+   blocks encode (item 7's last two shapes); the eval server serves
+   artifact units and the suites (t/nqp, t/01-sanity, t/spec) run through
+   it here.
 4. stage0 regenerated as artifacts; the class road, jast2bc, JAST, the
    class loaders, the indy budget and the class-file build plumbing
    deleted (item 8), with the direct QAST walk replacing Compiler.nqp as
