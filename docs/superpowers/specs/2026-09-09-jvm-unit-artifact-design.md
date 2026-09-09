@@ -175,6 +175,12 @@ verdict, `artifact`.
 A BEGIN-time nested unit compiled while its parent compiles is held in
 memory as a record (meta plus programs) and written under `nested/` in the
 parent's zip, replacing the nested class bytes that ride in the parent jar.
+(Milestone 1's writer refused such a unit, runtime compiles being class
+files then; since milestone 2 the record is retained by `loadcompunit` in
+`GlobalContext.inMemoryUnitRecords` and the writer embeds it. Nothing in
+nqp's own sources produces one: an NQP `BEGIN`'s dynamic compile is
+re-pointed at the unit's own emission of the same cuids. Rakudo's BEGIN
+blocks do, and exercise this road from milestone 3.)
 
 Unchanged in milestone 1: `--target=jar`, `--javaclass`, the `.jar`
 extension, the `blib/` layout, the Makefile, the gradle stage tasks (bar
@@ -270,9 +276,15 @@ and the t/nqp sweep are recorded as the new baseline (forward only).
 1. nqp stage2 as artifacts; t/nqp green on the eval server; Rakudo still
    green on the class road (this spec).
 2. Runtime compiles in memory: scripts, EVAL, BEGIN-time units build a
-   `ProgramUnit` from the record with no class definition; the
-   string-constant road, its size gate, and `ByteClassLoader`'s define
-   road go.
+   `ProgramUnit` from the record with no class definition. DONE
+   2026-09-09 behind the knob (plan
+   `docs/superpowers/plans/2026-09-09-jvm-unit-artifact-milestone-2.md`):
+   under `NQP_UNIT` every unit takes the road; with the knob unset the
+   class road is untouched, because Rakudo builds and runs on it until
+   milestone 3. The deletions this line used to end with (the
+   string-constant road, its size gate, `ByteClassLoader`'s define
+   road, and with them the nested `.class` embedding) are milestone 3's
+   closing item, when Rakudo flips and the knob becomes the default.
 3. Rakudo units as artifacts, after custom_args bodies and exit-handler
    blocks encode (item 7's last two shapes); the eval server serves
    artifact units and the suites (t/nqp, t/01-sanity, t/spec) run through
