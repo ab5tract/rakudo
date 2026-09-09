@@ -16,6 +16,42 @@ compile at all. Baseline at the directive: CORE.c parse 270.5 s
 standalone, `+` loop 82 ns, cold `t/01-sanity` 139 s at 4 jobs, warm
 67-81 s.
 
+## Position (2026-09-09)
+
+Where each item stands as the strict campaign pauses and the work
+refocuses on 5 and 6 (user decision, 2026-09-09):
+
+| item | state |
+|---|---|
+| 1 plain call | partial, paused: sited sink and frame-free outer reads landed; the per-call `Object[]` and the mainline OSR shape open |
+| 2 language id | partial, paused: HLL-simplification slice 1 landed (hllize off `%hll_ops`); slice 2 (hllbool, box types, hlllist/hllhash) open; diamond 7 re-validation deferred behind it |
+| 3 calling convention | partial, paused: frame-free blocks (phase A) landed knob-gated, `NQP_CODE_NOFRAME` off (it breaks the CORE.d compile); dispatch blocks deferred |
+| 4 compiler workload | not started; the CORE.c parse regression (206 -> 389 s) lives here and is accepted as compile-time cost |
+| **5 reflection-free unit** | **starting now** (design in progress) |
+| **6 unit artifact, no class file** | **starting now**, with 5; bilingual loader first, stage0 flips last; milestone 1 = nqp stage2 as artifacts with t/nqp green |
+| 7 encoder takes the refused shapes | nqp DONE (strict-green, nqp `ca71c19cb`); Rakudo census 2026-09-09: 10 op refusals (p6trialbind/p6setbinder, fixed, unbuilt), CORE.c 0; two shapes left: `custom_args` routine bodies (IN PROGRESS in the campaign session as of 2026-09-09 10:40, uncommitted in the worktree: wire ops P6BINDSIG 33 / P6TRYBINDSIG 34 bind the frame's own csd/args through Binder.kt inside the program, plus a custom_args header flag in the encoder) and exit-handler blocks (14 in CORE.c, not started). The raw/immediate unit wrappers are item 6's, not 7's. Census table: `docs/jvm-strict-campaign-handoff.md` |
+| 8 deletion | not started; the "move the sidecar writer first" step dissolves into 6 (the artifact writer becomes the sole writer) |
+| 9 ASM outside jast2bc | untouched; note the interop adaptor units (`BootJavaInterop`, `RakudoJavaInterop`) are runtime-generated CompilationUnits and must keep a class road or be rewritten |
+
+Item 7 ran ahead of 5-6 because the 2026-09-08 directive (all QAST via
+Truffle) made zero refusals layer 1; it stops here because its last two
+shapes and the wrappers all want the unit artifact to exist first.
+
+**The sidecar, placed (side-run 2026-09-09).** `<class>.codeprograms.lz4`
+came in with nqp `404d9f898` (2026-09-02) when CORE.c overflowed the
+class-file constant pool (71010 program strings against 65535, on top
+of the 65535-byte cap per constant that the encoder's 60000-char gate
+guards). It is held up by six sites: `Compiler.nqp` (`@*ENGINE_PROGRAMS`,
+the index stub), `JASTNodes.nqp` (`JAST::Class.codeprograms`), the
+jast2bc writer (`JASTCompiler.kt`, `JastClass.kt`, `JavaClass.kt`) and
+the runtime readers (`CompilationUnit.loadEnginePrograms`,
+`LibraryLoader`, `CodeEngine.codeRunIdx`). Its framing is by grapheme
+count, an NFG accident that cost a reader bug and an O(n^2) first fix;
+the artifact format must frame by byte. It is not removed on its own: it
+is the seed of item 6, and the 2026-09-09 gate lift (`:sidecar`) already
+treats it as the primary road, confining the class-file limits to the
+runtime-compile string road, which item 6 retires too.
+
 ## The list
 
 1. **Arguments in registers, which turned out to mean the plain call.**
