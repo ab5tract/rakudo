@@ -30,7 +30,9 @@ JVM class. This design replaces the unit; deletion (item 8) follows.
 
 ## 1. The artifact format
 
-A unit is a zip. Entries, by fixed name:
+A unit is a zip. Entries, by fixed name, and `unit.meta` is always the
+FIRST entry: an in-memory sniff reads only the first local file header to
+tell an artifact from a class-road jar (final review, 2026-09-09):
 
 - `unit.meta`: a binary record, little-endian, with a magic and a format
   version. Fields: the unit id (the sha1 or `--javaclass` name; the unit's
@@ -97,8 +99,11 @@ function and to its own `StaticCodeInfo`, so:
 The engine call target is parsed lazily on first entry, but
 `StaticCodeInfo` can materialize it on demand from the unit and program
 index, so the dispatchers' direct road opens at load time rather than after
-a first run through the stub. The continuation resume road keeps its
-resume handle through the same entry function.
+a first run through the stub. The continuation resume road does NOT go
+through the entry function: an engine program that suspends pushes the
+engine's own resume handle (`NqpCodeEngine.RESUME`) onto the save stack,
+so the block's `mhResume` is never invoked; `ProgramEntry`'s doc is the
+accurate description (final review, 2026-09-09).
 
 ### Deserialize, load and main are ordinary programs
 
@@ -111,10 +116,13 @@ are declaration blocks that the encoder takes like any other, and their
 qbids are recorded in the meta as the deserialize, load and entry ids. The
 loader invokes them through the entry function. Nothing about
 deserialization is reimplemented in Kotlin. The `deserialize` op reads the
-blob from the unit object instead of a class resource. Ops those blocks use
-that lack an encoding today (`createsc`, `scsetdesc`, `deserialize`,
-`jvm-claim-nested`, `jvm-finish-nested`, `setcodeobj`, `setup_blv`) get
-one; `setup_blv` reads the meta table rather than a string program.
+blob from the unit object instead of a class resource. The ops those blocks use (`createsc`, `scsetdesc`, `deserialize`,
+`jvm-claim-nested`, `jvm-finish-nested`, `setcodeobj`) turned out to need
+no new encoding: the encoder's generic classlib road covers them; the one
+addition the build forced was `QAST::VM` nodes (the `jvm` alternative, as
+`as_jast` takes it). `setup_blv` is not emitted on the artifact road; its
+rows go to the meta table, built right after the deserialize wrapper
+compiles (after `nqp::serialize`).
 
 ### The loader
 
@@ -194,10 +202,12 @@ the writer. stage2 (built by the stage1 compiler with the knob on) is all
 ten targets as artifacts. The runner generation task emits the new main
 class.
 
-Backtraces: attribution for artifact blocks comes from the block record's
-source fields and the engine root nodes' source sections; the Java-stack
-correlation in `ExceptionHandling.backtrace` stays as the class road's
-mechanism until that road is gone.
+Backtraces: NOT delivered by milestone 1, on either road (final review,
+2026-09-09): an engine-bodied block prints `in <name> (<file>)` with no
+line on the class road too, and the Java-stack correlation in
+`ExceptionHandling.backtrace` never fires for a `ProgramUnit`. The block
+record carries `sourceFile`/`sourceLine`; a fallback to the block's start
+line when no Java frame correlates would improve both roads. Open item.
 
 Identity: the unit id string replaces the Class object in the eval server's
 shared map, load dedupe, and debug and stats keys.
