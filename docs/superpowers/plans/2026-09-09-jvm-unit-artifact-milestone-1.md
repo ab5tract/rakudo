@@ -29,6 +29,8 @@
 
 The spec's writer section has nested BEGIN-time units written under `nested/` in milestone 1. They cannot be: a nested unit is a runtime compile, and runtime compiles produce class files until milestone 2. The format and loader handle nested units (Tasks 1, 3), but the writer refuses a unit that carries any (Task 7), naming them, so the milestone gate tells whether nqp's stage2 has one. If it does, milestone 2's in-memory road moves ahead of the gate.
 
+Two rulings from Task 6's review supersede that task's text (the ledger in `.superpowers/sdd/` has the reasoning): the static-lexical-value rows are built right after the deserialize wrapper compiles (after `nqp::serialize`), not where `setup_blv` is skipped; and `NQP_UNIT` is all-or-nothing, so the fallback junction dies on the unit road instead of counting, and no unit falls back to the class road (a class file produced after the artifact-road decisions would be silently broken). Task 7's writer still checks `fallbacks`, which is now always 0.
+
 ## File structure
 
 New, all under `nqp/src/vm/jvm/runtime/org/raku/nqp/runtime/unit/` (package `org.raku.nqp.runtime.unit`, part of `:nqp-runtime`):

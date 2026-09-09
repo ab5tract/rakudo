@@ -150,13 +150,19 @@ reads the tree as a record and writes the zip. It reads:
 Instruction lists are ignored. The wrapper blocks are emitted as
 declaration blocks on this road.
 
-Eligibility: a unit takes the artifact road when the knob (`NQP_UNIT=1`
-during the bilingual period) is on and every block encoded, tracked by a
-counter at Compiler.nqp's fallback junction. A unit with any fallback body
-takes the class road unchanged, so Rakudo keeps building on class files
-while nqp flips. Under `NQP_CODE_STRICT` a fallback is a compile error. The
-road taken is reported by the existing env-gated census verdict line,
-which gains one verdict, `artifact`.
+Eligibility: the knob (`NQP_UNIT=1` during the bilingual period) is
+all-or-nothing. With it on, a jar-bound comp-mode unit is written as an
+artifact, and a block that would fall back to bytecode is a compile error
+at Compiler.nqp's fallback junction, naming the block and cuid and
+pointing at `NQP_CODE_BAIL`/`NQP_CODE_WHY` for the reason (the same rule
+`NQP_CODE_STRICT` applies). The class road is chosen by leaving the knob
+off, which is how Rakudo builds in milestone 1. There is no per-unit
+fallback from the artifact road to the class road: the road is decided
+before the unit's blocks compile, and a class file produced after the
+artifact-road decisions (no sidecar string, no `setup_blv`) would be a
+silently broken jar (review finding, 2026-09-09). The road taken is
+reported by the existing env-gated census verdict line, which gains one
+verdict, `artifact`.
 
 A BEGIN-time nested unit compiled while its parent compiles is held in
 memory as a record (meta plus programs) and written under `nested/` in the
