@@ -9,6 +9,15 @@
 #   watched-run.raku -t=a.t -t=b.t ... [--jobs=N] [--log-dir=DIR] [--stall=..] [--max=..] -- runner args...
 #   A -t that names a directory expands to the .t/.rakutest files in it.
 #
+# Watch a run somebody else started (a subagent's build, a detached sweep):
+#   watched-run.raku --follow=PATH [--show=TEXT ...] [--show-rx=REGEX ...] [--max=SECONDS]
+#   Attaches to the log another watched-run is writing and streams its
+#   markers -- the mirrored [Ns] lines that run already recorded, plus any
+#   --show of your own prefixed with the seconds since that run started --
+#   until its "=== EXIT" line, which is echoed and becomes the exit code.
+#   A log that does not exist yet is waited for; a log that shrinks (the
+#   run was restarted into the same path) is followed from its new start.
+#
 # --stall    how long a silence is allowed before we call it wedged (default 900)
 # --max      overall ceiling per run, 0 for none (default 0)
 # --show     echo lines containing this literal text to stderr as they
@@ -150,6 +159,60 @@ my sub run-one(@cmd, Str :$log!, Int :$stall!, Int :$max!, :@pats, Str :$tag,
     ($code, $verdict)
 }
 
+# Follow a log another watched-run is writing: echo the [Ns] markers that
+# run mirrored into it, and any --show line of ours with the seconds since
+# that run's "=== started" stamp, until its "=== EXIT" line. Polling, not
+# inotify: a second's lag is nothing against a build's minutes, and it needs
+# no native module. Answers the run's exit code, or 124 on our own ceiling.
+my sub follow-log(Str $log, :@pats, Int :$max!) {
+    my $attached = now;
+    my $started;          # the followed run's start, from its stamp
+    my $pos = 0;          # bytes consumed
+    my $carry = '';       # a partial last line, until its newline arrives
+    my $waited = 0;
+    loop {
+        if $max > 0 && now - $attached > $max {
+            note "over the {$max}s ceiling, giving up";
+            return 124;
+        }
+        unless $log.IO.e {
+            note "waiting for $log" if $waited++ == 0;
+            sleep 1; next;
+        }
+        my $size = $log.IO.s;
+        if $size < $pos {
+            note "$log restarted, following from its new start";
+            $pos = 0; $carry = ''; $started = Nil;
+        }
+        if $size > $pos {
+            my $fh = open $log, :r, :bin;
+            $fh.seek($pos);
+            my $chunk = $fh.read($size - $pos).decode('utf8-c8');
+            $fh.close;
+            $pos = $size;
+            my @lines = ($carry ~ $chunk).split("\n");
+            $carry = @lines.pop;   # '' after a complete line, else the partial
+            for @lines -> $l {
+                if !$started && $l ~~ /^ '=== started ' (\S+) ' ===' $/ {
+                    $started = try DateTime.new(~$0).Instant;
+                }
+                if $l ~~ /^ '[' \d+ 's]' / {
+                    note $l;
+                }
+                elsif @pats.first({ $l ~~ $_ }) {
+                    my $since = ($started ?? now - $started !! now - $attached).Int;
+                    note "[{$since}s]{' ' x 3 - $since.Str.comb} $l";
+                }
+                if $l ~~ /^ '=== EXIT=' (\d+) ' verdict=' (\S+) ' elapsed=' (\d+) 's ===' $/ {
+                    note $l;
+                    return +$0;
+                }
+            }
+        }
+        sleep 1;
+    }
+}
+
 # It must be greater than two slashes. Otherwise treat it as a string search for '//'
 subset RegexInput of Str where { .starts-with('/') && .ends-with('/') && 2 < .comb }
 
@@ -163,9 +226,10 @@ sub MAIN(
     :@show,
     :@show-rx where { .elems == 0 || .elems == .grep(RegexInput) },
     Bool :$relay = False,
+    Str  :$follow,
     :@t
  ) {
-    @cmd or die "nothing to run: pass the command after --\n";
+    @cmd or $follow or die "nothing to run: pass the command after --, or --follow=LOG\n";
 
     # A --show is literal text; a --show-rx is compiled before anything
     # starts, so a broken regex fails here, not inside the react block once
@@ -175,6 +239,12 @@ sub MAIN(
             my $rx = try "anon regex \{ $s \}".EVAL;
             $rx // die "bad --show-rx pattern '$s': { $!.message }\n";
         };
+
+    if $follow {
+        die "--follow takes no command\n" if @cmd;
+        note "following: { $follow.IO.absolute }";
+        exit follow-log($follow, :@pats, :$max);
+    }
     # A chain script runs each long step under its own watched-run; the
     # outer run relays those steps' markers (their leading [Ns]) without
     # the caller repeating every pattern -- and without a grep in the
