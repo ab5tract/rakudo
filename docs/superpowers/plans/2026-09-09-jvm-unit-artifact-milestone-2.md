@@ -654,11 +654,11 @@ Model: `nqp/t/nqp/123-unit-artifact.t` (child processes because the road is chos
 # knob must refuse to run without the encoder switches; --target=jar with
 # no --output must take the road rather than die.
 
-plan(11);
+plan(12);
 
 my $is-windows := nqp::backendconfig()<osname> eq 'MSWin32';
 if nqp::getcomp('nqp').backend.name ne 'jvm' || $is-windows {
-    skip('the unit record road is JVM-only and driven through /bin/sh', 11);
+    skip('the unit record road is JVM-only and driven through /bin/sh', 12);
 }
 else {
     my $dir := nqp::cwd() ~ '/t/nqp/124-unit-record.tmp';
@@ -688,6 +688,8 @@ else {
         'my $evaled := nqp::getcomp("nqp").eval(\'sub ($x) { $x + 1 }\');',
         'say($evaled(41));',
         'say(nqp::getcomp("nqp").eval(\'my $y := 5; $y * 3\'));',
+        'class Kept { method answer() { 42 } }',
+        'say(Kept.answer());',
     ]);
 
     # t/nqp runs from the nqp checkout; the rakudo build drives the same
@@ -704,7 +706,7 @@ else {
 
     my @ran := sh("NQP_UNIT=1 NQP_CODE_WHY=1 $runner $script");
     my @out := nqp::split("\n", @ran[1]);
-    unless nqp::elems(@out) >= 6 {
+    unless nqp::elems(@out) >= 7 {
         say('# ' ~ @ran[1]);
         say('# ' ~ @ran[2]);
     }
@@ -714,6 +716,7 @@ else {
     is(@out[3] // '', '10',            'a regex from a record unit matches and fails to match');
     is(@out[4] // '', '42',            'an EVAL returns a sub that runs (a record of its own)');
     is(@out[5] // '', '15',            'an EVAL of statements answers its value');
+    is(@out[6] // '', '42',            'a class (a static lexical value) from a record unit resolves');
 
     # The positive marker: NQP_CODE_WHY names each record as loadcompunit
     # builds it -- the script and its two EVALs.
@@ -744,7 +747,7 @@ Note on the `--target=jar` case: `run-command` returns `[exit, stdout, stderr]`;
 - [ ] **Step 2: Run it**
 
 From the rakudo worktree root: `RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 ./nqp/nqp-j-gradle nqp/t/nqp/124-unit-record.t`
-Expected: `1..11`, eleven `ok`. A `not ok` on the record count means the marker line changed or `NQP_CODE_WHY` did not reach the child; on the knob test it means Task 2 Step 1's message text differs.
+Expected: `1..12`, twelve `ok`. A `not ok` on the record count means the marker line changed or `NQP_CODE_WHY` did not reach the child; on the knob test it means Task 2 Step 1's message text differs.
 
 Also run it from the nqp directory as the suite does: `cd /home/longwalker/code/raku/x.core/rakudo/.claude/worktrees/jesp-direct-lazy-records/nqp && RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 ./nqp-j-gradle t/nqp/124-unit-record.t` -- expected the same.
 
