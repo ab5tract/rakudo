@@ -131,6 +131,56 @@ Every newly covered op turns ~hundreds of blocks from bytecode into engine
 programs, and the *runtime* of those blocks is what t/nqp tests. Run the
 suite after every coverage step, against the stage0-runner baseline.
 
+## Rakudo-side census (2026-09-09, on nqp `ca71c19cb` + rakudo `ce0418cab5`)
+
+Every compile of the Rakudo build replayed from the Makefile's recipes
+into a scratch dir with `NQP_CODE_REPORT=1 NQP_CODE_BAIL=1 NQP_CODE_WHY=1`
+(the verdict trace is the honest census: `code bail:` only sees a
+`cbail`, while exit handlers, raw/immediate targets and the size gate
+return '' silently). Real refusals in the WHOLE build: **10**, two ops:
+
+| unit | verdicts | real bails | other non-encoded |
+|---|---|---|---|
+| Pod, ModuleLoader, Ops, SysConfig, Metamodel, Compiler, Actions, Grammar, rakudo.nqp | 3770 | 0 | unit wrappers only |
+| Optimizer | 238 | 1 (`p6trialbind`) | wrappers |
+| BOOTSTRAP v6c | 9330 | 9 (`p6trialbind` 6, `p6setbinder` 3) | 12 size gate (6 BEGIN bodies 67k-134k, each asked twice), wrappers |
+| v6d, v6e | 16 | 0 | wrappers |
+| CORE.c | 23777 | **0** | 1195 immediate targets (comp_mode 1), 14 exit handlers, 1 size gate, wrappers |
+| CORE.d, CORE.e | 770 | 0 | wrappers |
+
+"Wrappers" = Compiler.nqp's own per-unit `raw` blocks (deserialize,
+load, main) and the `immediate` blocks under them, three raw + N
+immediate per compilation unit including every BEGIN-time runtime
+compile (Metamodel: 37 raw / 72 immediate = ~36 runtime compiles).
+They are plan layer 2 (the stub shell), not coverage.
+
+What the census CANNOT see (fixed for the next run, unbuilt): a
+`custom_args` block (Raku: sub-signatures, generic/coercive params,
+capture slurpies -- the routine binds through Binder.kt via
+`p6bindsig`) is bypassed by Compiler.nqp before the encoder; it now
+reports `-> no: custom_args` through `TruffleEncoder.why`. CORE.c's
+1195 immediate targets are children of blocks the encoder never got,
+i.e. most likely custom_args routine bodies: the real CORE.c gap is
+those bodies (dispatch is unaffected -- the dispatchers are Truffle
+programs; only the callee body is bytecode).
+
+Fixes committed but NOT yet built or tested (amend on break): rakudo
+`4427bb935e` moves `p6trialbind`/`p6setbinder` onto `register_op_desugar`
+(src/vm/jvm/Raku/Ops.nqp); nqp `b6f9e033b` confines the size gate to the
+string-constant road (`:sidecar` from Compiler.nqp) and hoists `why` to
+a class method with a cached knob, called for the custom_args bypass.
+
+CORE.c timings this run: parse 389 s, qast 32 s, jast (encode) 36 s,
+classfile 4 s. Decision on the parse regression (206 -> 370-389 s):
+accepted as compile-time cost per the user's runtime-over-compile-time
+priority; it is the compiler's own ~374 newly encoded blocks running as
+engine programs, i.e. plan item 4 (tier policy), not a coverage item.
+
+**Pivot (user, 2026-09-09): plan items 5-6 (reflection-free
+CompilationUnit + unit artifact without a class file) come BEFORE the
+rest of the strict work.** Design in progress; see
+docs/superpowers/specs/ when written.
+
 ## The exact next step
 
 1. **t/nqp on `c131b8933`** (rerun: `raku tools/build/watched-run.raku
