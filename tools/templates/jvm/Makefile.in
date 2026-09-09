@@ -28,7 +28,12 @@ J_NQP_MAXHEAP = 14G
 # the grammar engine spelled out: nqp.jar holds rules compiled to Truffle
 # descriptors, and without the modules on the module path and the engine on
 # the class path they cannot run at all. Empty when nqp was built without it.
-@bpv(NQP_RR)@    = $(JAVA) -Xmx$(J_NQP_MAXHEAP) @j_truffle_args@ -cp @q(@nfp(./blib)@@cpsep@@nop($(BLD_NQP_JARS))@@cpsep@rakudo-runtime.jar@cpsep@@nop($(SYSROOT))@@abs2rel(@nqp_classpath@)@@j_truffle_jar@)@ nqp
+# It also has to name the entry point itself. There is no `nqp` main class in
+# a unit-artifact nqp.jar (it holds a unit.meta and no .class at all), so the
+# runner enters through UnitMain with the unit path as its first argument --
+# the same entry nqp's own runners took in nqp 15c20930c, and one that reads
+# a class-road nqp.jar just as happily.
+@bpv(NQP_RR)@    = $(JAVA) -Xmx$(J_NQP_MAXHEAP) @j_truffle_args@ -cp @q(@nfp(./blib)@@cpsep@@nop($(BLD_NQP_JARS))@@cpsep@rakudo-runtime.jar@cpsep@@nop($(SYSROOT))@@abs2rel(@nqp_classpath@)@@j_truffle_jar@)@ org.raku.nqp.runtime.unit.UnitMain @q(@nop($(SYSROOT))@@nfp(@abs2rel(@nqp_classpath@)@/nqp.jar)@)@
 @bpv(RUN_RAKUDO_SCRIPT)@ = rakudo-j-build
 @bpv(RUN_RAKUDO)@ = @shquot(@perl@)@ @bpm(RUN_RAKUDO_SCRIPT)@
 
