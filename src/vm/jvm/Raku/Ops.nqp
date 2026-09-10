@@ -3,12 +3,6 @@ my $TYPE_P6OPS := 'Lorg/raku/rakudo/RakOps;';
 
 # Other types we'll refer to.
 my $TYPE_OPS   := 'Lorg/raku/nqp/runtime/Ops;';
-my $TYPE_CSD   := 'Lorg/raku/nqp/runtime/CallSiteDescriptor;';
-my $TYPE_SMO   := 'Lorg/raku/nqp/sixmodel/SixModelObject;';
-my $TYPE_TC    := 'Lorg/raku/nqp/runtime/ThreadContext;';
-my $TYPE_CF    := 'Lorg/raku/nqp/runtime/CallFrame;';
-my $TYPE_STR   := 'Ljava/lang/String;';
-my $TYPE_OBJ   := 'Ljava/lang/Object;';
 
 # Exception categories.
 my $EX_CAT_NEXT    := 4;
@@ -22,9 +16,6 @@ my $RT_NUM  := 2;
 my $RT_STR  := 3;
 my $RT_UINT := 10;
 my $RT_VOID := -1;
-
-# Instruction constants.
-my $ALOAD_1     := JAST::Instruction.new( :op('aload_1') );
 
 # Register a de-sugar from one QAST tree to another.
 #
@@ -45,9 +36,7 @@ my %code_op_desugars;
 sub register_op_desugar($name, $desugar, :$inlinable = 1, :$compiler = 'Raku') is export {
     %code_op_desugars{$name} := $desugar;
     nqp::bindhllsym('nqp', 'CODE_OP_DESUGARS', %code_op_desugars);
-    nqp::getcomp('QAST').operations.add_hll_op($compiler, $name, :$inlinable, -> $qastcomp, $op {
-        $qastcomp.as_jast($desugar($op));
-    });
+    nqp::getcomp('QAST').operations.set_hll_op_inlinability($compiler, $name, $inlinable);
 }
 
 # Raku opcode specific mappings.
@@ -55,50 +44,6 @@ my $ops := nqp::getcomp('QAST').operations;
 $ops.map_classlib_hll_op('Raku', 'p6configposbindfailover', $TYPE_P6OPS, 'p6configposbindfailover', [$RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6store', $TYPE_P6OPS, 'p6store', [$RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6definite', $TYPE_P6OPS, 'p6definite', [$RT_OBJ], $RT_OBJ, :tc);
-$ops.add_hll_op('Raku', 'p6bindsig', :!inlinable, -> $qastcomp, $op {
-    my $il := JAST::InstructionList.new();
-    $il.append(JAST::Instruction.new( :op('aload_1') ));
-    $il.append(JAST::Instruction.new( :op('aload'), 'csd' ));
-    $il.append(JAST::Instruction.new( :op('aload'), '__args' ));
-    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_P6OPS,
-        "p6bindsig", $TYPE_CSD, $TYPE_TC, $TYPE_CSD, "[$TYPE_OBJ" ));
-    $il.append(JAST::Instruction.new( :op('dup') ));
-
-    my $natlbl := JAST::Label.new( :name($qastcomp.unique('p6bindsig_no_autothread_')) );
-    $il.append(JAST::Instruction.new( :op('ifnonnull'), $natlbl ));
-    $il.append(JAST::Instruction.new( :op('aload'), 'cf' ));
-    $il.append(JAST::Instruction.new( :op('invokevirtual'),
-        $TYPE_CF, 'leave', 'Void' ));
-    $il.append(JAST::Instruction.new( :op('return') ));
-    $il.append($natlbl);
-
-    $il.append(JAST::Instruction.new( :op('astore'), 'csd' ));
-    $il.append(JAST::Instruction.new( :op('aload_1') ));
-    $il.append(JAST::Instruction.new( :op('getfield'), $TYPE_TC, 'flatArgs', "[$TYPE_OBJ" ));
-    $il.append(JAST::Instruction.new( :op('astore'), '__args' ));
-
-    $ops.result($il, $RT_VOID);
-});
-$ops.add_hll_op('Raku', 'p6trybindsig', :!inlinable, -> $qastcomp, $op {
-    my $il := JAST::InstructionList.new();
-    $il.append(JAST::Instruction.new( :op('aload_1') ));
-    $il.append(JAST::Instruction.new( :op('aload'), 'csd' ));
-    $il.append(JAST::Instruction.new( :op('aload'), '__args' ));
-    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_P6OPS,
-        "p6trybindsig", 'Long', $TYPE_TC, $TYPE_CSD, "[$TYPE_OBJ" ));
-
-    # The runtime left any flattened callsite on the frame and the matching
-    # arguments in tc.flatArgs; reload the locals from there. On a failed
-    # bind the values are unused: assertparamcheck abandons the frame.
-    $il.append(JAST::Instruction.new( :op('aload'), 'cf' ));
-    $il.append(JAST::Instruction.new( :op('getfield'), $TYPE_CF, 'csd', $TYPE_CSD ));
-    $il.append(JAST::Instruction.new( :op('astore'), 'csd' ));
-    $il.append(JAST::Instruction.new( :op('aload_1') ));
-    $il.append(JAST::Instruction.new( :op('getfield'), $TYPE_TC, 'flatArgs', "[$TYPE_OBJ" ));
-    $il.append(JAST::Instruction.new( :op('astore'), '__args' ));
-
-    $ops.result($il, $RT_INT);
-});
 our $Binder;
 proto sub trial_bind(*@args) {
     $Binder.trial_bind(|@args);
@@ -132,39 +77,6 @@ $ops.map_classlib_hll_op('Raku', 'p6bindcaptosig', $TYPE_P6OPS, 'p6bindcaptosig'
 $ops.map_classlib_hll_op('Raku', 'p6typecheckrv', $TYPE_P6OPS, 'p6typecheckrv', [$RT_OBJ, $RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6decontrv_rt', $TYPE_P6OPS, 'p6decontrv_rt', [$RT_OBJ, $RT_OBJ, $RT_INT], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6bindwillresume', $TYPE_OPS, 'bindWillResumeOnFailure', [], $RT_INT, :tc);
-# Force a value into an object register, boxing a native if that is what it
-# takes. The dispatchers work in objects, so this is how a native value
-# reaches one. MoarVM spells it the same way.
-$ops.add_hll_op('Raku', 'p6box', -> $qastcomp, $op {
-    $qastcomp.as_jast(nqp::atpos($op, 0), :want($RT_OBJ))
-});
-sub decontrv_op($version) {
-    -> $qastcomp, $op {
-        my $is_rw;
-        if nqp::istype($op[0], QAST::WVal) {
-            $is_rw := nqp::istrue($op[0].value.rw);
-        }
-        else {
-            nqp::die('p6decontrv expects a QAST::WVal as its first child');
-        }
-        if $is_rw {
-            $qastcomp.as_jast($op[1])
-        }
-        else {
-            # The version picks the dispatcher: 'raku-rv-decont-6c' also
-            # decontainerizes a Proxy on return, which 6.c/6.d code relies
-            # on. Emitted as a static call with the dispatch site cached per
-            # routine (not the shared p6decontrv_internal desugar, whose
-            # dispatch op would put an invokedynamic on every return).
-            $qastcomp.as_jast(QAST::Op.new( :op('p6decontrv_rt'),
-                $op[0],
-                QAST::Op.new( :op('wantdecont'), $op[1] ),
-                QAST::IVal.new( :value($version eq '6c' ?? 1 !! 0) ) ));
-        }
-    }
-}
-$ops.add_hll_op('Raku', 'p6decontrv',    :!inlinable, decontrv_op(''));
-$ops.add_hll_op('Raku', 'p6decontrv_6c', :!inlinable, decontrv_op('6c'));
 $ops.map_classlib_hll_op('Raku', 'p6capturelex', $TYPE_P6OPS, 'p6capturelex', [$RT_OBJ], $RT_OBJ, :tc, :!inlinable);
 $ops.map_classlib_hll_op('Raku', 'p6capturelexwhere', $TYPE_P6OPS, 'p6capturelexwhere', [$RT_OBJ], $RT_OBJ, :tc, :!inlinable);
 $ops.map_classlib_hll_op('nqp', 'p6capturelexwhere', $TYPE_P6OPS, 'p6capturelexwhere', [$RT_OBJ], $RT_OBJ, :tc, :!inlinable);
@@ -175,49 +87,13 @@ $ops.map_classlib_hll_op('Raku', 'p6clearpre', $TYPE_P6OPS, 'p6clearpre', [], $R
 $ops.map_classlib_hll_op('Raku', 'p6inpre', $TYPE_P6OPS, 'p6inpre', [], $RT_INT, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6setfirstflag', $TYPE_P6OPS, 'p6setfirstflag', [$RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6takefirstflag', $TYPE_P6OPS, 'p6takefirstflag', [], $RT_INT, :tc);
-$ops.add_hll_op('Raku', 'p6return', :!inlinable, -> $qastcomp, $op {
-    my $il := JAST::InstructionList.new();
-    my $exprres := $qastcomp.as_jast($op[0], :want($RT_OBJ));
-    $il.append($exprres.jast);
-    $*STACK.obtain($il, $exprres);
-    $il.append(JAST::Instruction.new( :op('dup') ));
-    $il.append(JAST::Instruction.new( :op('aload'), 'cf' ));
-    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_OPS,
-        'return_o', 'Void', $TYPE_SMO, $TYPE_CF ));
-    $il.append(JAST::Instruction.new( :op('aload'), 'cf' ));
-    $il.append(JAST::Instruction.new( :op('getfield'), $TYPE_CF, 'outer', $TYPE_CF ));
-    $il.append(JAST::Instruction.new( :op('iconst_1') ));
-    $il.append(JAST::Instruction.new( :op('putfield'), $TYPE_CF, 'exitAfterUnwind', "Z" ));
-    $il.append(JAST::Instruction.new( :op('aload'), 'cf' ));
-    $il.append(JAST::Instruction.new( :op('invokevirtual'),
-        $TYPE_CF, 'leave', 'Void' ));
-    $il.append(JAST::Instruction.new( :op('return') ));
-    $ops.result($il, $RT_OBJ);
-});
 $ops.map_classlib_hll_op('Raku', 'p6getouterctx', $TYPE_P6OPS, 'p6getouterctx', [$RT_OBJ], $RT_OBJ, :tc, :!inlinable);
-$ops.add_hll_op('Raku', 'p6argvmarray', -> $qastcomp, $op {
-    my $il := JAST::InstructionList.new();
-    $il.append(JAST::Instruction.new( :op('aload_1') ));
-    $il.append(JAST::Instruction.new( :op('aload'), 'csd' ));
-    $il.append(JAST::Instruction.new( :op('aload'), '__args' ));
-    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_P6OPS,
-        "p6argvmarray", $TYPE_SMO, $TYPE_TC, $TYPE_CSD, "[$TYPE_OBJ" ));
-    $ops.result($il, $RT_OBJ);
-});
 $ops.map_classlib_hll_op('Raku', 'p6bindattrinvres', $TYPE_P6OPS, 'p6bindattrinvres', [$RT_OBJ, $RT_OBJ, $RT_STR, $RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6finddispatcher', $TYPE_P6OPS, 'p6finddispatcher', [$RT_STR], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6argsfordispatcher', $TYPE_P6OPS, 'p6argsfordispatcher', [$RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6setautothreader', $TYPE_P6OPS, 'p6setautothreader', [$RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'tclc', $TYPE_P6OPS, 'tclc', [$RT_STR], $RT_STR, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6staticouter', $TYPE_P6OPS, 'p6staticouter', [$RT_OBJ], $RT_OBJ, :tc);
-$ops.add_hll_op('Raku', 'p6invokehandler', -> $qastcomp, $op {
-    $qastcomp.as_jast(QAST::Op.new( :op('call'), $op[0], $op[1] ));
-});
-
-$ops.add_hll_op('Raku', 'p6invokeflat', -> $qastcomp, $op {
-    $op[1].flat(1);
-    $qastcomp.as_jast(QAST::Op.new( :op('call'), $op[0], $op[1]));
-});
 # Sinking is a runtime helper rather than an inline `can`/`callmethod sink`
 # pair: the inline form costs one invokedynamic call site per sunk statement,
 # and the core setting has more of those than a class may hold. Like MoarVM's,
@@ -240,95 +116,10 @@ $ops.map_classlib_hll_op('nqp', 'p6inpre', $TYPE_P6OPS, 'p6inpre', [], $RT_INT, 
 $ops.map_classlib_hll_op('nqp', 'jvmrakudointerop', $TYPE_P6OPS, 'jvmrakudointerop', [], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'jvmrakudointerop', $TYPE_P6OPS, 'jvmrakudointerop', [], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('nqp', 'p6captureouters2', $TYPE_P6OPS, 'p6captureouters2', [$RT_OBJ, $RT_OBJ], $RT_OBJ, :tc, :!inlinable);
-
-# Override defor to call defined method.
-QAST::OperationsJAST.add_hll_op('Raku', 'defor', -> $qastcomp, $op {
-    if +$op.list != 2 {
-        nqp::die("Operation 'defor' needs 2 operands");
-    }
-    my $tmp := $op.unique('defined');
-    $qastcomp.as_jast(QAST::Stmts.new(
-        QAST::Op.new(
-            :op('bind'),
-            QAST::Var.new( :name($tmp), :scope('local'), :decl('var') ),
-            $op[0]
-        ),
-        QAST::Op.new(
-            :op('if'),
-            QAST::Op.new(
-                :op('callmethod'), :name('defined'),
-                QAST::Var.new( :name($tmp), :scope('local') )
-            ),
-            QAST::Var.new( :name($tmp), :scope('local') ),
-            $op[1]
-        )))
-});
-
-# Boxing and unboxing configuration.
-$ops.add_hll_box('Raku', $RT_INT, -> $qastcomp {
-    my $il := JAST::InstructionList.new();
-    $il.append($ALOAD_1);
-    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_P6OPS,
-        'p6box_i', $TYPE_SMO, 'Long', $TYPE_TC ));
-    $il
-});
-$ops.add_hll_box('Raku', $RT_UINT, -> $qastcomp {
-    my $il := JAST::InstructionList.new();
-    $il.append($ALOAD_1);
-    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_P6OPS,
-        'p6box_u', $TYPE_SMO, 'Long', $TYPE_TC ));
-    $il
-});
-$ops.add_hll_box('Raku', $RT_NUM, -> $qastcomp {
-    my $il := JAST::InstructionList.new();
-    $il.append($ALOAD_1);
-    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_P6OPS,
-        'p6box_n', $TYPE_SMO, 'Double', $TYPE_TC ));
-    $il
-});
-$ops.add_hll_box('Raku', $RT_STR, -> $qastcomp {
-    my $il := JAST::InstructionList.new();
-    $il.append($ALOAD_1);
-    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_P6OPS,
-        'p6box_s', $TYPE_SMO, $TYPE_STR, $TYPE_TC ));
-    $il
-});
-QAST::OperationsJAST.add_hll_unbox('Raku', $RT_INT, -> $qastcomp {
-    my $il := JAST::InstructionList.new();
-    $il.append($ALOAD_1);
-    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_OPS,
-        'decont_i', 'Long', $TYPE_SMO, $TYPE_TC ));
-    $il
-});
-QAST::OperationsJAST.add_hll_unbox('Raku', $RT_UINT, -> $qastcomp {
-    my $il := JAST::InstructionList.new();
-    $il.append($ALOAD_1);
-    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_OPS,
-        'decont_u', 'Long', $TYPE_SMO, $TYPE_TC ));
-    $il
-});
-QAST::OperationsJAST.add_hll_unbox('Raku', $RT_NUM, -> $qastcomp {
-    my $il := JAST::InstructionList.new();
-    $il.append($ALOAD_1);
-    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_OPS,
-        'decont_n', 'Double', $TYPE_SMO, $TYPE_TC ));
-    $il
-});
-QAST::OperationsJAST.add_hll_unbox('Raku', $RT_STR, -> $qastcomp {
-    my $il := JAST::InstructionList.new();
-    $il.append($ALOAD_1);
-    $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_OPS,
-        'decont_s', $TYPE_STR, $TYPE_SMO, $TYPE_TC ));
-    $il
-});
-
-
-
-
 # --- BEGIN op desugars moved from the legacy Perl6::Actions (batch 27) ---
 # Self-contained QAST desugars the RakuAST frontend emits; they lived
 # in Perl6::Actions (no longer compiled). register_op_desugar (above)
-# stores each for the encoder AND adds its add_hll_op handler.
+# stores each for the encoder AND records its HLL inlinability.
 register_op_desugar('p6box_i', -> $qast {
     QAST::Op.new( :op('box_i'), $qast[0], QAST::Op.new( :op('hllboxtype_i') ) )
 });
