@@ -56,9 +56,11 @@ files are taken as given. Since milestone 3 of the unit artifact
 (2026-09-09) the encoder and the unit road are always on; nothing needs
 exporting beyond `RAKUDO_RAKUAST=1`, which the script exports itself.
 `NQP_CODE_RUN` and `NQP_CODE_PRECOMP` are not knobs and must not be set
-at all: the compiler dies on `=0` (the road needs the encoder on), and
-stage0's bootstrap compiler treats their mere presence as "encode", so a
-gradle build with them exported builds stage1 differently. The surviving
+at all: the compiler dies on `=0` (the road needs the encoder on). (The
+old stage0 caveat — that its bootstrap compiler treated their mere
+presence as "encode", so a gradle build with them exported built stage1
+differently — is history: milestone 4 regenerated stage0 as unit
+artifacts, 2026-09-10.) The surviving
 switches are the diagnostics `NQP_CODE_ENCODED`, `NQP_CODE_BAIL`,
 `NQP_CODE_WHY` and `NQP_CODE_STRICT`.
 

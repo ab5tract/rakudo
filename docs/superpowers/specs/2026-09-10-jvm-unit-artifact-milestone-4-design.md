@@ -363,3 +363,181 @@ half); anonymous-block naming; t/spec; `java -jar`; items 1 to 3.
 - Whether the regex callback grouping cap stays as a plain limit.
 - The `constants` handoff in the adaptors (static setter vs field write).
 - Whether the resume-value fix needs a wire field or a static table.
+
+## Done (2026-09-10) — code complete, gate open
+
+Everything this spec asked for is built and committed, and the milestone
+is **not closed**: the t/ gate (below) found eleven red files that
+milestone 3's sweep 2 did not list, two of them with named mechanisms,
+and the controller rules on them.
+
+Ranges: nqp `55bdee5b7`..`e270f070d` (branch
+`jesp-direct-lazy-records`), rakudo `670c3645b0`..`09f349adda` (branch
+`worktree-jesp-direct-lazy-records`). Plan
+`docs/superpowers/plans/2026-09-10-jvm-unit-artifact-milestone-4.md`, its
+ledger twin and the eleven task briefs/reports beside it.
+
+What shipped, task by task:
+
+1. **The driver** (nqp `c6af33aa3`). `QAST::Compiler` stopped emitting
+   JAST and became a unit driver over the QAST tree: 6363 lines to 1948,
+   `nqp/src/vm/jvm/NQP/Ops.nqp` 177 lines to 9, the record classes and
+   `RecordReader` in place, `jvm-*-unit-record` syscalls added,
+   `QAST::OperationsJAST` renamed `QAST::OperationsJVM` and
+   `supports_op` answering the encoder's rows plus the hand rows.
+   Build 214 s, 11 artifact jars, t/nqp 118/118.
+2. **The deletions on the compiler side** (nqp `5cf759de6`):
+   `NQP/Ops.nqp` and `JASTNodes.nqp` gone with the source lists. Build
+   221 s, 10 share-lib jars.
+3. **Rakudo's `Raku/Ops.nqp`** (rakudo `2e66c36b3d`): the same treatment
+   on the Rakudo side. Make (resumed, not from the top) 955 s, CORE.c
+   ~462 s, `t/01-sanity` 25/25, t/03-jvm + t/10-qast 2/2, precomp 13/14.
+4. **stage0 as unit artifacts** (nqp `9844a0de9`): `jBootstrapFiles` run
+   from the JAST-free driver; stage0 is 9 `unit.meta`-only jars
+   (`JASTNodes.jar` gone). Build A (old stage0) 206 s, build B (the new
+   stage0 compiling stage1) 263 s, t/nqp 118/118.
+5. **The runtime deletions and the loader port** (nqp `1a658daa1`,
+   `4b261b3b2`): the whole `jast2bc` package, `Ops.compilejast`,
+   `loadcompunit`'s define branch, `MemoryClassLoader`,
+   `JarFileClassLoader`, `LibraryLoader.java`, the `.codeprograms.lz4`
+   sidecar reader and its `$!codeprograms` pass-through, `IndyBootstrap`
+   and the indy budget, `setup_blv`; `CompilationUnit` reshaped around
+   `getCodeRefs(): Array<CodeRef>`; `UnitLoader` took over what
+   `LibraryLoader` did. Runtime jars and `:nqp-runtime:test` green,
+   t/nqp 118/118, eval-server smoke 2/2.
+6. **The Java-interop adaptors** (nqp `14df06863`, rakudo `09f349adda`):
+   `BootJavaInterop`/`RakudoJavaInterop` generate a plain class with ASM
+   and hand it to `AdaptorUnit(cls, descriptors, target)`, a hand-written
+   `CompilationUnit` subclass; `ByteClassLoader` defines only that plain
+   class. `perl Configure.pl --backends=jvm --gen-nqp` 3 s, `make` FROM
+   THE TOP 1185 s (milestone-3 baseline 1154 s), CORE.c 472 s (baseline
+   475 s), `t/03-jvm/01-interop.t` 30/30 with 8 in-source skips,
+   `t/01-sanity` 25/25.
+7. **Gap 5a, torn-frame `LEAVE`** (nqp `d8116d7c9`): a torn frame runs
+   its exit handler once, on whichever road reaches it first
+   (`runExitHandler` with a `left` guard and a `try`/`finally` in both
+   roads). `t/spec/S04-phasers/keep-undo.t` 15/16 -> 16/16.
+8. **Gap 5b, the resume value of a suspended typed op** (nqp
+   `929f73b11`): a suspension inside a typed op finishes by re-running
+   the op instead of answering the inner call's value
+   (`NqpCont.Suspend.finish`, `NqpOps.suspendToken`,
+   `NqpTypeOps.SuspendedIn`). nqp 112-continuations 26/26, 047 11/11,
+   121 16/16.
+9. **Gap 5c, the parked item-8 shape** (nqp `e270f070d`): the encoder's
+   `patch_params` now keeps the parameter prologue's deferred code-ref
+   slots, so a `BVal` in a parameter default or a `where` constraint no
+   longer resolves to the mainline (qbid 0). This closed both parked
+   t/02-rakudo files, `yada-trait-timing.t` and
+   `begin-time-attributive-param-method.t`. nqp clean build 258 s,
+   `make` FROM THE TOP 1103 s, `t/01-sanity` 25/25 (312 s on a loaded
+   box), t/nqp 118/118. Stage0 needed no regeneration: the change fills
+   wire cells the old encoder left at 0.
+
+Deviations from this spec and from the plan, all ledgered:
+
+- **Tasks 5 and 6 ran as one dispatch.** `LibraryLoader.java`'s class
+  branches call what Task 5 deletes, so the runtime jar does not compile
+  between them.
+- **`serializedBlob`, `claimNested` and `engineProgram` stayed `open`
+  with throwing bodies instead of becoming `abstract`.**
+  `KnowHOWMethods` is a hand-written `CompilationUnit` subclass and
+  implements none of them, so `abstract` does not compile. `unitId()`
+  kept its non-throwing default.
+- **`readToHeapBuffer` / `readToHeapBufferLz4` were not ported.** After
+  Task 5 they had no callers.
+- **`t/spec/S04-phasers/leave.t` does not exist** (a plan defect), so
+  `keep-undo.t` was gap 5a's gate.
+- **Gap 5b's Probe A was not an instance of the gap** (`Truthy` coerces
+  an already-computed value; the `FETCH` is a separate `DecontOp`). The
+  real reproducer is `subset S of Int where { take $_; True }; sub f(-->
+  S) { 5 }; gather { say f() }`, which answered `True` and now answers
+  `5`.
+- **A remake after Task 4.** Task 4 rebuilt nqp stage2 after Task 3's
+  make, so the Rakudo jars on disk were stale and `t/01-sanity` read
+  0/25 with a `SerializationReader` dependency-version error. The 5+6
+  sanity gate moved to Task 7, which had to `Configure --gen-nqp` and
+  make from the top anyway.
+
+Known gaps carried out of the milestone, none of them the unit road: the
+`p6typecheckrv` failed-check tail after a suspension raises
+`dieInternal` rather than `X::TypeCheck::Return`; the same bug class at
+the multi-dispatch bind site (`NqpOps.java:176`/`:963`); a finisher that
+suspends again reaches the guest as a raw exception; `enter-leave.t` #35
+(a `LEAVE` value clobbers a do-block return); and the P6Opaque half of
+item 9. The deferred minors are listed per task in the ledger twin.
+
+### The milestone gate (Task 11, 2026-09-10/11)
+
+Run on the final jars — Task 10's nqp build (258 s) and Rakudo `make`
+from the top (1103 s, CORE.c window 533 -> 1044 s), log
+`/home/longwalker/.claude/jobs/25fa1a35/tmp/t10-make.log`. Nothing was
+rebuilt for the gate.
+
+| gate | result |
+|---|---|
+| t/nqp (Task 10) | 118/118 |
+| `t/01-sanity` (Task 10) | 25/25, 312 s on a loaded box |
+| precomp, 14 files | 13/14; `rakuast-suspend-precomp-deps.t` is the `RAKUDOLIB=lib` harness gap known since milestone 3 and is green with it, so 14/14 |
+| t/03-jvm + t/10-qast | 2/2, 62 s |
+| jar census | **35/35 `unit.meta`-only, zero `.class`** — 10 nqp share-lib, 9 stage0, 16 Rakudo |
+| t/ sweep | see below: **eleven files red that milestone 3 did not list** |
+
+The sweep ran at **2 servers x 4g, not 3**: `MemAvailable` was 20 g, the
+sweep budgets `heap + 3g` off-heap per server against `MemAvailable - 3`,
+and 3 x 7 g = 21 g over a 17 g budget would have had the server's own
+guard decline the third mid-run. 418 files, 59 of 60 chunks inside the
+7200 s ceiling; the kill lost the per-chunk detail, which the sweep only
+prints at the end, and its chunk counter is a completion counter, not an
+index, so nothing in the log attributes a file. Attribution came from two
+reruns: the ten non-`t/02-rakudo` directories as one sweep that completed
+(120 files, 1546 s), and `t/02-rakudo` file by file through
+`watched-run -t --jobs=3` (298 files, 23 red), with every red file not on
+milestone 3's list re-confirmed through the eval server.
+
+Two mechanisms are named:
+
+- **`QAST::OperationsJVM.is_inlinable` lost its table.**
+  `%core_inlinability` is now populated only by `map_classlib_core_op`;
+  every op that used to arrive through `add_core_op` / `map_jvm_core_op`
+  answers 0. Probed: `add_i`, `sub_i`, `mul_i`, `add_n`, `mul_n`, `if`,
+  `while`, `list` are all 0, while classlib ops (`add_I`, `concat`,
+  `box_i`, `atpos_i`) are 1. RakuAST's `IMPL-INLINE-INFO`
+  (`src/Raku/ast/code.rakumod:3301`) dies "Non-inlinable op encountered"
+  on any of them, so routine inlining and native-arithmetic lowering
+  stop. This is the exact mirror of the `supports_op` finding Task 1's
+  review caught: `core_op_supported` was repaired then, `is_inlinable`
+  was not. Red because of it:
+  `t/08-performance/22-rakuast-ct-dispatch.t`,
+  `29-rakuast-attr-self-types.t`, `32-rakuast-native-param-bind.t` (all
+  three green in milestone 3, `32` explicitly noted as passing there) and
+  `t/02-rakudo/native-return-coercion.t`. It is a runtime-performance
+  regression baked into the built setting.
+- **A multi-character `Str` range never terminates.**
+  `("aa".."ac").elems` hangs; `("a".."e").elems` is 5 and `"aa".succ` is
+  `ab`, so the fault is in the range's iteration, not in `succ`. It hangs
+  `t/02-rakudo/sort-element-kinds.t` at test 2 and stalled both sweeps in
+  that neighbourhood.
+
+Six more are red and not root-caused here:
+`t/02-rakudo/21-begin-time-compile-sub.t` ("Failed to deserialize lexical
+`$?PACKAGE`"), `custom-declarator-naming.t` ("Method 'find_method' not
+found for invocant of class 'MetamodelX::RakuLevelNameHOW'"),
+`make-regex-frame.t` (engine refusal: "qastnode walks the caller chain
+(curcode)"), `try-statement-backtrace-frame.t` (1/4),
+`regex-interpolation-backtrack.t` (3/8), `m-flag-module-spec.t` (1/19).
+Caveat: milestone 3's list of 13 came from a chunk-attributed verify
+sweep whose infrastructure-attributed FAIL chunks were never resolved per
+file, so some of these six may have been red then too.
+
+Expected red, unchanged from milestone 3: the corekeys/settingkeys
+cluster (`03-cmp-ok.t`, `03-corekeys*.t` x4, `04-settingkeys-6c.t`,
+`04-settingkeys-6e.t`), `begin-called-block-routine.t`,
+`compiler-frontend-id.t`, `constant-anon-var-value.t`,
+`parse-target-match-tree.t`, `t/05-messages/02-errors.t`,
+`t/08-performance/15-rakuast-native-metaop.t` and
+`36-rakuast-begin-compiled-remark.t`. The item-8 pair
+(`yada-trait-timing.t`, `begin-time-attributive-param-method.t`) is
+**green**, confirming Task 10's fix. Two files that fail only cold and
+pass through the eval server (`long-int-literal.t`,
+`native-argument-snapshot.t`), plus `15-gh_1202.t`, are the cold-run
+`$*EXECUTABLE`-spawn gap, not failures.

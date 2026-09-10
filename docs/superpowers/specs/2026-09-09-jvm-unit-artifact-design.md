@@ -361,6 +361,71 @@ and the t/nqp sweep are recorded as the new baseline (forward only).
    and no gradle build may carry `NQP_CODE_RUN`/`NQP_CODE_PRECOMP` until
    then (stage0 encodes on their mere presence).
 
+   CODE COMPLETE 2026-09-10; the milestone is **not closed** — its t/
+   gate found eleven red files milestone 3's sweep 2 did not list, two
+   with named mechanisms (an `is_inlinable` regression that stops
+   RakuAST inlining and native lowering, and a multi-character `Str`
+   range that never terminates); the milestone-4 spec's "Done" section
+   carries the gate in full. (plan
+   `docs/superpowers/plans/2026-09-10-jvm-unit-artifact-milestone-4.md`,
+   spec
+   `docs/superpowers/specs/2026-09-10-jvm-unit-artifact-milestone-4-design.md`,
+   ledger twin and eleven task reports beside the plan; nqp
+   `55bdee5b7`..`e270f070d`, rakudo `670c3645b0`..`09f349adda`). What
+   shipped, in the order it landed: the JAST-free driver (nqp
+   `c6af33aa3`: `QAST::Compiler` 6363 -> 1948 lines, `NQP/Ops.nqp` 177 ->
+   9, unit records + `RecordReader` + the `jvm-*-unit-record` syscalls,
+   `QAST::OperationsJAST` -> `QAST::OperationsJVM`); the compiler-side
+   file deletions (nqp `5cf759de6`: `NQP/Ops.nqp` and `JASTNodes.nqp`);
+   Rakudo's `Raku/Ops.nqp` (rakudo `2e66c36b3d`); **stage0 regenerated as
+   9 `unit.meta`-only artifact jars** (nqp `9844a0de9`, `JASTNodes.jar`
+   gone); the runtime deletions and the loader port (nqp `1a658daa1`,
+   `4b261b3b2`: the whole `jast2bc` package, `Ops.compilejast`,
+   `loadcompunit`'s define branch, `MemoryClassLoader`,
+   `JarFileClassLoader`, `LibraryLoader.java`, the sidecar reader **and
+   the `$!codeprograms` pass-through the paragraph above told milestone 4
+   not to forget** -- it went with stage0, exactly as that paragraph
+   requires -- `IndyBootstrap`, the indy budget, `setup_blv`, the
+   per-block stub emission, and `CompilationUnit` reshaped around a
+   non-null `getCodeRefs(): Array<CodeRef>`); the interop adaptors (nqp
+   `14df06863`, rakudo `09f349adda`: `AdaptorUnit` over a plain
+   ASM-generated class, item 9's adaptor half); and the three carried
+   gaps -- torn-frame `LEAVE` (nqp `d8116d7c9`, `keep-undo.t` 15/16 ->
+   16/16), the resume value of a suspended typed op (nqp `929f73b11`),
+   and the parked where-in-`BEGIN` shape (nqp `e270f070d`:
+   `patch_params` keeps the parameter prologue's deferred code-ref
+   slots), which closed both parked t/02-rakudo files. ASM stays, for
+   `P6Opaque`'s generated attribute-storage classes and for the
+   adaptors; that is item 9's remaining half.
+
+   Timings on this toolchain: nqp clean build 214-263 s (milestone-3
+   baseline 222 s); `make` from the top 1185 s at Task 7 and 1103 s at
+   Task 10 (baseline 1154 s), CORE.c 472-511 s (baseline 475 s). Gate:
+   t/nqp 118/118; `t/01-sanity` 25/25; precomp 13/14 plain and 14/14
+   with `RAKUDOLIB=lib` (the harness gap known since milestone 3, not a
+   compiler fault); t/03-jvm + t/10-qast 2/2; interop 30/30; **all 35
+   jars `unit.meta`-only, zero `.class`** -- 10 nqp share-lib, 9 stage0,
+   16 Rakudo. The t/ sweep is the gate that is **not** green: 418 files
+   at 2 servers x 4g (3 x 4g exceeds the sweep's own budget at 20 g
+   MemAvailable), 59 of 60 chunks inside the 7200 s ceiling, and eleven
+   files red that milestone 3's sweep 2 did not list. The item-8 pair is
+   green, as Task 10 promised.
+
+   Six deviations, all ledgered: Tasks 5 and 6 ran as one dispatch
+   (`LibraryLoader.java` calls what Task 5 deletes, so the runtime jar
+   does not compile between them); `serializedBlob`/`claimNested`/
+   `engineProgram` stayed `open` with throwing bodies rather than
+   `abstract`, because the hand-written `KnowHOWMethods` subclass
+   implements none of them; `readToHeapBuffer*` was not ported (no
+   callers left after Task 5); `t/spec/S04-phasers/leave.t` does not
+   exist, so `keep-undo.t` was the torn-frame gate; the resume-value
+   probe in the plan was not an instance of the gap, and the real
+   reproducer is `subset S of Int where { take $_; True }; sub f(--> S)
+   { 5 }; gather { say f() }`; and Task 4's nqp rebuild left the Rakudo
+   jars stale, so the 5+6 sanity gate moved to Task 7's make from the
+   top. t/spec still did not run (milestone 3's deviation 2 stands:
+   user, not until t/ takes under two hours).
+
 ## Open questions from the unit map, resolved
 
 - Method-handle identity in `CallFrame.outerFor`: preserved, one bound
@@ -371,9 +436,14 @@ and the t/nqp sweep are recorded as the new baseline (forward only).
 - Nested units and `$*EMIT_CUIDS`: mechanism kept, cuids written only for
   nested units, class lookup replaced by the parent's nested table.
 - `getCodeRefs()` fallback road and `lookupCodeRef(String)`: class-road
-  only; untouched until item 8.
+  only; untouched until item 8. (Closed by milestone 4: both are gone,
+  and `getCodeRefs()` is a non-null `Array<CodeRef>` on every unit.)
 - Interop adaptor units (`BootJavaInterop`, `RakudoJavaInterop`): remain
   runtime-generated class-file units on the class road; item 9's problem.
+  (Closed by milestone 4: they generate a plain class with ASM and hand
+  it to `AdaptorUnit`, a hand-written `CompilationUnit` subclass; no
+  generated `CompilationUnit`, no class road. `P6Opaque`'s generated
+  attribute-storage classes are item 9's remaining half.)
 - Sidecar framing: byte-framed in the new format.
 - `serializedCodeRefCount`: carried in the meta.
 - Line attribution: block record plus engine source sections.
