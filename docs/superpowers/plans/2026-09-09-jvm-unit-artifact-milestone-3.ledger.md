@@ -67,3 +67,4 @@ Task 5: DONE_WITH_CONCERNS (sweep agent, sonnet): sweep 2 = 7200 s ceiling after
 Ruling: report-only tasks (3, 5) get no code review (no diff); their reports are the artifact.
 Task 5: complete (report task-5-report.md; no code)
 Task 6: docs dispatched (opus): plan position rows, spec milestone-3 line, AGENTS.md knob sentence, the docs twin of this ledger, reports kept; memory by the controller; final whole-branch review after the docs commit; then rebase + push.
+Final review (fable): Critical 1 = Task 4 cut the runtime's codeprograms pass-through that stage0's class-road compiler still needs (stage0 encodes whenever NQP_CODE_RUN is present in the environment); restored in the fix wave; gradle builds must not carry NQP_CODE_* until stage0 is regenerated (milestone 4).

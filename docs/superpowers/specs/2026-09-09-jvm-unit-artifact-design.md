@@ -348,12 +348,18 @@ and the t/nqp sweep are recorded as the new baseline (forward only).
    reader and `JarFileClassLoader` -- together with the JAST method
    carrier; the per-block stub emission in `Compiler.nqp` (arity check,
    locals, postlude, save sites, the `getCallSites`/`entryQbid`
-   methods) deleted with JAST; the `setup_blv` op; the four `NQP_UNIT`
-   comments left in the runtime's `.kt` sources and the `NQP_UNIT`
-   headers of `t/nqp/123` and `t/nqp/124`; and the interop adaptors
+   methods) deleted with JAST; the `setup_blv` op; and the interop adaptors
    (`BootJavaInterop`, `RakudoJavaInterop`), which still subclass a
    generated `CompilationUnit` through `ByteClassLoader` (item 9).
-   t/spec runs here (deviation 2 of milestone 3).
+   t/spec runs here (deviation 2 of milestone 3). Two items this list
+   carried are done in milestone 3's final-review fix wave: the four
+   `NQP_UNIT` comments in the runtime's `.kt` sources and the `NQP_UNIT`
+   headers of `t/nqp/123` and `t/nqp/124`. One thing milestone 4 must NOT
+   forget: the runtime's `$!codeprograms` pass-through (`JastClass` ->
+   `JASTCompiler` -> the `.codeprograms.lz4` sidecar) is what stage0's
+   class-road compiler needs, so it is deleted only with stage0 itself,
+   and no gradle build may carry `NQP_CODE_RUN`/`NQP_CODE_PRECOMP` until
+   then (stage0 encodes on their mere presence).
 
 ## Open questions from the unit map, resolved
 

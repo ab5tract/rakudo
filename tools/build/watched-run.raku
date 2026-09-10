@@ -14,7 +14,11 @@
 #   Attaches to the log another watched-run is writing and streams its
 #   markers -- the mirrored [Ns] lines that run already recorded, plus any
 #   --show of your own prefixed with the seconds since that run started --
-#   until its "=== EXIT" line, which is echoed and becomes the exit code.
+#   until the run ends: a single run's own "=== EXIT" line (echoed, and it
+#   becomes the exit code), or a -t run's summary verdict line ("N of M ok
+#   in Ss, logs: DIR", exit 0 when N == M, else 1). A -t digest carries one
+#   file-TAGGED "=== EXIT" line per file and no whole-run EXIT line, so the
+#   tagged ones are not mistaken for the end of the run.
 #   A log that does not exist yet is waited for; a log that shrinks (the
 #   run was restarted into the same path) is followed from its new start.
 #
@@ -172,7 +176,9 @@ my sub run-one(@cmd, Str :$log!, Int :$stall!, Int :$max!, :@pats, Str :$tag,
 
 # Follow a log another watched-run is writing: echo the [Ns] markers that
 # run mirrored into it, and any --show line of ours with the seconds since
-# that run's "=== started" stamp, until its "=== EXIT" line. Polling, not
+# that run's "=== started" stamp, until its "=== EXIT" line (single mode)
+# or its summary verdict line (-t mode, whose digest has no whole-run EXIT
+# line, only one file-tagged EXIT line per file). Polling, not
 # inotify: a second's lag is nothing against a build's minutes, and it needs
 # no native module. Answers the run's exit code, or 124 on our own ceiling.
 my sub follow-log(Str $log, :@pats, Int :$max!) {
@@ -214,9 +220,20 @@ my sub follow-log(Str $log, :@pats, Int :$max!) {
                     my $since = ($started ?? now - $started !! now - $attached).Int;
                     note "[{$since}s]{' ' x 3 - $since.Str.comb} $l";
                 }
-                if $l ~~ /^ '=== EXIT=' (\d+) ' verdict=' (\S+) ' elapsed=' (\d+) 's ===' $/ {
+                # The end of the followed run. Single mode: its own EXIT
+                # line, which carries no file tag -- a -t digest's per-file
+                # EXIT lines are tagged with the file's basename and end
+                # only that file, so the tag is what tells them apart.
+                if $l ~~ / '=== EXIT=' (\d+) ' verdict=' (\S+) ' elapsed=' (\d+) 's ===' /
+                        && $/.prematch eq '' {
                     note $l;
                     return +$0;
+                }
+                # -t mode: the summary verdict the run writes after its last
+                # file (there is no whole-run EXIT line to wait for).
+                if $l ~~ /^ (\d+) ' of ' (\d+) ' ok in ' \d+ 's, logs: ' \S/ {
+                    note $l;
+                    return $0 == $1 ?? 0 !! 1;
                 }
             }
         }
@@ -302,6 +319,9 @@ sub MAIN(
         my $line = "{ @results.elems - @failed.elems } of { @results.elems } ok "
                 ~ "in {$elapsed}s, logs: $log-dir";
         note $line;
+        # The digest gets the verdict too: a -t run has no whole-run EXIT
+        # line, so this is what a --follow on the digest ends on.
+        $show-fh.say: $line if $show-fh;
         # The verdict on disk, whole or absent: written beside the logs
         # under a temporary name and renamed into place.
         my $tmp = "$log-dir/SUMMARY.tmp";

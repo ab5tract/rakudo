@@ -53,9 +53,14 @@ per-server ceiling reaches the launcher through `RAKUDO_EVALSERVER_HEAP`
 
 Usage: directories are expanded to their `.t` and `.rakutest` files,
 files are taken as given. Since milestone 3 of the unit artifact
-(2026-09-09) the encoder and the unit road are on by default; nothing
-needs exporting beyond `RAKUDO_RAKUAST=1`, which the script exports
-itself. `NQP_UNIT=0`, `NQP_CODE_RUN=0`, `NQP_CODE_PRECOMP=0` opt out.
+(2026-09-09) the encoder and the unit road are always on; nothing needs
+exporting beyond `RAKUDO_RAKUAST=1`, which the script exports itself.
+`NQP_CODE_RUN` and `NQP_CODE_PRECOMP` are not knobs and must not be set
+at all: the compiler dies on `=0` (the road needs the encoder on), and
+stage0's bootstrap compiler treats their mere presence as "encode", so a
+gradle build with them exported builds stage1 differently. The surviving
+switches are the diagnostics `NQP_CODE_ENCODED`, `NQP_CODE_BAIL`,
+`NQP_CODE_WHY` and `NQP_CODE_STRICT`.
 
     RAKUDO_RAKUAST=1 \
         raku tools/build/evalserver-sweep.raku t/01-sanity t/02-rakudo/some.t

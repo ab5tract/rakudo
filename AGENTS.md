@@ -15,9 +15,14 @@ Session-start facts that keep getting relearned the hard way:
   Makefile exports it into its own recipes (2026-08-29), but nothing sets
   it for your own runs and test invocations, and `src/main.nqp` silently
   falls back to the legacy frontend without it. The encoder and the unit
-  road need no export at all: they are on by default since 2026-09-10
-  (nqp side; `NQP_CODE_RUN=0` / `NQP_CODE_PRECOMP=0` opt out, and there
-  is no class road left in the compiler to opt out *to*), so a bare
+  road are ALWAYS on since 2026-09-09 (nqp side) and are not knobs:
+  `NQP_CODE_RUN` and `NQP_CODE_PRECOMP` must not be set at all. The
+  compiler dies on `=0` ("the road needs the encoder on"), there is no
+  class road left to opt out *to*, and stage0's bootstrap compiler reads
+  their mere PRESENCE (even `=0`) as "encode", so a gradle build that
+  exports them builds stage1 differently. What survives are the
+  diagnostics: `NQP_CODE_ENCODED`, `NQP_CODE_BAIL`, `NQP_CODE_WHY`,
+  `NQP_CODE_STRICT`. So a bare
   `make` IS the Truffle engine build (frontend, BOOTSTRAP, settings all
   encoded) and every jar it writes is a unit artifact entered through
   `UnitMain`; there is no separate "bytecode build" to compare against,
