@@ -1,9 +1,10 @@
 package org.raku.rakudo
 
+import org.raku.nqp.runtime.AdaptorUnit
 import org.raku.nqp.runtime.BootJavaInterop
+import org.raku.nqp.runtime.BytecodeVersion
 import org.raku.nqp.runtime.CallFrame
 import org.raku.nqp.runtime.CallSiteDescriptor
-import org.raku.nqp.runtime.CompilationUnit
 import org.raku.nqp.runtime.ExceptionHandling
 import org.raku.nqp.runtime.GlobalContext
 import org.raku.nqp.runtime.Ops
@@ -726,9 +727,6 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
                 Type.getMethodDescriptor(Type.VOID_TYPE, TYPE_CU, TYPE_TC, TYPE_CR, TYPE_CSD, TYPE_AOBJ),
                 null, null)
         mc.mv = mv
-        val av = mv.visitAnnotation("Lorg/raku/nqp/runtime/CodeRefAnnotation;", true)
-        av.visit("name", "callout " + cc.target!!.name + " " + desc)
-        av.visitEnd()
         mv.visitCode()
         cc.descriptors.add(desc)
 
@@ -828,7 +826,7 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
     override fun createAdaptor(target: Class<*>): ClassContext {
         val cw = ClassWriter(ClassWriter.COMPUTE_MAXS or ClassWriter.COMPUTE_FRAMES)
         val className = "org/raku/nqp/generatedadaptor/" + target.name.replace('.', '/')
-        cw.visit(Opcodes.V1_7, Opcodes.ACC_PUBLIC or Opcodes.ACC_SUPER, className, null, TYPE_CU.internalName, null)
+        cw.visit(BytecodeVersion.EMITTED, Opcodes.ACC_PUBLIC or Opcodes.ACC_SUPER, className, null, "java/lang/Object", null)
 
         cw.visitField(Opcodes.ACC_STATIC or Opcodes.ACC_PUBLIC, "constants", "[Ljava/lang/Object;", null, null).visitEnd()
 
@@ -883,7 +881,6 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
         if (target.constructors.isNotEmpty())
             createConstructorDispatchAdaptor(cc, target.constructors)
         createAdaptorSpecials(cc)
-        compunitMethods(cc)
 
         finishClass(cc)
         /* debug
@@ -927,13 +924,7 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
     override fun computeInterop(tc: ThreadContext, klass: Class<*>): SixModelObject {
         val adaptor = createAdaptor(klass)
 
-        val adaptorUnit: CompilationUnit
-        try {
-            @Suppress("DEPRECATION")
-            adaptorUnit = adaptor.constructed!!.newInstance() as CompilationUnit
-        } catch (roe: ReflectiveOperationException) {
-            throw RuntimeException(roe)
-        }
+        val adaptorUnit = AdaptorUnit(adaptor.constructed!!, adaptor.descriptors, klass.name)
         adaptorUnit.initializeCompilationUnit(tc)
 
         val hash = gc.BOOTHash!!.st.REPR.allocate(tc, gc.BOOTHash!!.st)
