@@ -289,10 +289,71 @@ and the t/nqp sweep are recorded as the new baseline (forward only).
    blocks encode (item 7's last two shapes); the eval server serves
    artifact units and the suites (t/nqp, t/01-sanity, t/spec) run through
    it here.
+
+   DONE 2026-09-10 (plan
+   `docs/superpowers/plans/2026-09-09-jvm-unit-artifact-milestone-3.md`;
+   nqp `da1f5088a`..`30e849e3c`, rakudo `5ae25a8d3c`..`a22eb40b73`).
+   What shipped: exit-handler blocks, `withy` general, labeled control
+   and `for :label` encode (nqp `c872c83af`, additive wire op
+   `FORLOOPL = 35`); the encoder and the unit road became the defaults
+   and `NQP_UNIT` went away, the generated runners and the eval server
+   entering every unit through `UnitMain <unit jar>`, with the
+   record-road mainline frame carrying its file in backtraces again (nqp
+   `388173781`..`e5f2b3840`, rakudo `08a997dc2b`); seven gaps the first
+   t/ sweep found, closed (nqp `171d37508`..`8bab02391`: sized and
+   unsigned natives, the unnamed chain link, suspendable dedicated ops
+   with typed tokens on the additive wire op `OPCALLT = 36`, an
+   empty-message NPE, a sized `uint` attribute); and the compiler-side
+   deletions of milestone 4's list (nqp `30e849e3c`, rakudo
+   `a22eb40b73`). The gate on that toolchain, sleep suppressed:
+
+   - nqp clean build 222 s; `make` 1154 s from the top (rakudo.jar
+     171 s, BOOTSTRAP v6c starts 200 s, CORE.c 594 s to 1069 s = 475 s,
+     CORE.d 1069 s, CORE.e 1096 s)
+   - t/nqp 118/118 on the unit road; t/01-sanity 25/25 in 161 s;
+     precomp 14/14; t/03-jvm + t/10-qast 2/2
+   - all 16 Rakudo jars and all 11 nqp jars `unit.meta`-only; CORE.c
+     carries 4 nested units (8 `nested/` entries)
+
+   The four deviations the plan states, kept: (1) the runtime's
+   class-road writer and loaders stay, because stage0 is still a
+   class-road compiler running on this runtime -- they go with stage0 in
+   milestone 4; (2) t/spec did not run (user, 2026-09-09: not until t/
+   takes under two hours), so this line's t/spec clause moves to
+   milestone 4; (3) no RakuAST change for `ModuleLoader.class`, since
+   `LibraryLoader` already special-cases the name and sniffs for
+   `unit.meta`; (4) `--javaclass=perl6` stays, naming the unit id only,
+   which nothing keys on.
+
+   t/ ran twice through the eval server: sweep 1, after the flip,
+   7858 s over two invocations on two 6 GB servers; sweep 2, after the
+   deletions, 7270 s (the 7200 s ceiling after 59 of 60 chunks on three
+   4 GB servers, plus a 70 s tail), with no new failures and 26 files
+   fixed since sweep 1.
+
+   Parked, real and narrow: a where-constrained parameter of a routine
+   declared *and* called inside one `BEGIN` binds its `WhateverCode`
+   `$!do` to the dynamic unit's mainline code ref, leaving two
+   t/02-rakudo files red (evidence and the next lead in the milestone's
+   `task-3b-report.md`). Carried with it: a suspended typed op resumes
+   with the inner call's value instead of re-running the op (a `take`
+   inside a `Proxy` `FETCH` inside a typed op).
 4. stage0 regenerated as artifacts; the class road, jast2bc, JAST, the
    class loaders, the indy budget and the class-file build plumbing
    deleted (item 8), with the direct QAST walk replacing Compiler.nqp as
-   the driver.
+   the driver. After milestone 3 this is the whole remaining list, and
+   it is runtime-side: stage0 regenerated as artifacts; the runtime's
+   class-road writer and loaders deleted -- jast2bc, `Ops.compilejast`,
+   `loadcompunit`'s define branch, `MemoryClassLoader`, the sidecar
+   reader and `JarFileClassLoader` -- together with the JAST method
+   carrier; the per-block stub emission in `Compiler.nqp` (arity check,
+   locals, postlude, save sites, the `getCallSites`/`entryQbid`
+   methods) deleted with JAST; the `setup_blv` op; the four `NQP_UNIT`
+   comments left in the runtime's `.kt` sources and the `NQP_UNIT`
+   headers of `t/nqp/123` and `t/nqp/124`; and the interop adaptors
+   (`BootJavaInterop`, `RakudoJavaInterop`), which still subclass a
+   generated `CompilationUnit` through `ByteClassLoader` (item 9).
+   t/spec runs here (deviation 2 of milestone 3).
 
 ## Open questions from the unit map, resolved
 
