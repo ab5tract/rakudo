@@ -1,0 +1,51 @@
+pr: r4
+title: JVM: the Truffle code engine phases 1-4, Rakudo side
+branch: pr/04-truffle-code-engine
+
+# Section R7, log lines 100..109, 10 commits. Three groups.
+#
+# docs/jvm-truffle-migration.md is touched by every phase record AND by
+# 9c9d6f2f3d (the BEGIN-block split, which also changes
+# tools/build/raku-ast-compiler.nqp and AGENTS.md) AND by 174ea10afb (the
+# dice gate). Neither can cross the phase records, so the BEGIN split rides
+# in the docs commit (named in its subject) and the dice gate's doc note
+# rides in the build/eval-server commit. The only move is d8d4d7816b
+# (Makefile-common-macros.in only) pushed later over the docs run.
+
+= keep
+- b92bf4672f The Truffle migration plan: replace jast2bc, phase by phase
+
+= Truffle migration: Phases 1-4 recorded; a BEGIN block per 16 packages
+Final conclusions of the four phases. Phase 1: the Bytecode DSL skeleton
+runs, 34.0% of CORE.c's blocks encode, the calling convention is the
+whole game. Phase 2: runtime-compiled blocks run on the engine behind
+NQP_CODE_RUN=1 at t/01-sanity and t/02-rakudo parity, cold -e at parity,
+the warm int loop ahead. Phase 3: loops with handlers, handle and
+continuations on-engine at S04+S17 parity. Phase 4: engine programs bake
+into jars (string road, lz4 sidecar for CORE.c) behind NQP_CODE_PRECOMP=1;
+the engine build is the only build and docs/jvm-spectest-known-failing.txt
+is what future runs diff against. The RakuAST gen emits one BEGIN block
+per 16 packages (the single mainline OOM'd a 14GB compile); AGENTS.md
+records that a heap OOM is a symptom, and how to cage a heavy build.
+- 72cea5650a Truffle migration: Phase 1 done -- skeleton live, coverage measured
+- 73b1c57373 Docs: follow the Qt* -> Nqp*/TruffleEncoder/NQP_CODE_* rename
+- bde45636a4 Truffle migration: Phase 2 landed, gates recorded
+- 9c9d6f2f3d RakuAST gen: one BEGIN block per 16 packages, not one for the tree
+- 3417a2b0be Truffle migration: Phase 3 complete -- control flow and resume on-engine
+- d81301a1a9 Truffle migration: Phase 4 complete -- precompiled modules and the setting on-engine
+
+= Eval server: refuse over-budget starts, cage the JVM; .DELETE_ON_ERROR
+rakudo-eval-server does the memory arithmetic itself (its ceiling plus
+every live server's headroom against MemAvailable, exit 75 when it does
+not fit) and runs the JVM under systemd-run --scope -p MemoryMax.
+dice-spectest.raku, the spot-check gate, passes --heap, surfaces a
+refusal, cleans up best-effort, and honours never-run.txt for the steady
+set too. The Makefile templates set .DELETE_ON_ERROR so a failed recipe
+leaves no fresh-looking partial target.
+# moved: d8d4d7816b pushed later over 72cea5650a..d81301a1a9 --
+# tools/templates/Makefile-common-macros.in against
+# docs/jvm-truffle-migration.md, docs/jvm-spectest-known-failing.txt,
+# AGENTS.md and tools/build/raku-ast-compiler.nqp.
+- d8d4d7816b Makefile: .DELETE_ON_ERROR, so a failed recipe leaves no fresh corpse
+- 19fda6a398 Eval server: refuse over-budget starts and cage the JVM in a memory-capped scope
+- 174ea10afb Dice gate: an abort must report what it aborted on, and never-run means never

@@ -1,0 +1,48 @@
+pr: r10
+title: JVM unit artifact milestone 3: Rakudo on the unit road
+branch: pr/10-unit-artifact-m3
+
+# R15, log lines 233..242 (10 commits). Requires the nqp milestone-3 PR (the
+# unit road and the encoder as defaults) to be merged first.
+# The third watched-run feature (--follow ends on a -t digest too) shares
+# every docs file with the "milestone 3 done" commit that sits between it and
+# the other two, so it cannot join the watched-run group safely; it rides in
+# the docs commit, whose body names it.
+
+# moved: 08a997dc2b pulled earlier past 5641d0232f (watched-run.raku only);
+# a22eb40b73 pulled earlier past 5641d0232f, 7e1a66552e (AGENTS.md, watched-run.raku)
+# and 99d7b97d5d (the milestone-3 plan). They touch create-jvm-runner.pl,
+# jar-census.raku, rakudo-j-build.in, jvm-eval-server.md, the two build
+# scripts and Makefile.in only.
+= JVM: Rakudo runs as unit artifacts; every entry goes through UnitMain
+The generated runners, the eval server and the build runner enter through UnitMain
+<rakudo.jar>; tools/build/jar-census.raku reports whether a jar is unit.meta-only. The encoder
+knobs are defaults now, so the Makefile and the written-down build recipes (jvm-build.sh,
+jvm-build-resume.sh) drop them and enter nqp through UnitMain as well.
+- 08a997dc2b JVM: Rakudo runs as unit artifacts -- runners and the build runner enter through UnitMain <rakudo.jar>
+- a22eb40b73 Build: the encoder knobs are defaults now; the written-down build recipes enter nqp through UnitMain
+
+# moved: 7e1a66552e pulled earlier past 08a997dc2b (see above; disjoint from
+# watched-run.raku and AGENTS.md).
+= watched-run.raku: --follow=LOG attaches to a run; --show-file digest
+The --follow=LOG option attaches to a run somebody else started and streams its markers;
+with --show-file the log stays unfiltered and the marker digest (plus the EXIT line) goes to
+its own file. AGENTS.md documents both.
+- 5641d0232f watched-run.raku: --follow=LOG attaches to a run somebody else started and streams its markers
+- 7e1a66552e watched-run.raku: --show-file keeps the log unfiltered and writes the marker digest (+ EXIT line) to its own file
+
+# moved: 40145235cb and 99d7b97d5d pulled later past the two code commits and the
+# two watched-run commits; both touch the milestone-3 plan and ledger only.
+= docs: unit artifact milestone 3 -- plan, ledger, reports, the perf plan
+The milestone-3 plan (Rakudo on the unit road: encoder shapes, the flip, two t/ sweeps, the
+compiler-side deletions) with Task 3b, the unit-road gaps the t/ sweep found (6 encoder
+refusals, 5 engine-correctness causes); the done record (plan position, spec milestones 3/4,
+the eval-server sweep numbers, the encoder switches are not opt-outs); the ledger twin synced
+through the final review, fix wave and re-review, with the task and final-fix reports; the
+performance measurement session plan. watched-run --follow ends on a -t digest too.
+- 40145235cb docs: unit artifact milestone 3 plan -- Rakudo on the unit road, and its ledger
+- 99d7b97d5d docs: milestone 3 plan gains Task 3b -- unit-road gaps found by the t/ sweep
+- 5d1a3845f0 docs: unit artifact milestone 3 done -- Rakudo on the unit road
+- 9bf93837ca watched-run --follow ends on a -t digest too; the encoder switches are not opt-outs (docs); milestone-4 list consistent
+- b5e20e10a6 docs: performance measurement session plan
+- b4e5e65c3c docs: milestone 3 ledger twin synced through the final review, fix wave and re-review

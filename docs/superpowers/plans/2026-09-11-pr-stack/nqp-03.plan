@@ -1,0 +1,141 @@
+pr: n3
+title: JVM: the Truffle regex engine, to feature-complete
+branch: pr/03-truffle-regex-engine
+
+# Sections N5a (log lines 160..176), N5b (177..190), N5c (191..205), 46 commits.
+# Groups are contiguous runs in original order except where a `# moved:` comment says otherwise.
+
+= JVM/Truffle: a regex engine driven from QAST::Regex through a descriptor
+The nqp-truffle module: a backtracking regex VM (RxProgram/RxVmNode) under
+Truffle, a Cursor, the check harness and bench. The backend flattens
+QAST::Regex once at compile time into an int array plus a string pool
+(RxDescriptor.nqp), and the engine decodes it back; rxtypes it cannot encode
+answer null and keep the bytecode path.
+# NET-ZERO: the AST-interpreter design (RxNodes/RxLink/RxState) and the
+# parsed-text driving of the engine are introduced and replaced inside this
+# group; the text parser survives only as the harness's input (RxParser).
+- a697a12a4 JVM: a Truffle regex engine, and the ground it stands on
+- 9b1deedb5 JVM/Truffle: make the regex engine correct, and measure what that cost
+- 5c117c32f JVM/Truffle: find out why the engine does not compile
+- c67864dc2 JVM/Truffle: compile the pattern to a program so it can be compiled
+- 1c38bae97 JVM/Truffle: drive the engine from QAST::Regex, not from parsed text
+
+= JVM/Truffle: whole-regex shape, NQP captures on a Cursor, char classes
+The descriptor encodes the shape a whole regex has; the engine binds to a
+real Cursor and captures the way NQP captures; opcodes for the common
+character classes, and a scan that measures something.
+- b31685ffe JVM/Truffle: encode the shape a whole regex actually has
+- 565f20ac6 JVM/Truffle: bind the engine to a real Cursor, and stop encoding captures
+- 5de3afa26 JVM/Truffle: capture the way NQP captures, and encode captures again
+- f72f71d0a JVM/Truffle: opcodes for the common character classes, and a scan that measures something
+
+= JVM/Truffle: reach the engine from compiled code, compile rules to it
+GrammarEngine/TruffleGrammarEngine and the wire format; every generated
+runner starts a JVM that can run a grammar; a rule compiles to a descriptor
+instead of a matcher. NQP_JVM_TRUFFLE=require turns a missing engine into a
+failure.
+# Introduces the NQP_JVM_NO_TRUFFLE whole-engine toggle, removed later in
+# this file (see the `# spans:` note on that group).
+- 6ca347429 JVM/Truffle: let the engine be reached from compiled code
+- 723c3eecf JVM/Truffle: start every JVM so that it can run a grammar
+- 787b8f103 JVM/Truffle: compile a rule to a descriptor instead of a matcher
+
+= JVM/Truffle: five more rxtypes, the engine in Kotlin, and parity
+The engine is ported to Kotlin; five more rxtypes encode; parity with the
+bytecode path on the sweep. docs/truffle-grammar-engine.md records what the
+diff does not show and the measurement against what the engine replaces.
+- de41d6291 JVM/Truffle: write down what the diff does not show
+- 391d7883c JVM/Truffle: measure the engine against what it replaces
+- e277ce41c JVM/Truffle: five more rxtypes, the engine in Kotlin, and parity
+
+= JVM/Truffle: name what a qastnode bail is about; run rakudo's suite
+Lexical access on this backend is depth-indexed and resolved at compile
+time, which is what a qastnode fix has to satisfy; a qastnode bail names the
+lowered local it is about. Rakudo's own suite runs under the engine.
+- 09cbdfbbd JVM/Truffle: record what the qastnode attempt is actually constrained by
+- 2b69b9757 JVM/Truffle: run rakudo's own suite under the engine, which had never been done
+- 4423777a0 JVM/Truffle: name the lowered local a qastnode bail is about
+
+# ---- N5b ----
+
+= JVM: shape-keyed helper sites, corrupt-capture reports, pending dispatch
+A helper dispatch site is keyed by argument shape, not just by method; a
+corrupt capture is reported where it is read and which half is corrupt; the
+outer pending dispatch is restored rather than cleared, in realize too.
+- 6bbce5b7a JVM: key a helper dispatch site by argument shape, not just by method
+- 830076873 JVM: report a corrupt capture where it is read, not where it hurts
+- 08d6ef4e4 JVM: restore the outer pending dispatch, rather than clearing it
+- 7d5439d12 JVM: restore the pending dispatch in realize too, and say which half is corrupt
+
+= keep
+- 909eb1da8 JVM: keep a class under the JVM's resolved-reference ceiling
+
+= JVM: make the eval server survive more than four runs
+Per-run state (dispatch bootstrap, grammar-engine programs, global context)
+is reset between runs; shutdown hooks no longer pin every run. IntelliJ
+project files are ignored.
+- 1a4d18377 JVM: make the eval server survive more than four runs
+- 80073333c Ignore IntelliJ project files
+- b016312e2 JVM: stop shutdown hooks from pinning every eval-server run
+
+= keep
+- a95e2bc79 JVM: an explicitly-managed string must come from the C allocator
+
+= JVM: raku-invoke at runtime, exact smart coercions, lazy object lexicals
+Runtime invocations go through raku-invoke and the syscall gaps are closed;
+the smart coercions have the dispatcher programs' exact semantics; object
+lexicals vivify lazily and dynamically-bound code is repointed.
+- cbe306d58 JVM: run raku-invoke for runtime invocations, and close syscall gaps
+- 9d56f9cef JVM: give the smart coercions the dispatcher programs' exact semantics
+- b1c5f9384 JVM: vivify object lexicals lazily, and repoint dynamically-bound code
+
+# ---- N5c ----
+
+= Truffle engine: a CR LF pair is one atom, consumed whole by a newline
+# moved: a60e3db49 (nqp-truffle RxProgram.kt, RxVmNode.kt) pulled later past
+# a95e2bc79, cbe306d58, 9d56f9cef, b1c5f9384 -- those touch only
+# src/vm/jvm/runtime/**; disjoint.
+- a60e3db49 Truffle engine: a consuming newline takes the whole CR LF pair
+- efd29f30a Truffle engine: match a CR LF pair as one atom
+
+= Encode backtrackable rules, with unencodable subrule calls as callbacks
+Every rule the descriptor can encode runs on the engine; the bytecode path
+exists only for the rules that still bail (NQP_RX_SURVEY names them), and
+the NQP_RX_* triage knobs are where bisection belongs. Backtrackable rules
+that call no subrules encode; an unencodable subrule call is carried as a
+callback piece, and rule code runs against the captures made so far.
+%*RX resolution has env-gated diagnostics.
+# spans: the whole-engine toggle NQP_JVM_NO_TRUFFLE removed here was introduced
+# in this file's third group (the "reach the engine from compiled code" group).
+# The removal cannot be moved back: it touches QAST/Compiler.nqp and
+# runtime/GrammarEngine.kt, which the intervening "five more rxtypes",
+# "resolved-reference ceiling" and "eval server" commits also touch. Both stay.
+- f3d300474 Remove the whole-engine toggle
+- 5d9096c4c Encode backtrackable rules that call no subrules
+- 9a655a95f Carry unencodable subrule calls as callback pieces
+- b9382278f Run rule code against the captures made so far
+- a68a1b550 Env-gated diagnostics for %*RX resolution
+
+= Encode dynquants, conjunctions, ignoremark, uniprop pairs, pass names
+Dynamically-bounded quantifiers, conjunctions, ignoremark literals, uniprop
+pairs and computed pass names all encode.
+- 5082e4e6e Encode dynamically-bounded quantifiers
+- a61f942c7 Encode conjunctions
+- d498f557c Encode ignoremark literals
+- ffcc53427 Encode uniprop pairs
+- 98dc1d223 Encode computed pass names
+
+= keep
+- bddd763e9 Split the callback dispatch across blocks; drop the piece cap
+
+= keep
+- 28900d227 Cursor re-entry: resumable rules and backtracking into subrules
+
+= Doc: the engine is feature-complete and the sweep is green
+qastnode is on, with the two causes and their fixes recorded; the engine
+is feature-complete and the sweep is green.
+# moved: 3912f3aee (docs/truffle-grammar-engine.md only) pulled later past
+# 5082e4e6e, a61f942c7, d498f557c, ffcc53427, 98dc1d223, bddd763e9 and
+# 28900d227 -- none of which touch docs/; disjoint. One findings docs commit.
+- 3912f3aee Doc: qastnode is on; record the two causes and their fixes
+- d0578362e Doc: the engine is feature-complete and the sweep is green
