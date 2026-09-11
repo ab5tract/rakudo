@@ -1,9 +1,17 @@
 # Migrating general code from JVM bytecode to Truffle
 
-Status: Phase 2 landed 2026-09-01 -- runtime-compiled blocks run on the
-engine behind NQP_CODE_RUN=1; gates and the two documented exclusions
-below. The grammar engine already made this journey for regexes; this
-plan generalizes that playbook to all code.
+Status: **finished. This file is history from here down** — it is the
+2026-09-01 plan and its running log, kept for the reasoning and the
+inventories, and every knob, class name and "still to delete" list in it
+is written in the present tense of its own date. Where it left off: Phase
+2 landed 2026-09-01, runtime-compiled blocks running on the engine behind
+`NQP_CODE_RUN=1`. What happened after: the encoder became the only road
+(2026-09-09, `NQP_CODE_RUN`/`NQP_CODE_PRECOMP` must now not be set at
+all), and unit-artifact milestone 4 (2026-09-10) deleted the class road
+entirely — JAST, jast2bc, the sidecar, the class loaders, the indy
+budget, and the class-file stage jars. The current position is
+`docs/jvm-truffle-only-plan.md`. The grammar engine already made this
+journey for regexes; this plan generalized that playbook to all code.
 
 ## Why, and why we believe it
 

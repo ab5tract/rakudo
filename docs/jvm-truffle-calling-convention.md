@@ -251,9 +251,14 @@ edits test in ~5s via the jar sync.
   — it is JVM-startup-dominated and the default *setting* is bytecode, so
   frame-free only touches the test files. An earlier 63→50 s reading was
   cache warmup and is **retracted**.
-- **Not yet done:** the setting-wide measurement. The default `make`
-  compiles the setting as bytecode (engine/precompiled/frame-free are
-  opt-in per compile: `NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 NQP_CODE_NOFRAME=1`).
+- **Not yet done:** the setting-wide measurement. (As of 2026-09-06, when
+  this was written, the default `make` compiled the setting as bytecode
+  and engine/precompiled/frame-free were opt-in per compile:
+  `NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 NQP_CODE_NOFRAME=1`. Since 2026-09-07
+  a bare `make` IS the engine build, and since milestone 4, 2026-09-10,
+  there is no bytecode road at all: `NQP_CODE_RUN`/`NQP_CODE_PRECOMP` must
+  not be set, and only `NQP_CODE_NOFRAME` survives as a knob — still off,
+  for the reason two bullets down.)
   To see the win across every setting method, build the setting engine +
   precompiled + frame-free and compare warm eval-server 01-sanity against
   an engine+precompiled baseline. Deferred until more per-call wins land.
