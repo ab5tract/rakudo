@@ -1,0 +1,115 @@
+pr: r5
+title: JVM: Phase 5 -- Rakudo-side fixes and the coverage campaign's conclusions
+branch: pr/05-phase5-fixes
+
+# R8, log lines 110..162 (53 commits). Two code commits also edit
+# docs/jvm-truffle-migration.md (the return-type cache and the stray
+# special-casing drop), so the lab notebook cannot be gathered into one group
+# without a docs commit crossing them; it is squashed into three
+# final-conclusions commits instead, one per stretch between those anchors.
+# Every retracted diagnosis (the p6return chain and its two corrections) lies
+# inside the middle stretch, so none of them survives.
+
+= keep
+- 8ead5c9baa Silence Truffle's virtual-thread warning; fix a Bool returned from a --> int sub
+
+# moved: fdeb153138 pulled earlier past five docs-only commits
+# (docs/jvm-truffle-migration.md); it touches src/vm/jvm/Raku/Ops.nqp only.
+= keep
+- fdeb153138 Publish registered op desugars for the code engine
+
+# moved: 067e8d17db (AGENTS.md only) and 8ddd5834b1 (tools/build/watched-run.raku
+# only) pulled earlier past the docs-only commits between them and the first
+# code commit; nothing else in the section touches either file.
+= watched-run: literal --show, regex --show-rx, a SUMMARY file per sweep
+The --show flag matches literals and --show-rx a Raku regex (as many of each as needed); every
+sweep writes a SUMMARY file beside its log. AGENTS.md records that the eval server budgets its own
+heap now, so the manual jobs x heap arithmetic is gone from the instructions.
+- 067e8d17db AGENTS.md: the eval server budgets its own heap now
+- 8ddd5834b1 watched-run: literal --show, regex --show-rx, and a SUMMARY file per sweep
+
+= Docs: Phase 5 coverage campaign -- the gate, the table, the desugar door
+t/ is the Phase 5 gate and the coverage table is measured after every batch. The hash/list
+binder bug bisects to BOOTSTRAP's 'new': one block, and an interaction. The op-desugar wall
+(~590 blocks) has a door, the registered desugars, and enabling all 19 is worth measuring.
+List constructors land at 80.6%, native attribute references at 81.7%, with the ranking of
+what remains after them.
+- 6f76c2e3e7 Docs: t/ is the Phase 5 gate, and the eval server dies after ~43 files
+- 9e208a27e9 Docs: the Phase 5 coverage table, measured after every batch
+- 31ff1cd1f8 Docs: the hash/list binder bug, bisected to BOOTSTRAP's 'new'
+- bc0a7a4277 Docs: the binder bug is one block, and an interaction
+- e1d5d33767 Docs: the op-desugar wall is ~590 blocks, and it has a door
+- 3fea697aca Docs: desugar coverage numbers, and what enabling all 19 is worth
+- 82b303b38c Docs: list constructors land at 80.6%; hash alone carries the binder bug
+- c31fe62f5a Docs: native attribute references land at 81.7%; the ranking after them
+
+= keep
+- 65d3cf553c JVM: cache the return-type check per signature; document dispatch on Truffle
+
+# moved: 0525b95ae6 pulled earlier past 1ee9ab2df3 (docs-only); it touches
+# src/Raku/ast/signature.rakumod only.
+= keep
+- 0525b95ae6 RakuAST: check a definite parameter type as its base type plus concreteness
+
+= Docs: Phase 5 coverage campaign -- findings from 83.0% to 94.7%
+Typed assigns, native lexical references and batches 2-5 take CORE.c encodability from 83.0%
+to 94.2%; the mechanical tail and batch 11 reach 94.7% (the survey is an upper bound). What the
+CORE.c compile taught: PE code size, a 145 s parse, the deopt cycle behind the abandoned
+compiler roots; lazy refold and inlining across dispatch land. Regex was never a wall (it
+encodes). Hash encodes: the bug was a general flat-named-arg defect. p6return's blocker: the
+logical handler chain and the Java stack diverge at an engine frame; the unwind cannot reach it.
+- 1ee9ab2df3 Docs: the typed assigns land at 83.0%; lexicalref is now the lever
+- 444a7c2758 Docs: what the CORE.c compile taught -- PE code size, and 145s
+- e81af3c80d Docs: the deopt cycle behind the abandoned compiler roots, and its fix
+- 39d18bb76f Docs: lazy refold lands; what stays open on the dispatch road
+- 6dc1b0fddf Docs: inlining across dispatch lands
+- b5c7197506 Docs: native lexical references land at 88.1%; the survey is an upper bound
+- ed6f11845f Docs: batch 2 lands at 90.8%; Raku's defor override
+- c6f3d65a1d Docs: batch 3 lands at 91.9%; three encoder bugs it exposed
+- 624e86eb51 Docs: batch 4 lands at 93.9%
+- cd2fd22d49 Docs: batch 5 lands at 94.2%
+- 9faba61e74 Docs: plain uint lexicals; the three walls left below 94.2%, and why deletion waits
+- 86933505c4 Docs: p6return -- three encodings, one failure, and why it needs a real protocol
+- 0f0648c3be Docs: regex was not a wall -- it encodes; the two real blockers left are hash and p6return
+- be88ea3ebd Docs: hash -- native params fixed the binder bug; a narrow int-value bug remains
+- 3391cde42d Docs: sharpen the hash int-value diagnosis -- flatten swaps key/value for a boxed-int entry
+- f6dec3f4f8 Docs: the hash bug is a latent enclosing-block bug, not the hash wire (proven correct)
+- 1fbe817b3d Docs: hash encodes -- the bug was a general flat-named-arg defect; p6return is the last wall
+- ae5d1dbb21 Docs: p6return -- 4th attempt confirms it's frame handling; control-throw not equivalent
+- ad1c34628a Docs: p6return -- the precise mechanism is engine-handler-block vs the handle machinery's frame protocol
+- 1f54b9d393 Docs: CORRECTION -- p6return is not a frame problem; it's a want-propagation cascade (bigint-unbox)
+- 82104164ce Docs: localize p6return's cascade to IMPL-FITS-NATIVE-INT's try/unbox; NQP_EH_DEBUG is the next diagnostic
+- dff88eb3b1 Docs: the p6return blocker is an engine handle host-error suppression bug (matched unwind still escapes)
+- 8f77c2eecf Docs: refine -- the second handle escapes, so the host-error path leaves curHandler corrupted
+- 17e8c072f3 Docs: hostErrToUnwind only ever sees NqpUnwind -- the bigint-unbox host error bypasses the try's conversion
+- 17607c98a7 Docs: diagnosis flips -- bigint-unbox is a caught red herring; a control unwind escapes to a dead handler
+- 053f5e309e Docs: handler 59 is a bytecode CATCH handler; engine exitAfterUnwind pops past it -- frame-exit-order bug
+- 9ccf8bdd5a Docs: architectural root -- logical handler chain vs Java stack diverge at an engine frame
+- 296169cfd2 Docs: confirmed -- handler 59 is LIVE but not a Java-stack ancestor; logical/Java handler-chain divergence is architectural
+- 1151bf94a1 Docs: mechanical tail moves 94.2% -> 94.5% (+47 blocks; not fully co-blocked)
+- 3fbe0355a4 Docs: batch 11 -> 94.7%
+
+= keep
+- 16980802f6 Drop stray JVM special-casing: Failure, IO::Path stat
+
+= keep
+- 89918277fd Stash: atomicbindattr unconditionally; the JVM guard's cause is fixed
+
+# moved: 0bdde837d9 pulled earlier past 82d936703b (docs-only); it touches
+# src/vm/jvm/runtime/org/raku/rakudo/RakOps.kt only.
+= keep
+- 0bdde837d9 p6box_u boxes unsigned
+
+= Docs: Phase 5 coverage campaign -- conclusions and the final table
+Day two takes CORE.c to 96.5%: batches 12-21 (with/without, the pure-op tail, uint params and
+attributes, p6return as the SUCCEED handler's value, syscalls as the newdisp op mechanism with
+the stat family, the backend directives removed). Unsigned boxing: box_u/unbox_u/set_uint and
+the *param_u readers are unsigned and the line is drawn there; the wider chain (the compiler's
+RT_UINT box, the binder sites, the container FETCH) is a separate task. Ops come from the
+classlib registry, not by hand: it lands flat, redundant with the hand rows, which are deletable.
+- 82d936703b Docs: Phase 5 day two -- batches 12-21, p6return, syscalls, directives, the uint box finding
+- 18915391af Docs: batch 23 lands; the bytecode RT_UINT box is the last uint cause
+- 04c39b8bbc Docs: ops come from the classlib registry, not by hand
+- 1540d38b2a Docs: five signed sites for one native type (batch 24/24b)
+- e12064e0b1 Docs: uint boxing beyond batch 23 reverted; the line is drawn there
+- ab7e229ad4 Docs: the classlib registry lands flat -- redundant with the hand rows, hand cases now deletable

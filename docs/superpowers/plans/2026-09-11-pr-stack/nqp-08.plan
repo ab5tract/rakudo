@@ -1,0 +1,79 @@
+pr: n8
+title: JVM unit artifact: the format, the loader, UnitMain and the record road (milestones 1+2)
+branch: pr/08-unit-artifact-m1-m2
+
+# Sections N12 + N13 of the survey (log lines 323..342, 20 commits). This PR introduces UnitMain,
+# the rakudo/nqp entry contract (hazard H2): every rakudo section from R13 on needs it merged.
+
+= keep
+- 4a7eb2925 unit artifact: the format (unit.meta, byte-framed programs, zip envelope) with a round trip
+
+= keep
+- 383d88131 gradle: drop the two delegated-property declarations Gradle 10 removes
+
+= unit artifact: unit hooks, the shared block entry, ProgramUnit
+CodeEngine/CompilationUnit hooks (serializedBlob, claimNested, engineProgram, unitId), materialized
+targets and the shared block entry (ProgramEntry). claimNested wraps only the load, so control
+unwinds and internal dies pass through. ProgramUnit is a CompilationUnit built from the block
+table without reflection, with its test.
+- e5a0004a4 unit artifact: unit hooks (serializedBlob, claimNested, engineProgram, unitId), materialized targets, the shared block entry
+- e80d0586a unit artifact: claimNested wraps only the load; control unwinds and internal dies pass through
+- 3436eb48e unit artifact: ProgramUnit, a CompilationUnit built from the block table without reflection
+
+= unit artifact: the bilingual loader, UnitMain; runners enter through it
+# moved: 5ad6fc414 (GenerateRunnerTask.kt, tools/templates/jvm/nqp-j.in only) pulled ahead of
+# 138008759 (NqpDispatch.kt), 353efef12 and 7fec6d87d (Compiler.nqp, JASTNodes.nqp,
+# TruffleEncoder.nqp) -- disjoint files; it completes the UnitMain entry.
+LibraryLoader reads unit.meta to pick the road, with a cheap sniff cached per path; artifact-road
+errors translate to dieInternal. UnitMain is the entry on either road: the eval server goes
+through loadApp, and the generated runners and nqp-j enter through UnitMain.
+- 4e31b8f1d unit artifact: the bilingual loader (unit.meta picks the road), UnitMain, eval server through loadApp
+- 787b8f925 unit artifact: cheap unit sniff with a per-path road cache; artifact-road errors translate to dieInternal
+- 5ad6fc414 runners enter through UnitMain (either road)
+
+= unit artifact: the JAST record carries the unit; NQP_UNIT all-or-nothing
+# spans: the NQP_UNIT knob and the $*UNIT_FALLBACKS count are introduced here and deleted in n9
+# ("the compiler emits only unit records"); both stay in place, the removal being a later PR.
+The JAST record carries ids, programs, call sites and static lexical values; the wrappers (raw
+blocks) encode on the artifact road, and a fallback body is counted. Static lexical rows are built
+after serialize (where setup_blv ran), and since the road is chosen before any block compiles, a
+block with no engine program under NQP_UNIT is a compile error naming the block and the knobs, not
+a quiet class file. The dispatcher materializes an artifact block's target on demand instead of
+waiting for a stub run.
+- 138008759 jesp/dispatch: materialize an artifact block's target on demand instead of waiting for a stub run
+- 353efef12 unit artifact: the JAST record carries the unit (ids, programs, call sites, static lexical values); NQP_UNIT road in Compiler.nqp
+- 7fec6d87d unit artifact: static lexical rows after serialize; NQP_UNIT is all-or-nothing (a fallback is a compile error)
+
+= unit artifact: the writer (record -> zip), jvm-write-unit, t/nqp/123
+# moved: 56adfe211 (UnitFormatTest.kt, NqpWire.java, Backend.nqp, LibraryLoader.java, UnitZip.kt,
+# t/nqp/123) pulled ahead of 0f5137aef (TruffleEncoder.nqp only) and 0d45a336d
+# (NqpProgramBuilder.java only) -- disjoint; it is the milestone-1 review of this writer.
+UnitWriter turns the JAST record into the zip; the jvm-write-unit syscall and HLL::Backend's
+artifact road; t/nqp/123 round-trips a module. From the stage2 build on the road: QAST::VM encodes
+by its jvm alternative, and a buffered handle write no longer NUL-pads the file. Final review: the
+writer is the only refusal point on the unit road, first-entry sniff, a stale-jar guard, the
+PARAMS sentinel documented.
+- 934b33849 unit artifact: the writer (JAST record -> zip), jvm-write-unit, the backend's artifact road, t/nqp/123
+- 941b5aae5 unit artifact: encode QAST::VM (the jvm alternative); a buffered write no longer NUL-pads the file
+- 56adfe211 unit artifact: final-review fixes -- writer is the only refusal point on the unit road; first-entry sniff; stale-jar guard; PARAMS sentinel documented
+
+= jesp/encoder+engine: custom_args header slots shifted; named args bind
+patch_params leaves the PARAMS placeholder in place, splices the three custom_args header words
+after it and shifts the recorded deferred-qbid slots by the same three (Rakudo's first build on
+the engine decoded a wrong tag in a CORE.c program of Str.subst). The PARAMS reader recognises
+the header's shape (n == 0, accepted -1) and skips the extra-named rejection, since the runtime
+Binder binds every named argument. The wire is unchanged.
+- 0f5137aef jesp/encoder: the custom_args header must shift the nested-block slots
+- 0d45a336d jesp/engine: a custom_args block takes named arguments (the Binder binds them)
+
+= unit artifact: the record road in the runtime, every unit under NQP_UNIT
+Milestone 2. jvm-build-unit hands a runtime compile's JAST to the writer's reading half and
+loadcompunit builds a ProgramUnit from the record; nested records are retained in GlobalContext
+and embedded by the parent's writer, so claimNested has no in-memory fallback (a missing nested/
+entry is the hard error). Compiler.nqp decides the road from the knob alone -- a jar-bound unit
+with an output is written, anything else is a record in memory -- and every unit-road program is
+index-framed. t/nqp/124 runs a script, its EVALs and a class on the road, asserted from a marker.
+- cfa0846ac unit artifact: the record road in the runtime -- jvm-build-unit, loadcompunit builds a ProgramUnit from the record, nested records retained and embedded
+- 0b149eaeb unit artifact: under NQP_UNIT every unit takes the road -- runtime compiles become records in memory
+- 02f6fd00e t/nqp/124: a script, its EVALs and a class on the record road (NQP_UNIT), with the road asserted from a marker run
+- da1f5088a unit artifact: final-review fixes -- claimNested has no in-memory fallback (a missing nested/ entry is the hard error); t/nqp/124 sets the encoder switches for its children

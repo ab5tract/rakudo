@@ -1,0 +1,135 @@
+pr: n5
+title: JVM: Phase 5 -- encode coverage to 96.5% and the classlib registry
+branch: pr/05-phase5-encode-coverage
+
+# nqp section N8 (Phase 5 encode-coverage campaign): log lines 233..285,
+# 53 commits. No docs-only commits in this range, so no lab-notebook group.
+# Engine machinery, encoder batches and the registry all touch NqpOps.java
+# and TruffleEncoder.nqp, so every group is a contiguous run; nothing moved.
+
+= Phase 5: calling-convention family; a coverage report that cannot lie
+The calling-convention ops encode; repeat loops encode and immediate blocks
+must not; the encode decision is traceable, and the coverage report counts
+blocks the way the encoder actually decides them.
+- 01649f700 Phase 5: the calling-convention family, and a coverage report that cannot lie
+- 2bdcefe89 Phase 5: repeat loops encode; immediate blocks must not; the encode decision is traceable
+
+= Phase 5: sole blockers, op desugars, list constructors -- 70.7% -> 81.7%
+Two sole-blocker batches (CORE.c 70.7% -> 74.2% of blocks), encoding through
+the registered op desugars (-> 77.3%), the list constructors (-> 80.6%) and
+native attribute references (-> 81.7%). hlllist/hllhash read the running
+frame's HLL config.
+- ece3b0c8b Phase 5: the sole-blocker batch -- CORE.c goes 70.7% -> 73.4% of blocks
+- a710fd6a8 Phase 5: second sole-blocker batch -- CORE.c 73.4% -> 74.2% of blocks
+- e0003e7cd Code engine: hlllist/hllhash read the running frame's HLL config
+- 5abb4ac44 Phase 5: encode through registered op desugars -- CORE.c 74.2% -> 77.3%
+- cdfb2545e Phase 5: the list constructors encode -- CORE.c 77.8% -> 80.6% of blocks
+- 23f247c1d Phase 5: native attribute references encode -- CORE.c 80.6% -> 81.7% of blocks
+
+= Code engine: dispatch programs replay as PE-visible code; JDK out of PE
+Dispatch programs replay as partial-evaluation-visible code and enter engine
+callees directly; the JDK stays out of partial evaluation; attribute reads
+compile to field loads.
+- aaa67257a Code engine: dispatch programs replay as PE-visible code, and enter engine callees directly
+- 8bd9b1c42 Code engine: keep the JDK out of partial evaluation; attribute reads as field loads
+
+= keep
+- 06ced76b2 Phase 5: the typed assigns encode
+
+= Code engine: instruction caches, lazy refold, inlining across dispatch
+Per-instruction caches for lexical-by-name, WVal and attribute access; the
+caller chain is searched for a live outer only when one can exist; Kotlin's
+null and lateinit checks stay out of compiled code; the interpreter loop is
+handed Truffle exceptions, never host ones; a dispatch site refolds lazily,
+not on every install; engine callees inline across a dispatch through
+adopted call nodes.
+- 814a5e4b1 Code engine: per-instruction caches for lexical-by-name, WVal, and attribute access
+- 6f1f93aaa JVM: search the caller chain for a live outer only when one can exist
+- bc7bfd2a3 Code engine: keep Kotlin's null and lateinit checks out of compiled code
+- 0aa75dded Code engine: hand the interpreter loop Truffle exceptions, never host ones
+- 4b8de20a5 Code engine: refold a dispatch site lazily, not on every install
+- ad4f7e8b8 Code engine: engine callees inline across a dispatch through adopted call nodes
+
+= Code engine: lexicalrefs, the exception family, defor, native parameters
+Native lexical references encode (the lexicalref scope); the exception
+family, typed attributes, the valued two-child if and the small sole
+blockers; Raku's own defor, not nqp's; native parameters and immediate
+blocks, with the three encoder bugs they exposed fixed.
+- 0260f5ac4 Code engine: native lexical references encode (the lexicalref scope)
+- 61744899f Code engine: the exception family, typed attributes, valued two-child if, and the small sole blockers
+- 62a87e1ca Code engine: Raku's own defor, not nqp's
+- 8cc46ca6a Code engine: native parameters, immediate blocks, and three encoder bugs they exposed
+
+= Code engine: small-op tranches, loop bodies, uint lexicals, regex, hash
+Tranches of small ops plus a host-exception diagnostic; loop bodies that
+take the condition; plain uint lexicals share the int slots; an
+engine-covered regex encodes, handed to the grammar engine; a flat named
+argument carries no name, and hash encodes; the mechanical tail: multidim,
+floor/ceil, objectid, ord/rindex/index arity desugars, pow_I,
+ctxcallerskipthunks, multidim refs.
+- a38ac6bb6 Code engine: a tranche of small ops, and a host-exception diagnostic
+- 610001737 Code engine: loop bodies that take the condition, and more small ops
+- 89d2a2ab2 Code engine: plain uint lexicals share the int slots
+- a1c5fc578 Code engine: an engine-covered regex encodes, handed to the grammar engine
+- 905134017 Code engine: a flat named argument carries no name, and hash encodes
+- d2370d749 Code engine: the small-op mechanical tail (multidim, floor/ceil, objectid, and kin)
+- e31086efb Code engine: ord/rindex/index arity desugars, pow_I, ctxcallerskipthunks, multidim refs
+
+= Truffle encoder: with/without, uint params and attrs, op sweeps -> 96.5%
+with/without and the pure op tail (95.3%); uint parameters and comparisons
+with the atomic/IO tail (95.6%); uint attributes, Math ops and the IO/misc
+tail (96.0%); the computational op sweep, then p6return as the SUCCEED
+handler's value (96.5%).
+- b79ff0643 Truffle encoder: with/without + pure op tail -> 95.3%
+- 60fa74be3 Truffle encoder: uint parameters + uint comparisons + atomic/IO tail -> 95.6%
+- 7ad7878ce Truffle encoder: uint attributes + Math ops + IO/misc tail -> 96.0%
+- 86410afcf Truffle encoder: computational op sweep -> 96.5%
+- ed84c2fa6 Truffle encoder: p6return as the SUCCEED handler's value -> 96.5%
+
+= Truffle encoder: syscall dispatch, IO::Path op rows, uint boxes unsigned
+nqp::syscall encodes as the boot-syscall dispatch it is, with the stat
+syscall family; an immediate block's `count` alone no longer bails (+7 net:
+each given/when routine it frees is refused again by loop shape, chained
+chain or resume); the file/env op rows the un-guarded IO::Path code needs;
+P6opaque's atomic attribute ops delegate like the plain ones; a uint result
+boxes through box_u, and a native uint boxes and unboxes unsigned. 96.5%.
+- e4e02c345 Truffle: nqp::syscall as the boot-syscall dispatch it is; the stat syscall family
+- 16efe3810 Truffle encoder: an immediate block's `count` alone does not bail -> 96.5%
+- eff7c4537 Truffle encoder: the file/env op rows the un-guarded IO::Path code needs
+- 1ea99c3e1 P6opaque: the atomic attribute ops delegate like the plain ones
+- 9c0ef460f Truffle encoder: a uint result type that boxes through box_u -> 96.5%
+- eeb23686f Runtime: a native uint boxes and unboxes unsigned
+
+= keep
+- 63063d2cd Truffle: classlib ops from the registry, not by hand
+
+= Truffle encoder: coercions, comparison chains, numify, p6invokeflat
+str<->int/num and num->str coercions; nested comparison chains
+($a < $b < $c) and unnamed chains; numify, settypefinalize, p6invokeflat.
+- 1f76f6d22 Truffle encoder: str<->int/num and num->str coercions
+- 49c8cc7fe Truffle encoder: nested comparison chains ($a < $b < $c)
+- d87b98773 Truffle encoder: numify, settypefinalize, p6invokeflat, unnamed chains
+
+= keep
+- 4f888ab3b Truffle: drop 271 hand op3 rows the classlib registry covers; teach the survey the registry
+
+= Truffle: usecapture, the sprintf family, 3-operand loops, xor
+usecapture hands a re-dispatch the frame's own args; the sprintf family
+desugars to the nqp hll sub, as Compiler does; 3-operand loops carry the
+loop's "next" expression; xor is variadic "exactly one true", desugared.
+- e0457d37e Truffle: usecapture -- the frame's own args for a re-dispatch
+- aa2ebc481 Truffle: sprintf family -- desugar to the nqp hll sub, as Compiler does
+- 67237fb55 Truffle: 3-operand loops -- the loop's "next" expression
+- f8457a966 Truffle: xor -- variadic "exactly one true", desugared
+
+= Truffle: repeat_ handlers, labeled loops, continuations, sized uints
+repeat_ loops with last/next/redo handlers; labeled loops check the loop's
+own label at the unwind; delimited continuations -- reset / control /
+invoke; sized uint lexicals mask the value on bind.
+- 7db4a2878 Truffle: repeat_ loops with last/next/redo handlers
+- 8ff84ecea Truffle: labeled loops -- the loop's own label at the unwind check
+- 28dd67a64 Truffle: delimited continuations -- reset / control / invoke
+- c3f7abe6c Truffle: sized uint lexicals -- mask the value on bind
+
+= keep
+- aa7c44f0a Code engine: clear the resolution inline caches per eval-server run
