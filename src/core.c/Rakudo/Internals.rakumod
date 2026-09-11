@@ -1454,24 +1454,13 @@ my class Rakudo::Internals is implementation-detail {
               nqp::chars(my str $entry = self!next),
               nqp::stmts(
                 (my str $path = nqp::concat($!abspath,$entry)),
-#?if moar
                 (my $stat := nqp::syscall('file-stat', nqp::decont_s($path), 0)),
                 nqp::if(
                   nqp::syscall('stat-flags', $stat, nqp::const::STAT_ISREG) && $!file.ACCEPTS($entry),
-#?endif
-#?if !moar
-                nqp::if(
-                  nqp::stat($path, nqp::const::STAT_ISREG) && $!file.ACCEPTS($entry),
-#?endif
                   (return $path),
                   nqp::if(
                     $!dir.ACCEPTS($entry) &&
-#?if moar
                       nqp::syscall('stat-flags', $stat, nqp::const::STAT_ISDIR),
-#?endif
-#?if !moar
-                      nqp::stat($path, nqp::const::STAT_ISDIR),
-#?endif
                     nqp::stmts(
                       nqp::if(
                         nqp::fileislink($path),
