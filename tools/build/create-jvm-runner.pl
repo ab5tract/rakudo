@@ -122,6 +122,15 @@ else {
     # parent folder.
     my $rakudo_home = "$basedir/gen/build_rakudo_home";
 
+    # When building against the in-tree Gradle-built nqp (no installed
+    # nqp-j), the configured nqp home points at the would-be install
+    # prefix; fall back to the nested checkout's build output so
+    # ${NQP_HOME}/lib resolves ModuleLoader.jar and friends.
+    if (!-e "$nqp_home/lib/ModuleLoader.jar"
+        && -e "$basedir/nqp/build/jvm/share/lib/ModuleLoader.jar") {
+        $nqp_home = "$basedir/nqp/build/jvm/share";
+    }
+
     $preamble = join("\n",
         $preamble_unix,
         "$NQP_LIB",
@@ -151,10 +160,10 @@ sub install {
 }
 
 my $classpath = join($cpsep, ($rakudo_jars, $jardir, $libdir, $nqplibdir));
-my $jopts = '-noverify -Xms100m'
+my $jopts = '-noverify -Xms100m --enable-native-access=ALL-UNNAMED'
           . ' -cp ' . ($^O eq 'MSWin32' ? '"%CLASSPATH%";' : '$CLASSPATH:') . $classpath
           . ' -Dperl6.prefix=' . ($type eq 'install' && $^O ne 'MSWin32' ? '$DIR/..' : $prefix)
-          . ' -Djna.library.path=' . $sharedir
+          . ' -Dnqp.library.path=' . $sharedir
           . ($^O eq 'MSWin32' ? ' -Dperl6.execname="%~dpf0"' : ' -Dperl6.execname="$EXEC"');
 my $jdbopts = '-Xdebug -Xrunjdwp:transport=dt_socket,address=' 
             . ($^O eq 'MSWin32' ? '8000' : '${RAKUDO_JDB_PORT:=8000}') 
