@@ -17,10 +17,13 @@ Session-start facts that keep getting relearned the hard way:
   falls back to the legacy frontend without it. The encoder and the unit
   road are ALWAYS on since 2026-09-09 (nqp side) and are not knobs:
   `NQP_CODE_RUN` and `NQP_CODE_PRECOMP` must not be set at all. The
-  compiler dies on `=0` ("the road needs the encoder on"), there is no
-  class road left to opt out *to*, and stage0's bootstrap compiler reads
-  their mere PRESENCE (even `=0`) as "encode", so a gradle build that
-  exports them builds stage1 differently. What survives are the
+  compiler dies on `=0` ("the road needs the encoder on") and there is
+  no class road left to opt out *to* — not in the compiler, not in the
+  runtime, not in stage0. (History, closed 2026-09-10 by unit-artifact
+  milestone 4: stage0's bootstrap compiler used to read their mere
+  PRESENCE, even `=0`, as "encode", so a gradle build that exported
+  them built stage1 differently. Stage0 is unit artifacts now and that
+  trap is gone.) What survives are the
   diagnostics: `NQP_CODE_ENCODED`, `NQP_CODE_BAIL`, `NQP_CODE_WHY`,
   `NQP_CODE_STRICT`. So a bare
   `make` IS the Truffle engine build (frontend, BOOTSTRAP, settings all
@@ -84,7 +87,12 @@ Session-start facts that keep getting relearned the hard way:
   stays as the same commands written down (`gen` / `jars` / both). The
   nqp side alone: `./nqp/gradlew -p nqp buildJvm` (add `clean` first
   when `src/vm/jvm/QAST/*.nqp` changed — the stage graph misses that
-  edge). If the harness keeps stopping a heavy build task, start it as a
+  edge). **Stage0 is unit artifacts too** (9 jars, `unit.meta`-only,
+  since 2026-09-10): regenerate it with `./nqp/gradlew -p nqp
+  jBootstrapFiles` only ahead of an incompatible wire/meta/syscall
+  change, and run that regeneration from the last compiler that still
+  speaks the old shape; additive wire changes and encoder fixes that
+  fill cells stage0 left at 0 need no regeneration. If the harness keeps stopping a heavy build task, start it as a
   plain background job (`run_in_background`, NO `setsid`/`nohup`) tee'd to
   a log — `raku tools/build/watched-run.raku --log=build.log -- make` —
   and watch the log. A plain background job stays visible, trackable, and
