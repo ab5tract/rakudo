@@ -1,0 +1,64 @@
+pr: n10
+title: JVM unit artifact: QAST-only compiler, stage0 as unit artifacts, the class road deleted (milestone 4)
+branch: pr/10-unit-artifact-m4
+
+# Section N15 of the survey plus the five post-survey commits (log lines 359..372, 14 commits).
+# Every deletion stays a commit of its own; only two obvious pairs are folded.
+# Hazard H1: 9844a0de9 (stage0 regenerated as unit artifacts) must follow 5cf759de6 (JASTNodes
+# gone) -- it does, and no other stage0 commit is in this PR.
+
+= keep
+- c6af33aa3 unit compiler: a QAST-only driver hands the writer a unit record -- no JAST tree, no operand stack, no per-block stub; the registries stay as data
+
+= keep
+- 5cf759de6 unit compiler: the JASTNodes module and nqp's JAST op closures are gone; nine stage targets
+
+= keep
+- 9844a0de9 stage0: regenerated as unit artifacts from the JAST-free compiler; stage compiles enter through UnitMain
+
+= keep
+- 1a658daa1 runtime: the class road's writer and loaders are gone -- jast2bc, compilejast, loadcompunit's define branch, the sidecar reader, setLexValues, enterFromMain, IndyBootstrap; BytecodeVersion moves to runtime/
+
+= keep
+- 4b261b3b2 runtime: the loader is Kotlin and knows one road -- LibraryLoader.java and its four class loaders are gone; UnitLoader loads, primes and reads
+
+= keep
+- 14df06863 interop: adaptor classes are plain classes; AdaptorUnit builds their code refs from bound method handles; the reflective code-ref road and CodeRefAnnotation are gone
+
+= keep
+- d8116d7c9 runtime: a torn frame runs its exit handler with the result absent, then gives back its count (LEAVE on exceptional exit)
+
+= keep
+- 929f73b11 engine: a suspended fused op resumes through its finisher -- the op's tail runs on the inner call's value instead of taking that value as the op's result
+
+= keep
+- e270f070d encoder: patch_params keeps the parameter prologue's deferred code-ref slots -- a BVal in a param default or where constraint no longer resolves to the mainline (qbid 0); NQP_DO_TRACE shows $!do binds
+
+= keep
+- d24431b68 docs: the class road is gone -- BytecodeVersion moved, ASM stays for P6Opaque and the adaptors
+
+= runtime: a suspended frame keeps its exit handler and its live count
+# moved: b3d75f993 (CallFrame.kt only) pulled ahead of 47697ca29 (Compiler.nqp,
+# RxDescriptor.nqp, TruffleEncoder.nqp) and 3b9615f4b (t/jvm/16-op-registry.t) -- disjoint; it
+# corrects what the first commit's leaveSuspended did, so the pair is one change.
+CallFrame separates its two one-shots: the live-invocation count and the exit handler. A save
+into a continuation (leaveSuspended) restores tc.curFrame and nothing else -- the frame is still
+live, so a second invocation of the same static frame (SEQUENCE building a range with SEQUENCE)
+resolves its outer correctly; the real exit, leave() or leaveTorn(), gives the count back once and
+runs the handler once, so a LEAVE in a gather fires at its exit and not at the first take.
+UnitLoader marks a unit loaded only after it loaded; NqpOps.bindattr traces once per bind.
+- 908134f3f runtime: a continuation-captured frame keeps its exit handler for its real exit; UnitLoader marks a unit loaded only after it loaded
+- b3d75f993 runtime: a suspended frame is still live -- the save road keeps its invocation count, so a second invocation of the same static frame resolves its outer correctly
+
+= compiler: is_inlinable from the classlib registry and the encoder's rows
+add_core_op's :$inlinable default seeded %core_inlinability for the 44 hand-mapped core ops; the
+class road's deletion took those closures and left is_inlinable answering 0 for add_i, if, while,
+bind, callmethod and the rest, so RakuAST inlined no routine containing one and the CORE setting
+was built with routine inlining and native lowering off. The default now derives from the encoder's
+rows as core_op_supported does, with %core_noninlinable naming the twelve ops that carried
+:!inlinable; the classlib rows still win. t/jvm/16-op-registry pins inlinability and supports-op.
+- 47697ca29 compiler: is_inlinable answers from the classlib registry, the encoder's rows and an explicit non-inlinable table -- the deleted add_core_op closures were the table's source
+- 3b9615f4b tests: the op registry (inlinability, supports-op)
+
+= keep
+- 108fa2936 runtime: a unit stays loaded when a continuation capture crosses its load block

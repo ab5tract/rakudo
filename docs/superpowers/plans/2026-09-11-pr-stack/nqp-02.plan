@@ -1,0 +1,150 @@
+pr: n2
+title: JVM: the newdisp dispatch port, diagnostics and parity
+branch: pr/02-newdisp-port
+
+# Sections N3 (log lines 100..134) + N4 (135..159), 60 commits.
+# Groups are contiguous runs in original order except where a `# moved:` comment says otherwise.
+
+= JVM: camelCase the Kotlin runtime; tidy interop names and spawn output
+The Kotlin runtime uses camelCase names throughout; BootJavaInterop spells its
+names out; a spawn failure is reported to the merged stream. Groundwork before
+the dispatch port touches the same files.
+- 842563809 JVM: spell out the names in BootJavaInterop
+- fc3a9423a JVM: report a spawn failure to a merged stream
+- 306a9a71b JVM: camelCase the Kotlin variables
+
+= JVM: port the newdisp dispatch mechanism, and run nqp's own dispatchers
+The dispatch model, record, registry, syscalls and the boot dispatchers, with
+the Tracked REPR and t/jvm/11-dispatch.t; docs/jvm-dispatch.md describes it.
+nqp's own dispatchers (src/core/dispatchers.nqp) run on it. The stage0 jars
+are regenerated from this compiler (the later of the two regenerations is the
+one that survives the squash, deliberately).
+- 5893aeebf JVM: port the newdisp dispatch mechanism
+- d94a608eb Bootstrap JVM backend
+- a5223b99b JVM: run nqp's own dispatchers
+
+= JVM: resumable binds, QAST::ParamTypeCheck, HLL-reported bind failures
+A dispatch resumes when a bind check fails; the bind-will-resume-on-failure
+syscall; recorded dispatches reported under NQP_DISPATCH_TRACE.
+QAST::ParamTypeCheck compiles, the HLL reports a bind failure, a container a
+parameter already bound is not re-vivified, and a capture's named arguments
+are read by index.
+- d2238f199 JVM: resume a dispatch when a bind check fails
+- d09fa840b JVM: report recorded dispatches under NQP_DISPATCH_TRACE
+- 4b9684f62 JVM: add the bind-will-resume-on-failure syscall
+- efd6b5f8f JVM: compile QAST::ParamTypeCheck
+- 6b7cdaf01 JVM: let the HLL report a bind failure
+- fc686856e JVM: don't re-vivify a container a parameter already bound
+- cc6759b0a JVM: read a capture's named arguments by index
+
+= JVM: route call and callmethod through lang-call and lang-meth-call
+Every call compiles as a lang-call dispatch and every method call as a
+lang-meth-call dispatch, with the arguments those dispatchers expect. What
+routing everything needed: the raw KnowHOW gets a find_method and every
+knowhow method an STable, a tracked lookup guards its table as MoarVM does,
+and the bindcomplete op exists.
+# NET-ZERO: the NQP_JVM_LANG_CALL gate is introduced by the first two commits
+# and removed by the last one (routing by default); one group, so it never appears.
+- 75516997d JVM: compile a call as a lang-call dispatch, behind NQP_JVM_LANG_CALL
+- 6e85b3d0f JVM: compile a method call as a lang-meth-call dispatch, same gate
+- 0936cc0ea JVM: give lang-meth-call the arguments it expects
+- a61412085 JVM: give the raw KnowHOW a find_method, and every knowhow method an STable
+- e0c1e800c JVM: guard the table of a tracked lookup, as MoarVM does
+- ef86b72e2 JVM: implement the bindcomplete op
+- 52cde5811 JVM: route call and callmethod through lang-call by default
+
+= JVM: explode flattening at the dispatch entry, and key programs by shape
+Flattening is exploded once at the dispatch entry and dispatch programs are
+keyed by argument shape; full routing survives the core setting compile.
+- 1df03422a JVM: explode flattening at the dispatch entry, and key programs by shape
+- 22ba60970 JVM: make full-routing survive the core setting compile
+
+= JVM: uint parameter ops, hllize edges, NO_HINT for an uncomposed type
+The uint parameter ops; a failed rethrow names what it got; the hllize family
+passes st-less objects through and hllizes a type object to the target
+language's foreign type; an uncomposed type's attribute hint answers NO_HINT.
+# moved: 553eeb106 (P6Opaque.kt) and 1e0dfdac6 (Ops.kt) pulled ahead of
+# 6b40a7332, 102f96d70, cef172cba, cc5611a56 -- those touch only dispatch/*,
+# jast2bc/AutosplitMethodWriter.kt and the *ControlException/JavaCallinException
+# files; disjoint.
+- c98104675 JVM: uint parameter ops, and name what a failed rethrow got
+- 4b2a6f1d2 JVM: let the hllize family pass st-less objects through
+- 553eeb106 JVM: answer NO_HINT for an uncomposed type's attribute hint
+- 1e0dfdac6 JVM: hllize a type object to the target language's foreign type
+
+= JVM: allocation off the replay path; intern autosplit inference strings
+- 6b40a7332 JVM: take allocation off the dispatch replay path
+- 102f96d70 JVM: intern the autosplit type-inference strings
+
+= JVM: make control exceptions stackless, with causes threaded through
+- cef172cba JVM: make control exceptions stackless
+- cc5611a56 JVM: thread causes through the stackless control exceptions
+
+= keep
+- 92bcc943a JVM: dispatch through an Object[] when a callsite outgrows MethodType
+
+= JVM: integer atomics, code-ref source locations, sized-native semantics
+The integer atomic ops and getlexref_u are registered; every code ref
+carries its source location; sized native storage (P6int/P6num and the
+native ref lexicals) has MoarVM's semantics.
+- 465e6fe40 JVM: register the getlexref_u op
+- d1b017c0f JVM: implement the integer atomic ops
+- 8face622f JVM: give every code ref its source location
+- 20cd97c87 JVM: give sized native storage its MoarVM semantics
+
+# ---- N4 ----
+
+= JVM: backtraces in declared-source coordinates, and clearer failures
+A frame's invocation is noted while it is live; backtraces render in the
+declared source's coordinates; lang-call says what it was given when it has
+no language; a serialization failure identifies its closure; an escaped
+continuation tells its story.
+- b4066506c JVM: note a frame's invocation while it is live, not only on leave
+- da01884be JVM: render backtraces in the declared source's coordinates
+- 435da25c4 JVM: say what lang-call was given when it has no language
+- 9227517c5 JVM: identify the closure a serialization failure is about
+- 0052cfa73 JVM: make escaped continuations tell their story
+
+= JVM: dispatch method calls on Java interop wrappers, typed marshalling
+Marshalled interop arguments are cast to their real types and method calls
+on Java interop wrappers dispatch; the interop classfile dump is back behind
+an env var.
+- 625065d68 JVM: revive the interop classfile dump behind an env var
+- 1c8855d04 JVM: cast marshalled interop arguments to their real types
+- 8ee42f485 JVM: dispatch method calls on Java interop wrappers
+
+= JVM: mid-block #line, :m/:i:m regex literals, General_Category uniprops
+- ddb00a38a JVM: honor #line directives that change mid-block
+- 2ba40e60e JVM: support :m/:i:m literals in regex compilation
+- 5c2656122 JVM: answer General_Category through the uniprop ops
+
+= JVM: compile hot dispatch programs into MethodHandle chains
+DispatchCompiler turns a hot dispatch program into a MethodHandle chain;
+native calls run through the dispatcher path; flattened attributes resolve
+through the named class handle.
+- 357b6e7f6 JVM: resolve flattened attributes through the named class handle
+- 0ed8cd6b9 JVM: compile hot dispatch programs into MethodHandle chains
+- 34f902d40 JVM: run native calls through the dispatcher path
+
+= JVM: persist nested comp-mode units in the enclosing jar
+Nested comp-mode units get MoarVM's treatment and are persisted in the
+enclosing jar, loaded back through LibraryLoader.
+- 6e97927f2 JVM: give nested comp-mode units MoarVM's treatment
+- 6c89b113b JVM: persist nested compilation units in the enclosing jar
+
+= JVM: MoarVM parity edges in regexes, natives, bigints and exceptions
+Regexes match Unicode the way MoarVM does; a native assign lowers to a bind
+where the target is in reach; a sized native parameter is truncated where it
+is fetched; a flattened P6bigint unboxes to a long only when it fits and is
+read into an unsigned native by the unsigned rule; a payload belongs to its
+exception, an arity failure is worded as MoarVM words it; nqp::captureinnerlex
+exists. Serialization and Java-stack diagnostics are env-gated.
+- 7ccc69a74 JVM: env-gated serialization and Java-stack diagnostics
+- 2873d1bb2 JVM: lower a native assign to a bind where the target is in reach
+- a818f5850 JVM: a flattened P6bigint unboxes to a long only when it fits
+- 890643d3b JVM: match Unicode in regexes the way MoarVM does
+- e19e2d43f JVM: truncate a sized native parameter where it is fetched
+- 72c6c1400 JVM: a payload belongs to its exception, not to the thread
+- 01da7a5b3 JVM: word an arity failure as MoarVM words it
+- 25ba1ea74 JVM: read a bigint into an unsigned native by the unsigned rule
+- 93ca8ae9d JVM: implement nqp::captureinnerlex

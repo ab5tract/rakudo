@@ -1,0 +1,25 @@
+pr: r6
+title: JVM: the legacy Perl6 frontend trimmed -- RakuAST is the only frontend
+branch: pr/06-legacy-frontend-trimmed
+
+# R9, log lines 163..167 (5 commits).
+
+# moved: 8d9f0c7b35 pulled earlier past b7f4a9c3e2 (tools/build/watched-run.raku
+# only); it touches the two Makefile templates the trim commit already edits.
+= Trim the legacy Perl6 frontend: RakuAST is the only frontend
+World/Actions/Grammar and rakudo-debug leave the build: src/main.nqp is RakuAST-unconditional
+and loads modules through ModuleLoader, the desugars the legacy frontend carried move to
+src/vm/jvm/Raku/Ops.nqp, and the Makefile templates lose the frontend's build rules, the
+now-inert ones included.
+- 59326c65ae Trim the legacy Perl6 frontend (World/Actions/Grammar + rakudo-debug) from the build
+- 8d9f0c7b35 Remove the inert build rules for the trimmed legacy frontend
+
+= keep
+- b7f4a9c3e2 watched-run: mirror the elapsed [Ns] --show markers into the log
+
+= eval-server: libgraal-sized cage, heap uncommit, bounded child JVMs
+The memory cage accounts for libgraal's native footprint and the heap is uncommitted between
+runs, so a single warm server survives a whole subdirectory; the JVM children a spawn-heavy
+test forks are bounded. AGENTS.md drops its hand-rolled memory-guard guidance.
+- 2de3ca91c4 eval-server: size the cage for libgraal and uncommit the heap
+- 8f22859438 eval-server: bound the JVM children a spawn-heavy test forks

@@ -1,0 +1,69 @@
+pr: n9
+title: JVM unit artifact: the unit road and the encoder as the defaults; the compiler-side class road removed (milestone 3)
+branch: pr/09-unit-artifact-m3
+
+# Section N14 of the survey (log lines 343..358, 16 commits). The last group is the sidecar
+# forwarding crutch stage0 needs until milestone 4 (n10); it must stay last (hazard H1).
+
+= unit artifact: the unit road and the encoder are the defaults
+The last item-7 shapes encode first: exit-handler blocks (frame-forced), with/without in general
+form, labeled control, for :label (wire op FORLOOPL 35). Then the flip: NQP_UNIT=0 / NQP_CODE_RUN=0
+/ NQP_CODE_PRECOMP=0 opt out, the mainline block carries the unit's file, --target=jar without
+--output says so. Two refusals the flip turned into hard dies are fixed (a BVal naming a block of
+the same tree, with/without over a native condition), and block_in_tree stops at a nested block
+so a BVal into a deeper block refuses again; emit_defined_test names T_OBJ.
+- c872c83af encoder: exit-handler blocks encode (frame-forced), with/without general form, labeled control and for :label (wire op FORLOOPL 35)
+- 388173781 unit artifact: the unit road and the encoder are the defaults (NQP_UNIT=0 / NQP_CODE_RUN=0 / NQP_CODE_PRECOMP=0 opt out); the mainline block carries the unit's file; --target=jar without --output says so
+- e5f2b3840 encoder: block_in_tree stops at a nested block (a BVal into a deeper block refuses again); emit_defined_test names T_OBJ
+
+= encoder+runtime: sized/unsigned natives and unnamed chain links encode
+sized_trunc/sized_ret as QAST rewrites of Compiler.nqp's emit_sized_native_trunc; every lexical
+bind truncates to the declaring block's width; sized params no longer bail; num32 through the
+encoder-internal OP_SIZED_NUM32 (382); a uint lexicalref with no static declaration encodes
+T_UINT; a uint block value returns through the int register. Wire additive only. A chain link
+with no name (metaop / code-object operators) encodes as chain_codegen does.
+- 72a92bb67 encoder+runtime: sized and unsigned natives on the unit road (params, lexical stores, uint lexicalrefs, uint results)
+- b6e978ffe encoder: a nested chain whose link has no name encodes (metaop / code-object operators)
+
+= keep
+- 16f4e855c truffle: a dedicated op that reaches user code answers a suspend token (gather/take across p6sink, decont, p6typecheckrv)
+
+= encoder: guarded BlockInfo walks, sized uint attributes, no bare NPE
+NQP_ARITY_TRACE names the block an arity refusal came from (behind a TruffleBoundary off a static
+flag, guarding every dereference). An exception with no message is not a refusal and no longer
+becomes a bare NullPointerException replacing the real error; NQP_VERBOSE_EXCEPTIONS prints the
+nqp frame chain beside the host stack. All five BlockInfo walks stop where Compiler.nqp's do (a
+BEGIN-time EVAL reaches a RakuAST::Block outer); a sized uint attribute encodes (the P6opaque slot
+is the width); a lexical bind resolves its declaration once.
+- 47bbd4dda truffle: NQP_ARITY_TRACE names the block an arity refusal came from
+- 956ba1ad2 encoder: an exception with no message no longer becomes a bare NullPointerException
+- 171d37508 encoder: a sized uint attribute encodes, and a BlockInfo walk stops where Compiler.nqp's does
+- 19c53f45a encoder: the FIFTH BlockInfo walk gets the guard too, and a lexical bind resolves its declaration once
+
+= truffle+wire: typed suspension tokens; OPCALLT carries the result type
+istype/isconcrete/hllize answer the suspension token too (decont and their slow roads reach user
+code), and a token carries its site's result type so the resume reads the right return register
+(IsTypeOp/IsConcreteOp widen to Object). The wire's OPCALLT (36) carries a table op's result type
+for the generic road, which had hardcoded T_OBJ; OPCALL stays for object-typed ops and the
+hand-written emissions. Additive: stage0 programs predate it.
+- 8d1577250 truffle: istype/isconcrete/hllize suspend too, and a suspension token carries its site's result type
+- c35fdec19 wire: OPCALLT carries a table op's result type, so a suspension token names the right return register
+
+= runtime: NQP_REPOINT_TRACE and a qbid-gap test (item-8 evidence)
+# moved: 620d4c181 (Syscalls.kt, Ops.kt only) pushed after c35fdec19 (nqp-truffle NqpOps/
+# NqpProgramBuilder/NqpRootNode/NqpWire, TruffleEncoder.nqp) -- disjoint; the two trace commits
+# and the test belong together, no behaviour change in either.
+NQP_REPOINT_TRACE shows the code-object/code-ref pairing at jvm-repoint-dynamic-code,
+Ops.compunitcodes and Ops.setcodeobj, plus buildTable's whole block table; NQP_REPOINT_STACK=<cuid>
+prints the frame chain for one cuid. ProgramUnitTest pins that a qbid gap stays a gap and shifts
+nothing after it (codeRefs dense, qbidToCodeRef positional). Item 8 stays open.
+- 620d4c181 runtime: NQP_REPOINT_TRACE shows the code-object/code-ref pairing (item-8 evidence)
+- 8bab02391 unit: a qbid gap stays a gap (test), and NQP_REPOINT_TRACE shows the block table
+
+= keep
+# spans: this removes the NQP_UNIT knob and $*UNIT_FALLBACKS introduced in n8.
+- 30e849e3c unit artifact: the compiler emits only unit records -- the string-constant road, its size gates, the sidecar writer, $*UNIT_FALLBACKS, the NQP_UNIT knob and the raw-block refusal are gone
+
+= keep
+# LAST: the crutch stage0 needs until milestone 4 regenerates it; nothing may follow it in n9.
+- 55bdee5b7 unit artifact: the runtime keeps forwarding a class-road compiler's program sidecar (stage0 needs it until milestone 4); the per-call exit-handler check leaves the frame-free fast path; NQP_CODE_RUN/PRECOMP are not knobs
