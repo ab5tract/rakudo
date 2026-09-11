@@ -379,6 +379,39 @@ sub configure_jvm_backend {
               split( $config->{'cpsep'}, $nqp_config->{'jvm::runtime.jars'} )
         );
         $config->{'nqp_classpath'} = $nqp_config->{'jvm::runtime.classpath'};
+
+        # The grammar engine. nqp.jar holds rules compiled to Truffle
+        # descriptors, so a JVM that loads it without these cannot run them:
+        # the modules have to be on the module path (Truffle binds to the
+        # JDK's compiler only as modules) and the engine on the class path
+        # (the boot loader cannot see the module path). An nqp built without
+        # the engine simply reports nothing here and the flags stay empty.
+        my $truffle_mp = $nqp_config->{'jvm::runtime.truffle.modulepath'};
+        my $truffle_am = $nqp_config->{'jvm::runtime.truffle.addmodules'};
+        my $truffle_en = $nqp_config->{'jvm::runtime.truffle.engine'};
+        if ( $truffle_mp && $truffle_am ) {
+            # The two quieting flags travel with the module path because they
+            # are only meaningful when Truffle is actually there: the first
+            # grants native access to the MODULE (ALL-UNNAMED does not reach
+            # a named one), the second silences truffle-runtime's own use of
+            # a terminally deprecated Unsafe method. Both matter beyond tidy
+            # output -- the warnings go to stderr in front of the compiler's
+            # own, which breaks anything reading the first line of it.
+            my $quiet_opts = "'--enable-native-access=org.graalvm.truffle', "
+                           . "'--sun-misc-unsafe-memory-access=allow', ";
+            my $quiet_args = "--enable-native-access=org.graalvm.truffle "
+                           . "--sun-misc-unsafe-memory-access=allow";
+            $config->{'j_truffle_opts'} =
+              "'--module-path', '$truffle_mp', '--add-modules', '$truffle_am', $quiet_opts";
+            $config->{'j_truffle_args'} =
+              "--module-path $truffle_mp --add-modules $truffle_am $quiet_args";
+            $config->{'j_truffle_jar'} = $truffle_en ? $config->{'cpsep'} . $truffle_en : '';
+        }
+        else {
+            $config->{'j_truffle_opts'} = '';
+            $config->{'j_truffle_args'} = '';
+            $config->{'j_truffle_jar'}  = '';
+        }
         $config->{'nqp::libdir'}   = $nqp_config->{'nqp::libdir'};
         $config->{'j_runner'}      = $self->batch_file('rakudo-j');
 
@@ -749,6 +782,42 @@ sub gen_nqp {
     return unless %need;
 
     return unless defined($gen_nqp) || defined($gen_moar);
+
+    # java-to-kotlin prototype: the jvm backend builds from the nested nqp
+    # checkout via Gradle (stage0 -> stage1 -> stage2, runtime, runner),
+    # never through the legacy clone + Configure.pl + make path below --
+    # an upstream nqp has no Truffle grammar engine and this branch cannot
+    # run on it. The checkout is a working tree on its own branch, so it
+    # must also never be moved to $nqp_want by git_checkout below.
+    if ( $need{jvm} ) {
+        my $nqp_dir = File::Spec->catdir( $startdir, 'nqp' );
+        my $gradlew = File::Spec->catfile( $nqp_dir, 'gradlew' );
+        $self->sorry( "The jvm backend needs the nested nqp checkout at"
+              . " $nqp_dir (with its Gradle wrapper), and $gradlew is not"
+              . " executable. An upstream nqp cannot replace it: it has no"
+              . " Truffle grammar engine." )
+          unless -x $gradlew;
+        my @gradle = ( $gradlew, '--console=plain' );
+        push @gradle, 'clean' if $force_rebuild;
+        push @gradle, 'buildJvm';
+        $self->msg(
+            "Building the nested nqp checkout (gradlew buildJvm) ...\n");
+        chdir($nqp_dir);
+        system_or_die(@gradle);
+        chdir($pwd);
+        my $bin =
+          File::Spec->catfile( $nqp_dir, 'nqp-j-gradle' . $config->{bat} );
+        my %c = read_config($bin);
+        $self->sorry( "gradlew buildJvm finished but $bin did not"
+              . " produce a usable configuration" )
+          unless %c;
+        $self->msg("Using the freshly built $bin\n");
+        $impls->{jvm}{bin} = $bin;
+        $self->backend_config( jvm => \%c );
+        $impls->{jvm}{ok} = 1;
+        delete $need{jvm};
+        return unless %need;
+    }
 
     {
         my $user = $options->{'github-user'} // 'Raku';

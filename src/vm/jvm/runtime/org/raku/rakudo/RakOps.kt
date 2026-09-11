@@ -332,7 +332,16 @@ object RakOps {
          * binder reports is phrased against it. */
         val frame = tc.curFrame!!.caller ?: tc.curFrame!!
         val error = arrayOfNulls<Any>(3)
-        Binder.bind(tc, gcx, frame, params!!, capture.descriptor!!, capture.args, false, error)
+        val bindResult = Binder.bind(tc, gcx, frame, params!!, capture.descriptor!!, capture.args, false, error)
+        /* A Junction argument is not an error: the call autothreads, exactly
+         * as p6bindsig does for full-binder frames. Returning the result
+         * (rather than throwing) tells BindFailure.reportToHLL to make it
+         * the failed call's result. */
+        if (bindResult == Binder.BIND_RESULT_JUNCTION && gcx.AutoThreader != null) {
+            val csd = capture.descriptor!!.injectInvokee(tc, capture.args!!, code)
+            Ops.invokeDirect(tc, gcx.AutoThreader, csd, tc.flatArgs!!)
+            return Ops.result_o(tc.curFrame!!)
+        }
         if (error[0] is String)
             throw ExceptionHandling.dieInternal(tc, error[0] as String)
         if (error[0] != null)
@@ -414,6 +423,14 @@ object RakOps {
      * overflows. */
     private val rvDecontSites =
         java.util.concurrent.ConcurrentHashMap<SixModelObject, org.raku.nqp.dispatch.DispatchCallSite>()
+
+    /* The map's keys are routine objects, and a routine holds its whole
+     * serialization-context graph. In a process that runs programs in turn --
+     * the eval server -- entries from a finished run pin that run's entire
+     * type universe, so the map must go cold with the dispatch caches. */
+    init {
+        org.raku.nqp.dispatch.DispatchBootstrap.registerResettable { rvDecontSites.clear() }
+    }
     private val rvDecontSiteType = java.lang.invoke.MethodType.methodType(Void.TYPE)
     private val rvDecontCallSite = CallSiteDescriptor(
         byteArrayOf(CallSiteDescriptor.ARG_OBJ), null)
@@ -678,7 +695,7 @@ object RakOps {
         while (curFrame != null) {
             val found = curFrame.codeRef.staticInfo.oTryGetLexicalIdx(name)
             if (found != -1)
-                return curFrame.oLex!![found]
+                return curFrame.oLexOrVivify(found)
             curFrame = curFrame.outer
         }
         return null
@@ -772,7 +789,7 @@ object RakOps {
             val sci = ctx.codeRef.staticInfo
             val dispLexIdx = sci.oTryGetLexicalIdx("\$*DISPATCHER")
             if (dispLexIdx != -1) {
-                val maybeDispatcher = ctx.oLex!![dispLexIdx]
+                val maybeDispatcher = ctx.oLexOrVivify(dispLexIdx)
                 if (maybeDispatcher != null) {
                     dispatcher = maybeDispatcher
                     if (dispatcher is TypeObject) {
@@ -826,7 +843,7 @@ object RakOps {
             val sci = ctx.codeRef.staticInfo
             val dispLexIdx = sci.oTryGetLexicalIdx("\$*DISPATCHER")
             if (dispLexIdx != -1) {
-                val maybeDispatcher = ctx.oLex!![dispLexIdx]
+                val maybeDispatcher = ctx.oLexOrVivify(dispLexIdx)
                 if (maybeDispatcher === disp) {
                     /* Found; grab args. */
                     val CallCapture = tc.gc.CallCapture!!

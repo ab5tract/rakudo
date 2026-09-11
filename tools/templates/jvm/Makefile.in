@@ -2,6 +2,13 @@ JAVA    = java
 JAVAC   = javac
 JAR     = jar
 
+# The RakuAST frontend is the only supported one on this branch, and
+# src/main.nqp silently falls back to the legacy frontend when the switch
+# is missing from the environment. Export it so a bare `make` builds the
+# right compiler no matter how it was invoked. GNU make syntax, like the
+# rest of this backend's rules.
+export RAKUDO_RAKUAST = 1
+
 NQP_PREFIX  = @nqp_prefix@
 @bpv(NQP)@       = @shquot(@j_nqp@)@
 @bpv(NQP_BIN)@       = @nfp(@j_nqp@)@
@@ -9,7 +16,11 @@ NQP_PREFIX  = @nqp_prefix@
 # Overridable: the BOOTSTRAP/CORE compiles OOM'd at the old hardcoded
 # -Xmx8G (make J_NQP_MAXHEAP=16G ... to raise further).
 J_NQP_MAXHEAP = 14G
-@bpv(NQP_RR)@    = $(JAVA) -Xmx$(J_NQP_MAXHEAP) -cp @q(@nfp(./blib)@@cpsep@@nop($(BLD_NQP_JARS))@@cpsep@rakudo-runtime.jar@cpsep@@nop($(SYSROOT))@@abs2rel(@nqp_classpath@)@)@ nqp
+# This starts a JVM directly rather than through the nqp runner, so it needs
+# the grammar engine spelled out: nqp.jar holds rules compiled to Truffle
+# descriptors, and without the modules on the module path and the engine on
+# the class path they cannot run at all. Empty when nqp was built without it.
+@bpv(NQP_RR)@    = $(JAVA) -Xmx$(J_NQP_MAXHEAP) @j_truffle_args@ -cp @q(@nfp(./blib)@@cpsep@@nop($(BLD_NQP_JARS))@@cpsep@rakudo-runtime.jar@cpsep@@nop($(SYSROOT))@@abs2rel(@nqp_classpath@)@@j_truffle_jar@)@ nqp
 @bpv(RUN_RAKUDO_SCRIPT)@ = rakudo-j-build
 @bpv(RUN_RAKUDO)@ = @shquot(@perl@)@ @bpm(RUN_RAKUDO_SCRIPT)@
 
@@ -24,10 +35,24 @@ RUNTIME_JAR = rakudo-runtime.jar
 # rakudo-runtime/ and runs on the nested nqp checkout's Gradle wrapper.
 GRADLEW = @nfp(nqp/gradlew)@
 
+# The nqp runtime jar every JVM in this build runs on. make must know how
+# to rebuild it: editing nqp/src/vm/jvm/runtime/ and running make used to
+# build and test against the stale jar in nqp/build/jvm/share, silently.
+# $(wildcard) rather than bare globs: a pattern with no matches (there is
+# no depth-two .java today) must expand to nothing, not become a literal
+# prerequisite make has no rule for. GNU make syntax, like the order-only
+# prerequisites below.
+NQP_RUNTIME_SOURCES = $(wildcard @nfp(nqp/src/vm/jvm/runtime/org/raku/nqp/*/*.java)@ @nfp(nqp/src/vm/jvm/runtime/org/raku/nqp/*/*.kt)@ @nfp(nqp/src/vm/jvm/runtime/org/raku/nqp/*/*/*.java)@ @nfp(nqp/src/vm/jvm/runtime/org/raku/nqp/*/*/*.kt)@)
+NQP_RUNTIME_JAR = @nfp(nqp/build/jvm/share/runtime/nqp-runtime.jar)@
+
 @bpv(BAT)@    = @runner_suffix@
 
+# The directory the Raku-facing VM support code lives under; this backend
+# has migrated it from the legacy Perl6/ name.
+@bpv(RAKU_VM_DIR)@ = Raku
+
 # This is addition to J_ALL_METAMODEL_SOURCES
-@bsv(METAMODEL_SOURCES)@ = @nfp(src/vm/jvm/Perl6/Metamodel/JavaHOW.nqp)@
+@bsv(METAMODEL_SOURCES)@ = @nfp(src/vm/jvm/Raku/Metamodel/JavaHOW.nqp)@
 
 @bpv(ALL_TARGETS)@ = eval-client.pl @bpm(DEBUG_RUNNER)@
 
@@ -42,20 +67,41 @@ GRADLEW = @nfp(nqp/gradlew)@
   perl6-j \
   perl6-debug-j
 
-@bpv(ML_EXTRA)@ = @nfp(src/vm/jvm/Perl6/JavaModuleLoader.nqp)@
-@bpv(RAKUDO_DEPS_EXTRA)@ = $(RUNTIME_JAR)
+@bpv(ML_EXTRA)@ = @nfp(src/vm/jvm/Raku/JavaModuleLoader.nqp)@
+# NQP_RUNTIME_JAR sits after the | : order-only, GNU make syntax. The jar
+# must be fresh before any build JVM runs on it, but its rebuild (seconds)
+# must not timestamp-cascade into a full setting recompile (many minutes)
+# -- compiled bytecode does not depend on the runtime that executes it.
+@bpv(RAKUDO_DEPS_EXTRA)@ = $(RUNTIME_JAR) | $(NQP_RUNTIME_JAR)
 
 @bpv(NQP_FLAGS_EXTRA)@ = --javaclass=perl6
 
 @bpv(HARNESS_TYPE)@ = 5
 
+# One warm JVM for the whole harness run: --evalserver starts a single
+# rakudo-eval-server (8g heap by default, RAKUDO_EVALSERVER_HEAP to
+# override), routes every test file through eval-client, and keeps the
+# server alive until the harness exits -- no JVM boot and no re-JIT
+# between files, so Truffle compilation actually accumulates over a
+# spectest run. Runs serialize on the one server by design; parallel
+# pools are tools/build/evalserver-sweep.raku's business.
+@bpv(HARNESS5)@ = $(PERL5) @nfp(t/harness5)@ --@backend@ --evalserver
+
 @bsv(SPECIFIC_TEST_DIRS)@ = @nfp(t/03-jvm)@
 
 @include(Makefile-backend-common)@
 
-$(RUNTIME_JAR): $(RUNTIME_SOURCES) @nfp(rakudo-runtime/build.gradle.kts)@
+$(NQP_RUNTIME_JAR): $(NQP_RUNTIME_SOURCES) @nfp(nqp/nqp-runtime/build.gradle.kts)@
 	@echo(+++ Generating	$@ (Gradle))@
-	$(NOECHO)cd @nfp(rakudo-runtime)@ && @nfp(../nqp/gradlew)@ --console=plain -q jar
+	$(NOECHO)cd @nfp(nqp)@ && @nfp(../nqp/gradlew)@ --console=plain :nqp-runtime:jar syncRuntimeJars
+	@# Gradle leaves the jar untouched when the change was content-neutral
+	@# (a bare touch, a comment); bump it so make sees the rule as done
+	@# instead of re-running Gradle on every subsequent invocation.
+	$(NOECHO)touch $(NQP_RUNTIME_JAR)
+
+$(RUNTIME_JAR): $(RUNTIME_SOURCES) @nfp(rakudo-runtime/build.gradle.kts)@ | $(NQP_RUNTIME_JAR)
+	@echo(+++ Generating	$@ (Gradle))@
+	$(NOECHO)cd @nfp(rakudo-runtime)@ && @nfp(../nqp/gradlew)@ --console=plain jar
 	$(NOECHO)$(CP) @nfp(rakudo-runtime/build/libs/rakudo-runtime.jar)@ $(RUNTIME_JAR)
 
 @bpm(RUN_RAKUDO_SCRIPT)@: @@nfp(@template(@backend_subdir@/rakudo-j-build.in)@)@@
