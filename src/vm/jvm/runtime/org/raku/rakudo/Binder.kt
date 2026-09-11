@@ -12,10 +12,8 @@ import org.raku.nqp.sixmodel.REPR
 import org.raku.nqp.sixmodel.STable
 import org.raku.nqp.sixmodel.SixModelObject
 import org.raku.nqp.sixmodel.reprs.ContextRefInstance
-import org.raku.nqp.sixmodel.reprs.P6int
-import org.raku.nqp.sixmodel.reprs.P6str
-import org.raku.nqp.sixmodel.reprs.P6num
-import org.raku.nqp.sixmodel.reprs.P6OpaqueREPRData
+import org.raku.nqp.sixmodel.reprs.RakuObjectREPRData
+import org.raku.nqp.sixmodel.reprs.SlotKind
 
 object Binder {
     /* Possible results of binding. */
@@ -180,24 +178,17 @@ object Binder {
         /* If it's private, just need to fetch the attribute. */
         val assignee: SixModelObject?
         if ((paramFlags and SIG_ELEM_BIND_PRIVATE_ATTR) != 0) {
-            /* If we have a native Attribute we can't get a container for it, and
-               since *trying* to get a container would throw already, we first check
-               if the target Attribute is native. */
-            var hint = -1
-            for (map in (attrPackage.st.REPRData as P6OpaqueREPRData).nameToHintMap!!) {
-                hint = map!!.getOrDefault(varName, -1)
-            }
-            var attrREPR: REPR? = null
-            if ((attrPackage.st.REPRData as P6OpaqueREPRData).flattenedSTables!![hint] != null) {
-                /* We sometimes don't have flattenedSTables. I'm not sure that's okay, honestly... */
-                attrREPR = (attrPackage.st.REPRData as P6OpaqueREPRData).flattenedSTables!![hint]!!.REPR
-            }
-            when (attrREPR) {
-                is P6int ->
+            /* A native attribute has no container to fetch; ask the layout
+             * for the slot's kind before trying. */
+            val layout = (attrPackage.st.REPRData as? RakuObjectREPRData)?.layout
+            val slot = layout?.slotFor(attrPackage, varName) ?: -1
+            val kind = if (slot >= 0) layout!!.kinds[slot] else SlotKind.REF
+            when (kind) {
+                SlotKind.INT ->
                     Ops.bindattr_i(self, attrPackage, varName, Ops.unbox_i(value, tc), tc)
-                is P6num ->
+                SlotKind.NUM ->
                     Ops.bindattr_n(self, attrPackage, varName, Ops.unbox_n(value, tc), tc)
-                is P6str ->
+                SlotKind.STR ->
                     Ops.bindattr_s(self, attrPackage, varName, Ops.unbox_s(value, tc), tc)
                 else -> {
                     /* ...but we'll just assume it's probably some boxed Attribute. */

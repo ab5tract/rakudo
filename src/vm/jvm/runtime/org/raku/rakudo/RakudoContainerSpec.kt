@@ -1,9 +1,5 @@
 package org.raku.rakudo
 
-import java.lang.invoke.MethodHandles
-import java.lang.invoke.VarHandle
-import java.lang.reflect.Field
-
 import org.raku.nqp.runtime.CallSiteDescriptor
 import org.raku.nqp.runtime.Ops
 import org.raku.nqp.runtime.ThreadContext
@@ -14,6 +10,7 @@ import org.raku.nqp.sixmodel.SerializationReader
 import org.raku.nqp.sixmodel.SerializationWriter
 import org.raku.nqp.sixmodel.SixModelObject
 import org.raku.nqp.sixmodel.TypeObject
+import org.raku.nqp.sixmodel.reprs.RakuObject
 
 class RakudoContainerSpec : ContainerSpec() {
     companion object {
@@ -108,24 +105,21 @@ class RakudoContainerSpec : ContainerSpec() {
 
     /* Atomic operations. */
 
-    /* VarHandle for the generated Scalar class's $!value slot (field_1),
-     * formerly a sun.misc.Unsafe field offset. Cached lazily from the
-     * first container seen, as the Unsafe version cached its offset; the
-     * single-field cache also removes that version's two-field publication
-     * race (worst case now is a harmless recomputation). */
-    private var scalarValueHandle: VarHandle? = null
+    /* The slot of Scalar's $!value, resolved from the first container seen
+     * (formerly a VarHandle on the generated class's value field). The slot
+     * number is per STable and the same on every layout of the type, so a
+     * container on a variant layout (a reblessed Scalar) reads through its
+     * own layout's placement. */
+    @Volatile private var scalarValueSlot: Int = -1
 
-    private fun ensureAtomicsReady(cont: SixModelObject) {
-        if (scalarValueHandle == null) {
-            try {
-                val field: Field = cont.javaClass.getDeclaredField("field_1")
-                field.setAccessible(true)
-                scalarValueHandle = MethodHandles.lookup().unreflectVarHandle(field)
-            }
-            catch (e: Exception) {
-                throw RuntimeException(e)
-            }
+    private fun valueSlot(cont: RakuObject): Int {
+        var slot = scalarValueSlot
+        if (slot < 0) {
+            slot = cont.layout!!.slotForName("\$!value")
+            if (slot < 0) throw RuntimeException("Scalar container has no \$!value slot")
+            scalarValueSlot = slot
         }
+        return slot
     }
 
     override fun cas(tc: ThreadContext, cont: SixModelObject,
@@ -135,8 +129,8 @@ class RakudoContainerSpec : ContainerSpec() {
     }
 
     override fun atomic_load(tc: ThreadContext, cont: SixModelObject): SixModelObject? {
-        ensureAtomicsReady(cont)
-        return scalarValueHandle!!.getVolatile(cont) as SixModelObject?
+        val o = cont as RakuObject
+        return o.layout!!.getVolatile(o, valueSlot(o)) as SixModelObject?
     }
 
     override fun atomic_store(tc: ThreadContext, cont: SixModelObject, value: SixModelObject) {
