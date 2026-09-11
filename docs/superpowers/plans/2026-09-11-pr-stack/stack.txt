@@ -1,0 +1,22 @@
+# order tree pr branch needs
+1  nqp    n1  pr/01-gradle-kotlin-runtime         -
+2  rakudo r1  pr/01-gradle-kotlin-runtime         n1
+3  nqp    n2  pr/02-newdisp-port                  -
+4  rakudo r2  pr/02-rakudo-on-newdisp             n2
+5  nqp    n3  pr/03-truffle-regex-engine          -
+6  rakudo r3  pr/03-grammar-engine-eval-server    n3
+7  nqp    n4  pr/04-truffle-code-engine           -
+8  rakudo r4  pr/04-truffle-code-engine           n4
+9  nqp    n5  pr/05-phase5-encode-coverage        -
+10 rakudo r5  pr/05-phase5-fixes                  n5
+11 rakudo r6  pr/06-legacy-frontend-trimmed       n5
+12 nqp    n6  pr/06-nfg-trufflestring             -
+13 rakudo r7  pr/07-nfg                           n6
+14 nqp    n7  pr/07-jesp-calling-convention       -
+15 rakudo r8  pr/08-jesp-calling-convention       n7
+16 nqp    n8  pr/08-unit-artifact-m1-m2           -
+17 rakudo r9  pr/09-unit-artifact-m1-m2           n8
+18 nqp    n9  pr/09-unit-artifact-m3              -
+19 rakudo r10 pr/10-unit-artifact-m3              n9
+20 nqp    n10 pr/10-unit-artifact-m4              -
+21 rakudo r11 pr/11-unit-artifact-m4              n10

@@ -1,0 +1,18 @@
+pr: r7
+title: JVM: NFG on the JVM
+branch: pr/07-nfg
+
+# R10, log lines 168..170 (3 commits). Stacks directly on the nqp NFG PR
+# (the code commit needs the NFGString value type and the grapheme layer).
+
+# moved: 182a00660b pulled earlier past 10e4759917 (docs/jvm-nfg-representation.md
+# only); it touches src/core.c/Unicode.rakumod, unicodey.rakumod and core_sources.
+= keep
+- 182a00660b Make Uni and the normalization forms work on JVM
+
+= docs: NFG on the JVM -- representation decision, perf findings, handoff
+The NFG-on-JVM representation decision and status; the perf findings of 2026-09-06 with their
+benches under docs/bench/nfg (the call ceiling, the string and runtime benches, the ascii vs
+nfg string loops); the calling-convention handoff that the findings point at.
+- 10e4759917 docs: NFG-on-JVM representation decision and status
+- 008c343704 docs: NFG perf findings + calling-convention handoff (2026-09-06)

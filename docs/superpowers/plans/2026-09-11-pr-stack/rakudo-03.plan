@@ -1,0 +1,107 @@
+pr: r3
+title: JVM: the grammar engine adopted; eval server, sweep tooling, static-code identity, Perl6 -> Raku
+branch: pr/03-grammar-engine-eval-server
+
+# R4's last commit + R5 + R6: log lines 74..99, 26 commits. 12 groups.
+#
+# Order is pinned by AGENTS.md (0a8dd95a8b, ba94206b9a, ee34ae75db,
+# d561d35e04, cdd7742925, 878bd01c7c, 530bd3ee79, 62a3c8faf7 all touch it)
+# and by tools/templates/jvm/Makefile.in (ee34ae75db < 41a53daa74 <
+# 6a0ed07bb1), so "make rebuilds the nqp runtime" cannot join the
+# Configure.pl group without crossing the rename; it stays its own commit.
+# The only moves push the four docs/test/regex commits that sat between the
+# working-agreement commits later (file-disjoint, see the note), and let
+# 022996c617 sit after the spectest-infra pair.
+
+= keep
+- 837844623e JVM: teach every runner about the grammar engine
+
+= The eval server: heap, pool sized by memory, sweep, and the docs
+The server gets an 8g heap, the harness waits for its token instead of
+sleeping a second, and evalserver-sweep.raku runs a directory in chunks
+across a pool sized against MemAvailable (jobs x heap, --force to go
+over). The eval client is Raku; RakOps' rv-decont site cache resets per
+run; the sweep forces RAKUDO_RAKUAST=1 and unbuffers its progress.
+docs/jvm-eval-server.md and docs/jvm-newdisp-port.md are written.
+- b7eeeab9db Give the eval server a heap, a start worth waiting for, and a sweep
+- 69206c0f09 Size the eval server pool by memory, and speak Raku to it
+- c58448ab8e JVM: clear the rv-decont sites per eval-server run, and document it all
+- 03e26859cb JVM has no 16-bit argument limit, and the sweep must not forget its frontend
+- 1b51112e14 Document the JVM newdisp port's true state, and unbuffer sweep progress
+
+= Unify static-code identity for BEGIN-bound code on the JVM
+A BEGIN-time dynamic compilation bound code objects to the nested
+unit's code refs while the enclosing unit emitted the same cuids anew,
+splitting the lexical universe a begin-created phaser closes over from
+the one the runtime executes; the comp unit now emits a load-time
+jvm-repoint-dynamic-code fixup for those cuids. The port doc records the
+root cause and resolution, and AGENTS.md is born as the session-start
+briefing (CLAUDE.md symlinks to it).
+- 66eabbd824 Root-cause the traited-variable failure to static-code identity
+- 0a8dd95a8b Give agents a session-start briefing that survives anything
+- ba94206b9a Unify static-code identity for BEGIN-bound code on the JVM
+
+= keep
+- ee34ae75db Teach make to rebuild the nqp JVM runtime it runs on
+
+= keep
+- 41a53daa74 Migrate src/vm/jvm/Perl6 to src/vm/jvm/Raku
+
+= Configure.pl --gen-nqp bootstraps the nested nqp; the build written down
+The jvm gen_nqp path builds the nested nqp checkout in place with
+gradlew buildJvm (never cloning or moving it), so `perl Configure.pl
+--backends=jvm --gen-nqp && make` is the whole chain again and the
+Makefile exports RAKUDO_RAKUAST=1 itself. tools/build/jvm-build.sh and
+jvm-build-resume.sh are the same steps written down. AGENTS.md gains the
+working agreements: env-gated debug prints, -Ilib for in-tree module
+use, the build through Configure.pl and make.
+# moved: 3ff3be13f2, b28dbca846, 8bc2c1fc94 and ac965414c7 pushed later
+# over cdd7742925, 878bd01c7c, 530bd3ee79, 6a0ed07bb1 and 62a3c8faf7 --
+# docs/jvm-newdisp-port.md, t/02-rakudo/regex-crlf-grapheme.t and
+# ast/regex.rakumod against AGENTS.md, the two build scripts, Rakudo.pm
+# and Makefile.in.
+- d561d35e04 The host raku now reaches non-interactive shells on its own
+- cdd7742925 Working agreement: debug prints are env-gated, always
+- 878bd01c7c The rakudo JVM build, written down: no make required
+- 530bd3ee79 Working agreement: -Ilib for in-tree module use
+- 6a0ed07bb1 Configure.pl --gen-nqp: bootstrap the nested nqp via Gradle
+- 62a3c8faf7 Working agreement: the full build runs through Configure.pl and make
+
+= Docs: newdisp port Phase 5 closed -- one issue, one PR, two bugs gone
+The port doc carries the traited-variable repro inline; verified against
+upstream main, the callwith-in-multi-sub and nextwith divergences no
+longer reproduce, the order-dependent mainline/phaser container sharing
+is filed upstream as an issue, and the lex2local flatten-candidate
+hardening went upstream as a PR.
+- 3ff3be13f2 Phase 5 briefing: the three frontend bugs, with the repro inline
+- b28dbca846 Phase 5 closed: one issue, one PR, two bugs evaporated
+
+= RakuAST: fuse \r\n across a WithWhitespace wrapper
+IMPL-FUSE-CRLF looks through the WithWhitespace wrapper an atom with
+trailing whitespace arrives in, so `/ ^ \r\n $ /` fuses like `/^\r\n$/`.
+The grapheme-position assertion in regex-crlf-grapheme.t is skipped on
+the JVM with its reason: .from/.to are char indices without NFG strings.
+- 8bc2c1fc94 Skip the grapheme-position assertion on the JVM
+- ac965414c7 RakuAST: fuse \r\n across a WithWhitespace wrapper
+
+= make j-spectest on one warm eval server; leak-check and hprof tooling
+The jvm harness passes --evalserver, so a spectest runs through one
+warm server (full spectest ~2h20m through an 8g server). evalserver-
+leak-check.sh pushes rounds of files through a server and prints live
+GlobalContext counts; hprof_extract.py and hprof_paths.py find shortest
+paths from a class's instances to GC roots in a heap dump. The
+eval-server doc gains the post-mortem.
+# moved: 022996c617 pushed later over 9c274578c9 -- ast/nqp.rakumod and
+# ParallelSequence.rakumod against docs/jvm-eval-server.md and the new
+# tools/build scripts.
+- 397e2d10ea make j-spectest: one warm eval server for the whole run
+- 9c274578c9 Eval server: leak-check command, hprof path-finder, post-mortem
+
+= keep
+- 022996c617 RakuAST: nqp::cas literals must stay boxed; guard hyper with singletons
+
+= keep
+- de0833a064 JVM: autothread Junction arguments from the bind_error handler
+
+= keep
+- c3da65a89f JVM: real HTML entities, packed to fit the constant pool
