@@ -103,7 +103,9 @@ nqp::say("total_ns=" ~ (nqp::time() - $t0));
 # loopbench.nqp: same loop, body `$acc := $acc + 1` (no call)
 ```
 
-Run with `NQP_CODE_RUN=1 nqp/nqp-j`:
+Run with `nqp/nqp-j` (in 2026-09-06 terms, `NQP_CODE_RUN=1 nqp/nqp-j`;
+that variable must not be set at all since the encoder became the only
+road, and the class road it selected between is gone as of 2026-09-10):
 
 - trivial nqp call: **78 ns**
 - loop-only (boxed-int arith through dispatch): **32 ns/iter**
