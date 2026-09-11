@@ -69,6 +69,9 @@ object RakOps {
 
     @JvmField val key = ContextKey(ThreadExt::class.java, GlobalExt::class.java)
 
+    /** NQP_RV_TRACE=1: explain every rejected return-value type check on stderr. */
+    private val RV_TRACE = System.getenv("NQP_RV_TRACE") != null
+
     /* Parameter hints for fast lookups. */
     private const val HINT_CODE_DO = 0L
     private const val HINT_CODE_SIG = 1L
@@ -235,7 +238,7 @@ object RakOps {
         /* Do any flattening before processing begins. */
         val cf = tc.curFrame!!
         if (theCsd.hasFlattening) {
-            theCsd = theCsd.explodeFlattening(cf, theArgs!!)
+            theCsd = theCsd.explodeFlattening(cf.tc, theArgs!!)
             theArgs = tc.flatArgs
         }
         cf.csd = theCsd
@@ -296,7 +299,7 @@ object RakOps {
         var theArgs = args
         val cf = tc.curFrame!!
         if (theCsd.hasFlattening) {
-            theCsd = theCsd.explodeFlattening(cf, theArgs!!)
+            theCsd = theCsd.explodeFlattening(cf.tc, theArgs!!)
             theArgs = tc.flatArgs
         }
         cf.csd = theCsd
@@ -493,7 +496,17 @@ object RakOps {
      * return in the steady state, dwarfing the call itself. Keyed by the
      * signature object, so it goes cold with the dispatch caches for the
      * same reason rvDecontSites does. */
-    private class RvCheck(@JvmField val rtype: SixModelObject?, @JvmField val generic: Boolean)
+    /* jesp guard-lowering: a non-generic definite return type (Int:D)
+     * decomposes into a base-type istype plus a concreteness test -- the
+     * same lowering signature.rakumod already applies to a :D *parameter*.
+     * Without it, `Ops.istype(rv, Int:D)` invokes DefiniteHOW.accepts_type
+     * every return, which cascades into base_type/definite/check_instantiated
+     * (six metamodel invocations per return -- measured as the dominant cost
+     * of `$a + $b`, whose candidate returns Int:D). baseType non-null selects
+     * the cheap road; wantConcrete distinguishes :D (require concrete) from
+     * :U (require a type object). */
+    private class RvCheck(@JvmField val rtype: SixModelObject?, @JvmField val generic: Boolean,
+                          @JvmField val baseType: SixModelObject?, @JvmField val wantConcrete: Boolean)
     private val rvChecks = java.util.concurrent.ConcurrentHashMap<SixModelObject, RvCheck>()
     init {
         org.raku.nqp.dispatch.DispatchBootstrap.registerResettable { rvChecks.clear() }
@@ -503,6 +516,8 @@ object RakOps {
         rvChecks[sig]?.let { return it }
         val rtype = sig.get_attribute_boxed(tc, gcx.Signature, "$!returns", HINT_SIG_RETURNS)
         var generic = false
+        var baseType: SixModelObject? = null
+        var wantConcrete = false
         if (rtype != null) {
             val HOW = rtype.st.HOW
             val archetypesMeth = Ops.findmethod(HOW, "archetypes", tc)
@@ -516,10 +531,46 @@ object RakOps {
                 Ops.invokeDirect(tc, genericMeth, Ops.invocantCallSite, arrayOf<Any?>(Archetypes))
                 generic = Ops.istrue(Ops.result_o(tc.curFrame!!), tc) == 1L
             }
+            /* jesp: for a non-generic definite return type, precompute the
+             * base type + concreteness so the per-return check avoids
+             * accepts_type. Generic types instantiate per-frame at run time,
+             * so they stay on the plain istype road. Mirrors
+             * signature.rakumod's :D parameter lowering exactly. */
+            if (!generic) {
+                val defArchMeth = Ops.findmethodNonFatal(Archetypes, "definite", tc)
+                var definiteArch = false
+                if (defArchMeth != null) {
+                    Ops.invokeDirect(tc, defArchMeth, Ops.invocantCallSite, arrayOf<Any?>(Archetypes))
+                    definiteArch = Ops.istrue(Ops.result_o(tc.curFrame!!), tc) == 1L
+                }
+                if (definiteArch) {
+                    val btMeth = Ops.findmethodNonFatal(HOW, "base_type", tc)
+                    val dMeth  = Ops.findmethodNonFatal(HOW, "definite", tc)
+                    if (btMeth != null && dMeth != null) {
+                        Ops.invokeDirect(tc, btMeth, targetTypeSite, arrayOf<Any?>(HOW, rtype))
+                        baseType = Ops.result_o(tc.curFrame!!)
+                        Ops.invokeDirect(tc, dMeth, targetTypeSite, arrayOf<Any?>(HOW, rtype))
+                        wantConcrete = Ops.istrue(Ops.result_o(tc.curFrame!!), tc) == 1L
+                    }
+                }
+            }
         }
-        val check = RvCheck(rtype, generic)
+        val check = RvCheck(rtype, generic, baseType, wantConcrete)
         rvChecks[sig] = check
         return check
+    }
+
+    /**
+     * jesp: may an engine site cache p6typecheckrv's acceptance for this
+     * routine per (deconted value's type, concreteness)? Yes unless the
+     * return type is generic, which instantiates against each frame.
+     */
+    @JvmStatic
+    fun p6typecheckrvCacheable(routine: SixModelObject?, tc: ThreadContext): Long {
+        val gcx = key.getGC(tc)
+        val sig = routine!!.get_attribute_boxed(tc, gcx.Code, "$!signature", HINT_CODE_SIG)
+        val check = rvCheckFor(sig!!, gcx, tc)
+        return if (check.rtype == null || !check.generic) 1 else 0
     }
 
     @JvmStatic
@@ -557,7 +608,29 @@ object RakOps {
             }
 
             val decontValue = Ops.decont(rv, tc)
-            if (Ops.istype(decontValue, rtype, tc) == 0L) {
+            /* jesp: base-type istype + concreteness is exactly what
+             * accepts_type computes for a definite type, minus the metamodel
+             * invocations. baseType is set only for a non-generic definite
+             * rtype, where rtype is still check.rtype (the definite type) for
+             * the mismatch/unbox fallback below. */
+            val accepted = if (check.baseType != null)
+                Ops.istype(decontValue, check.baseType, tc) == 1L
+                    && (Ops.isconcrete(decontValue, tc) == 1L) == check.wantConcrete
+                else
+                    Ops.istype(decontValue, rtype, tc) == 1L
+            if (!accepted) {
+                if (RV_TRACE) {
+                    val bt = check.baseType
+                    System.err.println("p6typecheckrv rejected: value=" + decontValue?.javaClass?.simpleName
+                        + " valueWHAT=" + (decontValue?.st?.WHAT?.let { Ops.typeName(it, tc) } ?: "?")
+                        + " rtype=" + Ops.typeName(rtype!!, tc)
+                        + " baseType=" + (bt?.let { Ops.typeName(it, tc) } ?: "null")
+                        + " wantConcrete=" + check.wantConcrete
+                        + " istypeBase=" + (bt?.let { Ops.istype(decontValue, it, tc) } ?: -1)
+                        + " istypeRtype=" + Ops.istype(decontValue, rtype, tc)
+                        + " isconcrete=" + Ops.isconcrete(decontValue, tc)
+                        + " sameListType=" + (bt != null && decontValue != null && decontValue.st.WHAT === bt))
+                }
                 /* Straight type check failed, but it's possible we're returning
                  * an Int that can unbox into an int or similar. */
                 val spec = rtype!!.st.REPR.get_storage_spec(tc, rtype.st)

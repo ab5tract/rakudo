@@ -45,24 +45,38 @@ sub MAIN(
     # everything else alive on the box.
     my $avail-gb = '/proc/meminfo'.IO.lines.first(*.starts-with('MemAvailable')) ~~ /(\d+)/
                        ?? $0 div (1024 * 1024) !! 8;
-    my $budget = max(4, $avail-gb * 3 div 4);
+    # Reserve a fixed 3g for the clients, the harness and the rest of the
+    # box, not a quarter: a quarter of 19g refused the three servers the
+    # server's own guard (which works from MemAvailable directly) allows.
+    my $budget = max(4, $avail-gb - 3);
 
-    my $h = $heap // ($budget >= 12 ?? 6 !! max(3, $budget div 2));
-    my $j = $jobs // max(1, min(6, $budget div $h));
-    if $h * $j > $budget && !$force {
-        die "jobs ($j) x heap ({$h}g) = { $h * $j }g exceeds the {$budget}g budget"
+    # The server's own guard (rakudo-eval-server: "REFUSING to start") counts a
+    # server as heap + 3g of off-heap (the Truffle compiler isolate, code
+    # cache, metaspace), and refuses a new server when the live ones' growth
+    # allowance plus that would pass MemAvailable. Budget the same way, or the
+    # pool this promises is one the guard declines mid-run -- which surfaced
+    # as a chunk with no TAP and a 120s token timeout (2026-09-08).
+    my constant OFF-HEAP-GB = 3;
+    my $h = $heap // ($budget >= 18 ?? 6 !! max(2, $budget div 2 - OFF-HEAP-GB));
+    my $per = $h + OFF-HEAP-GB;
+    my $j = $jobs // max(1, min(6, $budget div $per));
+    if $per * $j > $budget && !$force {
+        die "jobs ($j) x (heap {$h}g + {OFF-HEAP-GB}g off-heap) = { $per * $j }g exceeds the {$budget}g budget"
           ~ " ({$avail-gb}g available); lower one, or pass --force to overcommit\n";
     }
     my $c = $chunk // max(3, $h * 15 div 8);
 
     my @files = @targets.map({
-        .IO.d ?? .IO.dir(test => *.ends-with('.t')).sort.map(*.relative).Slip !! $_
+        .IO.d
+            ?? .IO.dir(test => *.ends-with('.t' | '.rakutest'))
+                   .sort.map(*.relative).Slip
+            !! $_
     });
     die "no test files found\n" unless @files;
 
     my @chunks = @files.batch($c);
     note "{ +@files } files, { +@chunks } chunks of $c, "
-       ~ "$j servers x {$h}g heap ({ $h * $j }g of a {$budget}g budget, {$avail-gb}g available)";
+       ~ "$j servers x {$h}g heap + {OFF-HEAP-GB}g off-heap ({ $per * $j }g of a {$budget}g budget, {$avail-gb}g available)";
 
     my $started = now;
     my $done = 0;
@@ -96,8 +110,12 @@ sub MAIN(
     say "{ +@failed } of { +@chunks } chunks failed" if @failed;
     say "*** $silent chunk(s) contained a file with no TAP -- lower --chunk ***" if $silent;
     for @failed -> $f {
-        say "--- chunk { $f<i> } ---";
+        say "--- chunk { $f<i> }: { $f<files>.join(' ') } (exit { $f<code> }) ---";
         say $f<out>.lines.grep({ /^ 't/' | 'Result:' | 'No subtests' | 'Failed ' /}).join("\n");
+        # A chunk whose server never came up, or whose harness died, has no
+        # test line at all; the raw tail is the only diagnostic there is.
+        my @tail = $f<out>.lines.tail(15);
+        say "--- raw tail ---\n" ~ @tail.join("\n") if @tail;
     }
     exit @failed ?? 1 !! 0;
 }

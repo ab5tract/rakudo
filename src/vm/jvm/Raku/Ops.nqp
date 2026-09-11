@@ -103,24 +103,27 @@ our $Binder;
 proto sub trial_bind(*@args) {
     $Binder.trial_bind(|@args);
 }
-my $trial_bind := -> $qastcomp, $op {
-    $qastcomp.as_jast(QAST::Op.new(
+# A trial bind is a plain call of the &trial_bind proto above; published
+# as a desugar so the code engine's encoder reaches it too (it was the
+# one refusal left in the Optimizer's optimize_call, 2026-09-09).
+my $trial_bind := -> $op {
+    QAST::Op.new(
         :op('call'),
         QAST::WVal.new( :value(&trial_bind) ),
         |@($op)
-    ));
+    )
 };
 proto sub set_binder($b) { $Binder := $b; }
 proto sub get_binder()   { $Binder }
-$ops.add_hll_op('nqp', 'p6setbinder', -> $qastcomp, $op {
-    $qastcomp.as_jast(QAST::Op.new(
+register_op_desugar('p6setbinder', -> $op {
+    QAST::Op.new(
         :op('call'),
         QAST::WVal.new( :value(&set_binder) ),
         |@($op)
-    ));
-});
-$ops.add_hll_op('Raku', 'p6trialbind', :!inlinable, $trial_bind);
-$ops.add_hll_op('nqp', 'p6trialbind', :!inlinable, $trial_bind);
+    )
+}, :compiler('nqp'));
+register_op_desugar('p6trialbind', $trial_bind, :!inlinable, :compiler('Raku'));
+register_op_desugar('p6trialbind', $trial_bind, :!inlinable, :compiler('nqp'));
 $ops.map_classlib_hll_op('Raku', 'p6setitertype', $TYPE_P6OPS, 'p6setitertype', [$RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6setassociativetype', $TYPE_P6OPS, 'p6setassociativetype', [$RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6setiterbuftype', $TYPE_P6OPS, 'p6setiterbuftype', [$RT_OBJ], $RT_OBJ, :tc);

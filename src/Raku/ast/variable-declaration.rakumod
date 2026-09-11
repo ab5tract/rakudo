@@ -769,14 +769,15 @@ class RakuAST::VarDeclaration::Simple
     # emits by-name vivification lookups.
     method IMPL-LOWERED-LOCAL-NAME() {
         return $!lowered-local-name if $!lowered-local-name;
-        return '' unless $!lowered-to-local;
-        return '' if nqp::isnull($!lowered-away-sentinel);
-        return '' if $!already-declared
-            || self.scope ne 'my'
-            || $!desigilname.is-multi-part
-            || self.IMPL-HAS-EXPLICIT-CONTAINER-BASE-TYPE;
+        return self.IMPL-DECLINE-LOCAL-NAME('not-lowered') unless $!lowered-to-local;
+        return self.IMPL-DECLINE-LOCAL-NAME('no-sentinel') if nqp::isnull($!lowered-away-sentinel);
+        return self.IMPL-DECLINE-LOCAL-NAME('already-declared') if $!already-declared;
+        return self.IMPL-DECLINE-LOCAL-NAME('scope ' ~ self.scope) if self.scope ne 'my';
+        return self.IMPL-DECLINE-LOCAL-NAME('multi-part') if $!desigilname.is-multi-part;
+        return self.IMPL-DECLINE-LOCAL-NAME('container-base-type')
+            if self.IMPL-HAS-EXPLICIT-CONTAINER-BASE-TYPE;
         my $of := $!where ?? $!type.meta-object !! self.IMPL-OF-TYPE;
-        return '' if self.sigil eq '$' && nqp::objprimspec($of);
+        return self.IMPL-DECLINE-LOCAL-NAME('native') if self.sigil eq '$' && nqp::objprimspec($of);
         # The assignment emit paths choose their strategy from the QAST
         # name's leading sigil, so the local keeps it. The declared name
         # rides along for debuggability.
@@ -796,6 +797,17 @@ class RakuAST::VarDeclaration::Simple
                     ~ self.name ~ $where);
         }
         $!lowered-local-name
+    }
+
+    # Why a declaration the pass chose to lower still keeps its lexical
+    # (RAKUDO_LOWERING_DEBUG): a decided lowering that mints no local name
+    # is otherwise invisible.
+    method IMPL-DECLINE-LOCAL-NAME(str $why) {
+        if $!lowered-to-local && nqp::atkey(nqp::getenvhash(), 'RAKUDO_LOWERING_DEBUG') {
+            RakuAST::IMPL::VarLowering.IMPL-NOTE(
+                'lex2local: unminted ' ~ self.name ~ ' (' ~ $why ~ ')');
+        }
+        ''
     }
 
     # The declaration form for a scope flattened into its user's frame:
