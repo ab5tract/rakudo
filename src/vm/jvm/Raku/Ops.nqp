@@ -4,18 +4,11 @@ my $TYPE_P6OPS := 'Lorg/raku/rakudo/RakOps;';
 # Other types we'll refer to.
 my $TYPE_OPS   := 'Lorg/raku/nqp/runtime/Ops;';
 
-# Exception categories.
-my $EX_CAT_NEXT    := 4;
-my $EX_CAT_REDO    := 8;
-my $EX_CAT_LAST    := 16;
-
 # Opcode types.
 my $RT_OBJ  := 0;
 my $RT_INT  := 1;
 my $RT_NUM  := 2;
 my $RT_STR  := 3;
-my $RT_UINT := 10;
-my $RT_VOID := -1;
 
 # Register a de-sugar from one QAST tree to another.
 #
@@ -41,6 +34,21 @@ sub register_op_desugar($name, $desugar, :$inlinable = 1, :$compiler = 'Raku') i
 
 # Raku opcode specific mappings.
 my $ops := nqp::getcomp('QAST').operations;
+
+# The five Raku ops an HLL must NOT inline. They used to say so through
+# add_hll_op(:!inlinable); those closures are gone, and all five have an
+# encoder row (TruffleEncoder's $extra_ops), so is_inlinable's "an op the
+# encoder compiles is inlinable" fallback would otherwise answer yes for
+# them. It must not: every one of them acts on the frame it is compiled
+# into -- the signature binders on that frame's arguments, p6return on
+# its return, the decontainerizers on its return value -- so an inlined
+# copy would act on the inliner's frame instead. Correctness, not speed.
+$ops.set_hll_op_inlinability('Raku', 'p6bindsig', 0);
+$ops.set_hll_op_inlinability('Raku', 'p6trybindsig', 0);
+$ops.set_hll_op_inlinability('Raku', 'p6decontrv', 0);
+$ops.set_hll_op_inlinability('Raku', 'p6decontrv_6c', 0);
+$ops.set_hll_op_inlinability('Raku', 'p6return', 0);
+
 $ops.map_classlib_hll_op('Raku', 'p6configposbindfailover', $TYPE_P6OPS, 'p6configposbindfailover', [$RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6store', $TYPE_P6OPS, 'p6store', [$RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6definite', $TYPE_P6OPS, 'p6definite', [$RT_OBJ], $RT_OBJ, :tc);
