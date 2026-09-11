@@ -11,10 +11,14 @@ encode-time IR inliner.
 
 The gate is `t/01-sanity` (cold runners and the warm eval-server sweep)
 plus the `+` microbenchmark below. Everything here is measured on the
-engine build; a script mainline must be run with
-`RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1`, or it compiles to
-bytecode and never touches the engine's replay (dispatch stats show it at
-once: 20k folded hits instead of 90M).
+engine build; a script mainline needs `RAKUDO_RAKUAST=1`, and that is
+all. (Written 2026-09-07 this line also demanded
+`NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1`, "or it compiles to bytecode and
+never touches the engine's replay". There is no bytecode road any more —
+milestone 3 made the encoder the only road and milestone 4, 2026-09-10,
+deleted the class road outright — and those two variables must now NOT be
+set at all. Read every `NQP_CODE_RUN`/`NQP_CODE_PRECOMP` and every
+`.codeprograms.lz4` in this file as the vocabulary of its own date.)
 
 ## The benchmark and what it says
 

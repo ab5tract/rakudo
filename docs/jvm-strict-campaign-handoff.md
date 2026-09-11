@@ -20,11 +20,16 @@ section first — it is the stuff that keeps getting re-explained.
   submodule). nqp changes: `cd <abs>/nqp && git ...` in its own call (the
   worktree guard refuses `git -C`); gradle as `./nqp/gradlew -p nqp` from the
   root. Label hashes by tree.
-- **Every build/run needs `RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1`.**
+- **Every build/run needs `RAKUDO_RAKUAST=1`.** (As written in 2026-09-08
+  this line also said `NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1`. Since milestone 3
+  of the unit artifact those two are not knobs and must NOT be set at all.)
 - **Env-gate every debug print** (`nqp::getenvhash()<VAR>` / `System.getenv`).
-- **Stage0 jars carry wire programs** (`nqp.codeprograms.lz4` inside each
-  bootstrap jar), so a wire change must be ADDITIVE: new op numbers only,
-  never a changed layout of an existing op.
+- **Stage0 jars carry wire programs**, so a wire change must be ADDITIVE:
+  new op numbers only, never a changed layout of an existing op. (In
+  2026-09-08 terms that meant an `nqp.codeprograms.lz4` sidecar inside each
+  class-road bootstrap jar; since milestone 4, 2026-09-10, stage0 is nine
+  `unit.meta`-only artifact jars and the programs live in the unit. The
+  additive rule is unchanged.)
 - **Backtraces omit engine closures.** A nested block run by the engine has
   no name (its CodeRef `name` is an uninitialized lateinit on the script
   road, the enclosing routine's name on the jar road) and does not appear
@@ -266,8 +271,10 @@ got slower.
 
 ## Recipes (the tmp/ artifacts of the previous session are gone)
 
-- Strict loop: `NQP_CODE_STRICT=1 RAKUDO_RAKUAST=1 NQP_CODE_RUN=1
-  NQP_CODE_PRECOMP=1 raku tools/build/watched-run.raku --log=strict.log
+- Strict loop (drop the `NQP_CODE_RUN`/`NQP_CODE_PRECOMP` this recipe
+  carried in 2026-09-08; they must not be set):
+  `NQP_CODE_STRICT=1 RAKUDO_RAKUAST=1
+  raku tools/build/watched-run.raku --log=strict.log
   --show='> Task :stage' --show='code-bail' --show='BUILD' --show='rror'
   -- ./nqp/gradlew -p nqp clean buildJvm` (≈5 min to the first stage2
   error, ≈10 min green).
@@ -292,3 +299,8 @@ got slower.
 is now covered; the strict build proves the nqp bootstrap has none left.
 Deeper background: `docs/jvm-jesp.md`, `docs/jvm-truffle-only-plan.md`,
 `docs/jvm-truffle-migration.md`.
+
+## Closed (2026-09-10)
+
+Unit-artifact milestone 4 deleted the runtime class road and JAST;
+nothing here is left to hand off. This file is history from this line up.
