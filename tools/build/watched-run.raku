@@ -9,6 +9,19 @@
 #   watched-run.raku -t=a.t -t=b.t ... [--jobs=N] [--log-dir=DIR] [--stall=..] [--max=..] -- runner args...
 #   A -t that names a directory expands to the .t/.rakutest files in it.
 #
+# Watch a run somebody else started (a subagent's build, a detached sweep):
+#   watched-run.raku --follow=PATH [--show=TEXT ...] [--show-rx=REGEX ...] [--max=SECONDS]
+#   Attaches to the log another watched-run is writing and streams its
+#   markers -- the mirrored [Ns] lines that run already recorded, plus any
+#   --show of your own prefixed with the seconds since that run started --
+#   until the run ends: a single run's own "=== EXIT" line (echoed, and it
+#   becomes the exit code), or a -t run's summary verdict line ("N of M ok
+#   in Ss, logs: DIR", exit 0 when N == M, else 1). A -t digest carries one
+#   file-TAGGED "=== EXIT" line per file and no whole-run EXIT line, so the
+#   tagged ones are not mistaken for the end of the run.
+#   A log that does not exist yet is waited for; a log that shrinks (the
+#   run was restarted into the same path) is followed from its new start.
+#
 # --stall    how long a silence is allowed before we call it wedged (default 900)
 # --max      overall ceiling per run, 0 for none (default 0)
 # --show     echo lines containing this literal text to stderr as they
@@ -16,6 +29,11 @@
 #            tailing the log from outside just to see progress markers.
 # --show-rx  the same, matching a Raku regex (quote the argument; `=` and
 #            spaces are metacharacters to the regex parser).
+# --show-file PATH that receives only the --show/--show-rx matches (elapsed
+#            prefixed, file-tagged in -t mode) and each run's "=== EXIT" line,
+#            so the log stays the complete, unfiltered record and this file is
+#            the progress digest. Without it the markers are mirrored into
+#            the log itself, as before. --follow reads either file.
 # --relay    also echo the markers of nested watched-runs (lines with a
 #            leading [Ns]); for a chain script whose every long step runs
 #            under its own watched-run. Never filter a step's output with
@@ -46,7 +64,7 @@ $*OUT.out-buffer = False;
 $*ERR.out-buffer = False;
 
 my sub run-one(@cmd, Str :$log!, Int :$stall!, Int :$max!, :@pats, Str :$tag,
-               Bool :$interruptible) {
+               Bool :$interruptible, :$show-fh) {
     my $fh = open $log, :w, :out-buffer(0);
     # Say so plainly: a bad path otherwise surfaces as a Failure being
     # printed to, several frames away from the cause.
@@ -79,13 +97,15 @@ my sub run-one(@cmd, Str :$log!, Int :$stall!, Int :$max!, :@pats, Str :$tag,
             my $who = $tag ?? " $tag" !! '';
             for @pats -> $pat {
                 whenever $lines.grep($pat) -> $l {
-                    # Prefix the elapsed seconds and mirror the marker into
-                    # the log, so a detached run (terminal discarded) still
-                    # carries the timing -- greppable as a leading [Ns].
+                    # Prefix the elapsed seconds and keep the marker on disk,
+                    # so a detached run (terminal discarded) still carries the
+                    # timing -- greppable as a leading [Ns]: in the --show-file
+                    # when there is one (the log stays unfiltered), otherwise
+                    # mirrored into the log itself.
                     my Str() $duration = (now - $started).Int;
                     my $mark = "[{$duration}s]{" " x 3 - $duration.comb}$who $l";
                     note $mark;
-                    $fh.say: $mark;
+                    ($show-fh // $fh).say: $mark;
                 }
             }
         }
@@ -144,10 +164,81 @@ my sub run-one(@cmd, Str :$log!, Int :$stall!, Int :$max!, :@pats, Str :$tag,
         default          { 124 }
     };
 
-    $fh.say: "=== EXIT=$code verdict=$verdict elapsed={(now - $started).Int}s ===";
+    my $exit-line = "=== EXIT=$code verdict=$verdict elapsed={(now - $started).Int}s ===";
+    $fh.say: $exit-line;
     $fh.say: "=== finished { DateTime.now } ===";
     $fh.close;
+    # The digest gets the verdict too, tagged in -t mode, so a follower or a
+    # waiter on that file alone knows the run ended and how.
+    $show-fh.say: ($tag ?? "$tag " !! '') ~ $exit-line if $show-fh;
     ($code, $verdict)
+}
+
+# Follow a log another watched-run is writing: echo the [Ns] markers that
+# run mirrored into it, and any --show line of ours with the seconds since
+# that run's "=== started" stamp, until its "=== EXIT" line (single mode)
+# or its summary verdict line (-t mode, whose digest has no whole-run EXIT
+# line, only one file-tagged EXIT line per file). Polling, not
+# inotify: a second's lag is nothing against a build's minutes, and it needs
+# no native module. Answers the run's exit code, or 124 on our own ceiling.
+my sub follow-log(Str $log, :@pats, Int :$max!) {
+    my $attached = now;
+    my $started;          # the followed run's start, from its stamp
+    my $pos = 0;          # bytes consumed
+    my $carry = '';       # a partial last line, until its newline arrives
+    my $waited = 0;
+    loop {
+        if $max > 0 && now - $attached > $max {
+            note "over the {$max}s ceiling, giving up";
+            return 124;
+        }
+        unless $log.IO.e {
+            note "waiting for $log" if $waited++ == 0;
+            sleep 1; next;
+        }
+        my $size = $log.IO.s;
+        if $size < $pos {
+            note "$log restarted, following from its new start";
+            $pos = 0; $carry = ''; $started = Nil;
+        }
+        if $size > $pos {
+            my $fh = open $log, :r, :bin;
+            $fh.seek($pos);
+            my $chunk = $fh.read($size - $pos).decode('utf8-c8');
+            $fh.close;
+            $pos = $size;
+            my @lines = ($carry ~ $chunk).split("\n");
+            $carry = @lines.pop;   # '' after a complete line, else the partial
+            for @lines -> $l {
+                if !$started && $l ~~ /^ '=== started ' (\S+) ' ===' $/ {
+                    $started = try DateTime.new(~$0).Instant;
+                }
+                if $l ~~ /^ '[' \d+ 's]' / {
+                    note $l;
+                }
+                elsif @pats.first({ $l ~~ $_ }) {
+                    my $since = ($started ?? now - $started !! now - $attached).Int;
+                    note "[{$since}s]{' ' x 3 - $since.Str.comb} $l";
+                }
+                # The end of the followed run. Single mode: its own EXIT
+                # line, which carries no file tag -- a -t digest's per-file
+                # EXIT lines are tagged with the file's basename and end
+                # only that file, so the tag is what tells them apart.
+                if $l ~~ / '=== EXIT=' (\d+) ' verdict=' (\S+) ' elapsed=' (\d+) 's ===' /
+                        && $/.prematch eq '' {
+                    note $l;
+                    return +$0;
+                }
+                # -t mode: the summary verdict the run writes after its last
+                # file (there is no whole-run EXIT line to wait for).
+                if $l ~~ /^ (\d+) ' of ' (\d+) ' ok in ' \d+ 's, logs: ' \S/ {
+                    note $l;
+                    return $0 == $1 ?? 0 !! 1;
+                }
+            }
+        }
+        sleep 1;
+    }
 }
 
 # It must be greater than two slashes. Otherwise treat it as a string search for '//'
@@ -163,9 +254,11 @@ sub MAIN(
     :@show,
     :@show-rx where { .elems == 0 || .elems == .grep(RegexInput) },
     Bool :$relay = False,
+    Str  :$follow,
+    Str  :$show-file,
     :@t
  ) {
-    @cmd or die "nothing to run: pass the command after --\n";
+    @cmd or $follow or die "nothing to run: pass the command after --, or --follow=LOG\n";
 
     # A --show is literal text; a --show-rx is compiled before anything
     # starts, so a broken regex fails here, not inside the react block once
@@ -175,6 +268,23 @@ sub MAIN(
             my $rx = try "anon regex \{ $s \}".EVAL;
             $rx // die "bad --show-rx pattern '$s': { $!.message }\n";
         };
+
+    if $follow {
+        die "--follow takes no command\n" if @cmd;
+        note "following: { $follow.IO.absolute }";
+        exit follow-log($follow, :@pats, :$max);
+    }
+
+    # The progress digest: one handle for the whole invocation (every -t
+    # run writes its tagged markers into it), unbuffered so a follower sees
+    # each line as it lands.
+    my $show-fh;
+    if $show-file {
+        $show-fh = open $show-file, :w, :out-buffer(0);
+        die "cannot write --show-file '$show-file': { $show-fh.exception.message }\n"
+            if $show-fh ~~ Failure;
+        note "markers: { $show-file.IO.absolute }";
+    }
     # A chain script runs each long step under its own watched-run; the
     # outer run relays those steps' markers (their leading [Ns]) without
     # the caller repeating every pattern -- and without a grep in the
@@ -200,7 +310,7 @@ sub MAIN(
             my $name = $file.trans('/.' => '__');
             my ($code, $verdict) =
                     run-one([|@cmd, $file], :log("$log-dir/$name.log"), :$stall, :$max,
-                            :@pats, :tag($file.IO.basename));
+                            :@pats, :tag($file.IO.basename), :$show-fh);
             note "{ $code == 0 ?? 'ok  ' !! 'FAIL' } $file (exit $code, $verdict)";
             $file => ($code, $verdict)
         };
@@ -209,6 +319,9 @@ sub MAIN(
         my $line = "{ @results.elems - @failed.elems } of { @results.elems } ok "
                 ~ "in {$elapsed}s, logs: $log-dir";
         note $line;
+        # The digest gets the verdict too: a -t run has no whole-run EXIT
+        # line, so this is what a --follow on the digest ends on.
+        $show-fh.say: $line if $show-fh;
         # The verdict on disk, whole or absent: written beside the logs
         # under a temporary name and renamed into place.
         my $tmp = "$log-dir/SUMMARY.tmp";
@@ -226,7 +339,7 @@ sub MAIN(
         note "log: { $log.IO.absolute }";
         my $start = now;
         my ($code, $verdict) =
-                run-one(@cmd, :$log, :$stall, :$max, :@pats, :interruptible);
+                run-one(@cmd, :$log, :$stall, :$max, :@pats, :interruptible, :$show-fh);
         note "$verdict, exit $code, log: $log";
         exit $code;
     }

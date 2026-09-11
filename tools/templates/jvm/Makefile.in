@@ -8,14 +8,7 @@ JAR     = jar
 # right compiler no matter how it was invoked. GNU make syntax, like the
 # rest of this backend's rules.
 export RAKUDO_RAKUAST = 1
-
-# The code engine is opt-in at the encoder (NQP_CODE_RUN: blocks encode to
-# Truffle programs; NQP_CODE_PRECOMP: precompiled units, i.e. the frontend,
-# BOOTSTRAP and the settings, encode too). Everything runs on Truffle here,
-# so the build exports both: a bare `make` is the engine build, and a
-# bytecode-only setting is not something this Makefile produces.
-export NQP_CODE_RUN = 1
-export NQP_CODE_PRECOMP = 1
+# The engine build is the build: the encoder and the unit road are on by default (nqp, 2026-09-09).
 
 NQP_PREFIX  = @nqp_prefix@
 @bpv(NQP)@       = @shquot(@j_nqp@)@

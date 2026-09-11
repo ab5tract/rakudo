@@ -14,11 +14,19 @@ Session-start facts that keep getting relearned the hard way:
 - **`RAKUDO_RAKUAST=1` on every build, test, and run.** The generated
   Makefile exports it into its own recipes (2026-08-29), but nothing sets
   it for your own runs and test invocations, and `src/main.nqp` silently
-  falls back to the legacy frontend without it. The Makefile also exports
-  `NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1` (2026-09-07): a bare `make` IS the
-  Truffle engine build (frontend, BOOTSTRAP, settings all encoded);
-  there is no separate "bytecode build" to compare against, and any
-  CORE.c timing must come from a build made this way. The legacy frontend
+  falls back to the legacy frontend without it. The encoder and the unit
+  road are ALWAYS on since 2026-09-09 (nqp side) and are not knobs:
+  `NQP_CODE_RUN` and `NQP_CODE_PRECOMP` must not be set at all. The
+  compiler dies on `=0` ("the road needs the encoder on"), there is no
+  class road left to opt out *to*, and stage0's bootstrap compiler reads
+  their mere PRESENCE (even `=0`) as "encode", so a gradle build that
+  exports them builds stage1 differently. What survives are the
+  diagnostics: `NQP_CODE_ENCODED`, `NQP_CODE_BAIL`, `NQP_CODE_WHY`,
+  `NQP_CODE_STRICT`. So a bare
+  `make` IS the Truffle engine build (frontend, BOOTSTRAP, settings all
+  encoded) and every jar it writes is a unit artifact entered through
+  `UnitMain`; there is no separate "bytecode build" to compare against,
+  and any CORE.c timing must come from a build made this way. The legacy frontend
   (`src/Perl6/`) is off limits — don't read it, reason from it, or measure
   against it.
 - **Long builds and test runs go through `tools/build/watched-run.raku`.**
@@ -31,6 +39,15 @@ Session-start facts that keep getting relearned the hard way:
           --show='Compiling|Generating' -- sh tools/build/jvm-build.sh jars
       raku tools/build/watched-run.raku -t=t/02-rakudo --jobs=3 -- ./rakudo-j
       raku tools/build/evalserver-sweep.raku --jobs=3 --heap=2 t/01-sanity
+
+  `--show-file=PATH` (2026-09-09) keeps the log unfiltered and writes only
+  the marker matches plus the EXIT line there; `--follow=LOG` attaches to
+  a run somebody else started (a subagent's build) and streams its
+  markers until its EXIT line:
+
+      raku tools/build/watched-run.raku --log=build.log --show-file=build.markers \
+          --show='Compiling' -- make
+      raku tools/build/watched-run.raku --follow=build.markers
 
   Both gates run at 3 (decision 2026-09-08): the eval server's own guard
   counts a server as heap + 3g off-heap and refuses a 4th on this box,

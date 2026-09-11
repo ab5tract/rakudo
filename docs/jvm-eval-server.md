@@ -52,11 +52,17 @@ per-server ceiling reaches the launcher through `RAKUDO_EVALSERVER_HEAP`
 (default 8g).
 
 Usage: directories are expanded to their `.t` and `.rakutest` files,
-files are taken as given, and every run needs the engine-build
-environment exported (the script exports `RAKUDO_RAKUAST=1` itself;
-`NQP_CODE_RUN`/`NQP_CODE_PRECOMP` come from the caller):
+files are taken as given. Since milestone 3 of the unit artifact
+(2026-09-09) the encoder and the unit road are always on; nothing needs
+exporting beyond `RAKUDO_RAKUAST=1`, which the script exports itself.
+`NQP_CODE_RUN` and `NQP_CODE_PRECOMP` are not knobs and must not be set
+at all: the compiler dies on `=0` (the road needs the encoder on), and
+stage0's bootstrap compiler treats their mere presence as "encode", so a
+gradle build with them exported builds stage1 differently. The surviving
+switches are the diagnostics `NQP_CODE_ENCODED`, `NQP_CODE_BAIL`,
+`NQP_CODE_WHY` and `NQP_CODE_STRICT`.
 
-    RAKUDO_RAKUAST=1 NQP_CODE_RUN=1 NQP_CODE_PRECOMP=1 \
+    RAKUDO_RAKUAST=1 \
         raku tools/build/evalserver-sweep.raku t/01-sanity t/02-rakudo/some.t
 
     --heap=N      GB of heap per server (default 6, less on a tight box)
@@ -70,6 +76,34 @@ its own server (a distinct `RAKUDO_EVALSERVER_TOKEN`), so the pool never
 serialises onto one server; the summary names failed chunks and any file
 that produced no TAP (lower `--chunk` when that happens). Wrap it in
 `watched-run.raku` for a log and a stall watchdog, as with any long run.
+
+**What a whole `t/` costs on artifact units** (milestone 3 of the unit
+artifact, 2026-09-10; ~418 files):
+
+    sweep 2, after the deletions   7270 s   3 servers x 4 GB
+    sweep 1, after the flip        7858 s   2 servers x 6 GB
+
+Neither run finished inside one invocation: both hit a `--max=7200`
+ceiling (sweep 2 after 59 of 60 chunks, sweep 1 after 35 of 38) and the
+unreached directories ran in a second invocation — 70 s for sweep 2,
+658 s for sweep 1. Chunk size follows the heap, `chunk = heap x 15 / 8`
+files (4 GB gives 7, 6 GB gives 11), so sweeps with different heaps are
+not comparable chunk for chunk; files inside the ceiling are (413 for
+sweep 2 against 385 for sweep 1). `--jobs=3 --heap=4` is the pool this
+box's budget actually fits — auto-sizing chose two 6 GB servers, and the
+third server is worth more than the extra heap. Put the numbers on the
+command line rather than relying on the sizing.
+
+The tail of both runs is made of chunks with no TAP, and they are the
+part of the wall clock that is not test work: a file that dies before
+emitting a plan (a compile-time `SORRY`, an NPE in a `BEGIN`) takes its
+chunk's whole per-file report with it, and a chunk whose server the
+guard declined burns the harness's full 120 s wait for a token file that
+never appears (`t/harness5:165`). A timed-out sweep also never reaches
+its final per-chunk summary, so attribution is lost: with three servers
+the progress lines are labelled by completion order, not chunk index,
+and a targeted second sweep over the files you care about is the only
+reliable way back to per-file verdicts.
 
 That budgeting failed to prevent a second OOM on 2026-09-02 (four servers
 alive at once, launched by different tools), so the arithmetic now lives in
