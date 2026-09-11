@@ -366,6 +366,13 @@ half); anonymous-block naming; t/spec; `java -jar`; items 1 to 3.
 
 ## Done (2026-09-10) — code complete, gate open
 
+> **Superseded in part, 2026-09-11.** The fix wave below the gate
+> section closed both named mechanisms. Every timing in THIS section was
+> taken with routine inlining and native lowering off (the `is_inlinable`
+> regression), so none of it is a baseline for anything; the wave's
+> numbers are — nqp clean build 253 s, `make` 1142 s, CORE.c 467 s.
+> See "Fix wave (2026-09-11)" at the end of this section.
+
 Everything this spec asked for is built and committed, and the milestone
 is **not closed**: the t/ gate (below) found eleven red files that
 milestone 3's sweep 2 did not list, two of them with named mechanisms,
@@ -541,3 +548,88 @@ cluster (`03-cmp-ok.t`, `03-corekeys*.t` x4, `04-settingkeys-6c.t`,
 pass through the eval server (`long-int-literal.t`,
 `native-argument-snapshot.t`), plus `15-gh_1202.t`, are the cold-run
 `$*EXECUTABLE`-spawn gap, not failures.
+
+## Fix wave (2026-09-11) — both named mechanisms closed
+
+nqp `908134f3f`, `47697ca29`, `3b9615f4b`, `b3d75f993`; rakudo
+`548dc2544d`, `cd5799df09`, and the docs commit carrying this text.
+
+**`is_inlinable` (gate regression 1).** `QAST::OperationsJVM.is_inlinable`
+answers, in order: an HLL override; then `%core_inlinability` (the
+classlib rows); then 0 for the twelve names in a new
+`%core_noninlinable` table — `call`, `callstatic`, `dispatch`,
+`syscall`, `register`, `delegate`, `track`, `guard`, `handle`,
+`handlepayload`, `usecapture`, `savecapture`, verified one by one
+against `55bdee5b7:src/vm/jvm/QAST/Compiler.nqp`; and otherwise the rule
+`core_op_supported` already used, `QAST::TruffleEncoder.supports_op`. So
+every op the backend can compile is inlinable unless named, and an
+unknown op is not — the semantics `add_core_op`'s `:$inlinable = 1`
+default gave. The Rakudo half is mandatory and separate: `p6bindsig`,
+`p6trybindsig`, `p6decontrv`, `p6decontrv_6c` and `p6return` are all in
+`$extra_ops`, so the new fallback would make them inlinable, and an
+inlined signature binder or `p6return` acts on the inliner's frame;
+`src/vm/jvm/Raku/Ops.nqp` records them with
+`set_hll_op_inlinability(..., 0)`.
+
+That makes `$extra_ops` a three-consumer list (survey, `supports_op`,
+`is_inlinable`'s last resort), which its comment now says, and
+`nqp/t/jvm/16-op-registry.t` pins both answers so it cannot recur
+silently — the gap that let this ship was that nothing between Task 1
+and Task 11 exercised either consumer.
+
+**The `Str` range hang (gate regression 2) was not a CORE.c build
+artifact and not the compiler.** Two things established it. First, a
+dump/diff of the gather block between `blib/CORE.c.setting.jar` and a
+working precompiled module copy of the same routine: the `BlockRec`s
+match field for field (name, line, outer, `oLex`, `iLex` = `[$stop,
+$looped]`, handler kinds, static-lexical rows) and the wire programs are
+879 words each, differing at exactly 44 operand positions — every one a
+string-table index, SC handle index, handler id or nested qbid, not one
+opcode. Second, the pre-Task-8 runtime (`14df06863`) hangs identically,
+which exonerates Tasks 8 and 9, and the post-fix CORE.c jars still hung,
+which exonerates the `is_inlinable` repair.
+
+The cause is in `CallFrame`. The continuation save road called
+`leave()`, which gives the frame's live-invocation count back and points
+the static frame's `priorInvocation` at the frame being packed away.
+With `liveInvocations` back at 0, `outerFor` skips the caller-chain
+search and answers `priorInvocation` — so a **second invocation of the
+same static frame, running while the first is suspended**, resolves its
+blocks' outer to the suspended one. `SEQUENCE` creates exactly that:
+its multi-character branch builds each character position's range with
+the sequence operator, which is `SEQUENCE`. The inner gather's
+`$stop = 1` landed in the outer invocation's lexicals, its `until $stop`
+never saw it, and the producer repeated its last value forever. It is
+invisible while a static frame has one invocation at a time, which is
+why no hand-written reduction reproduced it and why the reviewer's copy
+did not: that copy's inner `...` reached the *setting's* `SEQUENCE`, a
+different routine. Compiling the same body as an ordinary module with
+its inner sequence made to call itself reproduces
+`(aa ab ac ac ac ac)` exactly.
+
+`leaveSuspended()` now does the one thing a save owes — restore
+`tc.curFrame` — and `leave()`/`leaveTorn()` still give the count back
+exactly once and set `priorInvocation`, at the real exit, when it is
+true. Regression test: `t/02-rakudo/nested-invocation-continuation.t`.
+
+**Also in the wave.** A continuation-captured frame keeps its exit
+handler for its real exit (`left` is now the count's one-shot and
+`exitHandlerRun` the handler's; `leaveThrough(ce)` names the rule the
+four control-throw sites share). `UnitLoader.load` records a unit as
+loaded only if the load succeeded. `NqpOps.bindattr` traces once per
+bind on either road instead of twice on the slow one. The dead
+`$RT_VOID`/`typechar`/`typeobj_from_rttype` helpers, `unit()`'s unread
+slurpy and Rakudo's `$EX_CAT_*`/`$RT_VOID`/`$RT_UINT` constants are
+gone, as are the comments still naming JAST, `add_core_op`,
+`engine_jast` and stage0's `NQP_CODE_RUN`-presence trap.
+
+**Timings — this is the milestone's baseline.** nqp `clean buildJvm`
+253 s; `make` from the top **1142 s** (rakudo.jar 163 s, BOOTSTRAP v6c
+193 s, CORE.c 585 → 1052 s = **467 s**, CORE.d 1058 s, CORE.e 1084 s),
+against milestone 3's 1154 s / 475 s. Everything in the section above
+was measured with the inliner idle and is not comparable.
+
+**Still open.** `t/02-rakudo/native-return-coercion.t` is **unchanged at
+19/23** after the wave, so its four `dies-ok` failures were never the
+`is_inlinable` regression; it needs its own session. The other five
+un-root-caused files from the gate were re-run but not fixed.

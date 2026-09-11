@@ -361,12 +361,26 @@ and the t/nqp sweep are recorded as the new baseline (forward only).
    and no gradle build may carry `NQP_CODE_RUN`/`NQP_CODE_PRECOMP` until
    then (stage0 encodes on their mere presence).
 
-   CODE COMPLETE 2026-09-10; the milestone is **not closed** — its t/
-   gate found eleven red files milestone 3's sweep 2 did not list, two
-   with named mechanisms (an `is_inlinable` regression that stops
-   RakuAST inlining and native lowering, and a multi-character `Str`
-   range that never terminates); the milestone-4 spec's "Done" section
-   carries the gate in full. (plan
+   CODE COMPLETE 2026-09-10; its t/ gate found eleven red files
+   milestone 3's sweep 2 did not list, two with named mechanisms (an
+   `is_inlinable` regression that stops RakuAST inlining and native
+   lowering, and a multi-character `Str` range that never terminates).
+   **Both were fixed in the fix wave of 2026-09-11** (nqp `908134f3f`,
+   `47697ca29`, `3b9615f4b`, `b3d75f993`; rakudo `548dc2544d`,
+   `cd5799df09`): `is_inlinable` answers from the classlib registry, an
+   explicit twelve-name non-inlinable table and the encoder's own rows,
+   with the five Raku ops recorded again on the Rakudo side and both
+   answers pinned by `nqp/t/jvm/16-op-registry.t`; and the range hang
+   turned out to be neither CORE.c nor the compiler but `CallFrame` —
+   the continuation save road gave a still-live frame's invocation count
+   back, so a second invocation of the same static frame (which
+   `SEQUENCE` makes of itself) resolved its outer to the suspended one.
+   The milestone-4 spec's "Done" section carries the gate in full and
+   the wave's analysis after it. Nine of the eleven are green or
+   expected; `native-return-coercion.t` (19/23) and five others remain
+   open, none of them with a named mechanism. **The timings below were
+   taken with the inliner idle and are not a baseline; the wave's are:
+   nqp clean build 253 s, `make` 1142 s, CORE.c 467 s.** (plan
    `docs/superpowers/plans/2026-09-10-jvm-unit-artifact-milestone-4.md`,
    spec
    `docs/superpowers/specs/2026-09-10-jvm-unit-artifact-milestone-4-design.md`,
