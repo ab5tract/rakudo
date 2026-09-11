@@ -1,0 +1,38 @@
+pr: r11
+title: JVM unit artifact milestone 4: the Raku op file, AdaptorUnit, the fix wave; docs
+branch: pr/11-unit-artifact-m4
+
+# R16 + the six post-survey commits, log lines 243..252 (10 commits). Top of
+# the stack; requires the nqp milestone-4 PR (JASTNodes gone, stage0
+# regenerated, AdaptorUnit) to be merged first.
+
+= keep
+- 2e66c36b3d JVM ops: the Raku op file registers classlib mappings and desugars only; the JAST closures are gone
+
+= keep
+- 09f349adda JVM interop: the Rakudo adaptor is a plain class behind an AdaptorUnit
+
+= keep
+- 548dc2544d JVM ops: the five non-inlinable Raku ops are recorded again
+
+= keep
+- cd5799df09 tests: a BEGIN-time parameter default holding a code object
+
+= keep
+- 031887789e tests: a second invocation of one static frame, while the first is suspended
+
+# moved: e4a1811207, 670c3645b0, e9a5b9205a pulled later past 2e66c36b3d and
+# 548dc2544d (src/vm/jvm/Raku/Ops.nqp), 09f349adda (RakudoJavaInterop.kt) and the
+# two t/02-rakudo test commits; all three touch docs/ and AGENTS.md only.
+= docs: unit artifact milestone 4 -- design, plan, ledger, reports, closed
+The milestone-4 design (QAST-only driver first, one stage0 regeneration, the runtime class road
+and JAST deleted, adaptors on plain method handles, the three carried gaps time-boxed) and its
+11-task plan; code complete at 35/35 jars unit.meta-only, stage0 included, with the older docs
+re-dated to the class road's deletion; the two gate regressions (the inlinability table, a
+second invocation of one static frame) fixed and the timings re-taken (make 1142 s, CORE.c
+467 s); closed with the fix wave's re-review, the parked residuals, the ledger, the reports.
+- e4a1811207 docs: unit artifact milestone 4 design
+- 670c3645b0 docs: unit artifact milestone 4 implementation plan -- 11 tasks
+- e9a5b9205a docs: unit artifact milestone 4 -- code complete (35/35 jars unit.meta-only, stage0 included), gate open on 11 new reds
+- 6b108ded74 docs: milestone 4's two gate regressions are fixed, and the timings are re-taken
+- 35e0c355b0 docs: milestone 4 closed -- the fix wave's re-review, the parked residuals, the final numbers; the PR-sections survey kept with the reports

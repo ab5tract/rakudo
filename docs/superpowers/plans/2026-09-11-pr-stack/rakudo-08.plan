@@ -1,0 +1,121 @@
+pr: r8
+title: JVM: calling convention, jesp diamonds, and the strict-refusal campaign, Rakudo side
+branch: pr/08-jesp-calling-convention
+
+# R11 + R12, log lines 171..210 (40 commits). Three commits with code edit
+# docs/jvm-jesp.md too (diamond 3, "Gates at 3", the deferral), so the jesp
+# bench notebook is gathered into one docs commit placed at the end of R11,
+# with those two tooling-and-notes commits inside it (no docs commit around
+# them can cross them safely).
+
+= Frame-free methods: JVM-specific %_ discard + calling-convention docs
+A method's implicit %_ is discarded on the JVM when nothing reads it, so the callee can run
+frame-free; the calling-convention document and the CcBench harness under docs/bench/callconv;
+dispatch-cost profiling recorded, with the liveInvocations over-count fix.
+- 704aebd3d7 Frame-free methods: JVM-specific %_ discard + calling-convention docs
+- d525048ce4 docs: dispatch-cost profiling + the liveInvocations over-count fix
+
+# NET-ZERO knob: the A/B knob introduced with the lowering and dropped two
+# commits later vanish together.
+# moved: 04b1309986 pulled earlier past 6f3c25ebfd (AGENTS.md, the calling-convention
+# and migration docs); it touches RakOps.kt and docs/jvm-newdisp-port.md only.
+= jesp: definite-return-type checks lowered in p6typecheckrv
+For a non-generic definite return type the per-signature check cache precomputes the base type
+and the wanted concreteness, so p6typecheckrv tests istype(base) plus isconcrete instead of
+running the accepts_type cascade on every return; the mismatch/unbox fallback is untouched.
+The lowering is unconditional.
+- 600e0d4902 jesp: lower definite-return-type checks in p6typecheckrv (kill accepts_type)
+- 04b1309986 Drop JESP_RVGUARD_OFF
+
+# moved: e449ccb237 pulled earlier past 7e259b6007 (AGENTS.md, Makefile.in) and
+# 46e9aab090 (watched-run.raku); it touches docs/jvm-truffle-calling-convention.md only.
+= Docs: the nested nqp/ tree named everywhere; frame-free CORE.c stays off
+AGENTS.md and the migration and calling-convention docs name the nested nqp/ working tree
+wherever it is meant (nqp/ paths, gradle from the root, hashes labeled by tree). A frame-free
+CORE.c breaks the CORE.d compile, so the frame-free knob stays off.
+- 6f3c25ebfd Docs: the nested nqp/ working tree, named everywhere it is meant
+- e449ccb237 Docs: frame-free CORE.c breaks the CORE.d compile; the knob stays off
+
+= keep
+- 7e259b6007 Build: the engine build is the build
+
+# moved: 2294032ea5 pulled earlier past e449ccb237, a39b893cd4, 779e1a8a33;
+# 8893ef74dc and ce5d63419d pulled earlier past every commit between them and
+# 46e9aab090. Nothing they jump over touches tools/build/watched-run.raku,
+# tools/build/evalserver-sweep.raku or docs/jvm-eval-server.md.
+= watched-run: --relay and fixes; evalserver-sweep takes .rakutest too
+watched-run.raku: --relay echoes nested watched-run markers, the show-rx subset-default warning
+is silenced, and small improvements; evalserver-sweep.raku picks up .rakutest files, with its
+usage documented in docs/jvm-eval-server.md.
+- 46e9aab090 watched-run.raku improvements
+- 2294032ea5 evalserver-sweep: pick up .rakutest files too; document the usage
+- 8893ef74dc watched-run.raku: --relay echoes nested watched-run markers
+- ce5d63419d watched-run: silence the show-rx subset-default warning
+
+= jesp diamonds 1-3: Rakudo side, bench scripts, docs
+Diamonds 1-2 (the direct road for resumable literals, lazy dispatch records) recorded in
+docs/jvm-jesp.md. Diamond 3's Rakudo side: RakudoContainerSpec answers fetchAttribute for
+Scalar's value slot so the decont site reads it through a constant getter, and p6typecheckrv's
+check is cacheable; the + loop bench and the resumption smoke test live under docs/bench/jesp.
+- a39b893cd4 Docs: jesp diamonds 1-2 (direct road for resumable literals, lazy dispatch records)
+- 779e1a8a33 jesp diamond 3: Rakudo side, bench scripts, docs
+
+# moved: 580445bb8b pulled earlier past 7cae1d1f1a, 2f118b08e9, 87c7374d12
+# (docs/jvm-jesp.md only); it touches src/Raku/ast only.
+= keep
+- 580445bb8b RakuAST lowering: name the routine in the debug trace, report unminted lowerings, keep the sentinel across analyzers
+
+# Two members carry small evalserver-sweep.raku changes beside their notes
+# ("Gates at 3", the deferral); they stay here because every docs commit
+# around them edits docs/jvm-jesp.md as well.
+= Docs: jesp diamonds 4-8 and the Truffle-only plan; the sweep gates at 3
+The + loop: add_I sited 285 -> 189 ns (the small-int cache is noise, off); frame-free callees 142;
+hllize sited, checkarity off the boundary 123; frame-free across languages 83-92; the boundaries
+gone and the loader walking simple graphemes take the cold gate 126 -> 90 s. Diamond 7 costs the
+compiler nothing; the stage0 refresh does not change stage2; run-once code pays the DSL interpreter
+tier (plan item 4). The Truffle-only plan ranked; item 1 rewritten around the plain sub call; HLL
+simplification sliced; dispatching-blocks-frame-free deferred; gates at 3, the sweep budgets like the server's guard.
+- 7cae1d1f1a Docs: jesp diamond 4 (add_I as a sited operation; the intcache measured)
+- 2f118b08e9 Docs: the intcache measured on the warm sweep too (70s on, 74s off: noise)
+- 87c7374d12 Docs: jesp diamond 5, frame-free callees on by default
+- df90c72d86 Docs: diamond 5b results at equal parallelism, quiet-machine bench, frame-free A/B
+- 1d5f48df93 Docs: jesp diamond 6, hllize as a sited operation, checkarity off the boundary
+- b7fd10ea10 Docs: jesp diamond 7, frame-free across languages; diamond 6 compile-time A/B
+- e0e65245df Docs: the stage0 refresh does not change stage2; the compile-time drift was machine state
+- 2825aa6174 Docs: the prologue and return boundaries, with the cold-gate and CORE.c A/B numbers
+- 0ef230e63f Docs: jesp diamond 8, the engine-program loader walks simple graphemes itself
+- d710795ec0 Docs: bytecode-path inventory and census; diamond 7 compile-time claims withdrawn
+- 8b79a73a91 Docs: diamond 7 cleared on compile time by a runtime-knob A/B; the engine-vs-bytecode compiler gap
+- 16e1c9c909 Docs: the Truffle-only plan, ranked
+- c672069d0b Gates at 3; the sweep budgets like the server's guard and shows a failed chunk's raw tail
+- 35ab7322b9 Docs: the plain sub call -- p6sink sited, outer reads without a frame; plan item 1 rewritten
+- c4798711db Defer dispatching-blocks-frame-free (register aliasing); sweep reserves a fixed 3g
+- 528c97827e docs/jesp: HLL simplification sliced; diamond 7 re-test deferred to slice 2
+
+# R12 from here.
+
+# moved: 8b3bf126b0 pulled earlier past 794fa17c7f, b947e4a4ff, e22f496a4b,
+# 544ff95086 (docs/jvm-strict-campaign-handoff.md only); it touches RakOps.kt only.
+= keep
+- 8b3bf126b0 RakOps: NQP_RV_TRACE=1 explains a rejected return-value type check
+
+# moved: fa31c40cd3 pulled earlier past the same four and b706e53ab7 (the handoff
+# doc only); it touches src/vm/jvm/Raku/Ops.nqp only.
+= keep
+- fa31c40cd3 JVM Ops: p6trialbind and p6setbinder as published desugars
+
+= docs: strict-refusal campaign handoff, Rakudo side; the plan's position
+The campaign's handoff document: the facts not to relearn; the nqp bootstrap strict-green and
+the runtime regressions of the first strict-green build (a coercing op goes through
+encode_child, frame-free blocks vs frame-reading ops, the repeat pre-run); untyped if/ternary
+typing; the hllize frame-language bug; CORE.c timings; the Rakudo-side census (10 op refusals,
+CORE.c 0), custom_args on the engine, the parse regression accepted; and the Truffle-only
+plan's position as of 2026-09-09 with the sidecar placed and the pivot to items 5-6.
+- 794fa17c7f docs: strict-refusal campaign context transfer
+- b947e4a4ff docs: strict-refusal campaign handoff -- nqp bootstrap strict-green
+- e22f496a4b docs: strict-campaign handoff -- runtime regressions of the first strict-green build
+- 544ff95086 docs: strict-campaign handoff -- untyped if/ternary typing, rakudo make in progress
+- b706e53ab7 docs: strict-campaign handoff -- rakudo builds; hllize frame-language bug; CORE.c timings
+- 6734aebecb docs: strict-campaign handoff -- Rakudo-side census (10 refusals, CORE.c 0), custom_args, pivot to plan items 5-6
+- 56aeb044d3 docs: truffle-only plan -- position as of 2026-09-09, the sidecar placed
+- 02fc304897 docs: strict-campaign handoff -- Rakudo-side census, custom_args on the engine, parse regression accepted

@@ -1,0 +1,88 @@
+pr: n4
+title: JVM: the Truffle code engine, phases 1-4
+branch: pr/04-truffle-code-engine
+
+# nqp sections N6 (code engine phases 1-2, 12 commits) + N7 (phases 3-4,
+# 15 commits): log lines 206..232, 27 commits.
+
+= JVM: runtime and build fixes ahead of the code engine
+The null singleton and rx STATES no longer pin finished runs; putfield pops
+two and putstatic pops one in the autosplit method writer; the bind_error
+handler stands in for the failed call; the gradle runners give the compiler
+a 64MB stack.
+# moved: f9515a2e7 (buildSrc GenerateRunnerTask.kt only) pulled ahead of
+# f1ba81f7e (Rx*.kt, RxDescriptor.nqp), b8df13a24 (Qt*.java,
+# nqp-truffle/build.gradle.kts) and f0d04b155 (NqpSources.kt, Compiler.nqp,
+# QtEncoder.nqp, qast_sources) -- disjoint files.
+- 4f65249a8 JVM: stop the null singleton and rx STATES from pinning finished runs
+- 047623f28 JVM: putfield pops two, putstatic pops one
+- 79a23a628 JVM: let the bind_error handler stand in for the failed call
+- f9515a2e7 Gradle runners: give the compiler a 64MB stack
+
+= Truffle engine: backreferences, backtracking loop marks, bol/eol, \s
+Working backreferences and loop marks that backtrack; LOOP_SPLIT no longer
+shares its opcode with POS_EQ_REG (every conj broke); bol/eol refuse the
+post-trailing-newline position and \s is nqp's.
+# moved: d1a6573d4 (RxProgram.kt, RxVmNode.kt) pulled ahead of b8df13a24 and
+# f0d04b155; 9d5dafb36 (RxVmNode.kt) pulled ahead of b8df13a24 .. 8382da1c1.
+# Every commit jumped touches only Qt*/Nqp*.java, nqp-truffle/build.gradle.kts,
+# buildSrc, Compiler.nqp, QtEncoder/TruffleEncoder.nqp, qast_sources,
+# CodeEngine.kt, DispatchBootstrap.kt -- no Rx* file among them.
+- f1ba81f7e Truffle engine: working backreferences, and loop marks that backtrack
+- d1a6573d4 Truffle engine: LOOP_SPLIT collided with POS_EQ_REG; every conj broke
+- 9d5dafb36 Rx engine: bol/eol refuse the post-trailing-newline position; \s is nqp's
+
+= keep
+- b8df13a24 Truffle migration Phase 1: the Bytecode DSL skeleton, proven live
+
+= keep
+- f0d04b155 Truffle migration Phase 1: coverage reporting before coverage
+
+= keep
+- 0020f7ac2 Rename Qt* to Nqp*/TruffleEncoder: no framework homonyms
+
+= Truffle migration Phase 2: blocks run on the engine over the nqpp wire
+The code engine's wire road: NqpProgramBuilder, NqpWire, NqpOps and
+NqpCodeEngine behind CodeEngine.kt, proven live before any block used it.
+Local types travel in the nqpp header and engine locals start zeroed.
+TruffleEncoder encodes whole blocks, and the nqp suite proves them.
+- cccda0b6b Truffle migration Phase 2: the code engine, wire road proven
+- f7f1862f9 nqpp wire: local types in the header; engine locals start zeroed
+- 343151a29 Truffle migration Phase 2: blocks run on the engine, nqp suite proving
+
+= Code engine: the Raku mainline runs; params, want() and void reads
+Args and results carry types; param tasks run, and positionals go before
+nameds; resultchild and void reads are semantics, not style; the encoder
+mirrors the want() selector, and 'v' hides BEGIN-parked code.
+- 3db74ba80 Code engine: the Raku mainline runs; args and results carry types
+- 477fbfaf6 Code engine: param tasks run, and positionals go before nameds
+- d8317c3ea Code engine: resultchild and void reads, both semantics not style
+- 8382da1c1 Code engine: mirror the want() selector; 'v' hides BEGIN-parked code
+
+= keep
+- 36ecb8bb8 Phase 3, first tranche: loops with last/next/redo handlers run on-engine
+
+= keep
+- 15782b543 Phase 3, second tranche: handle and handlepayload run on-engine
+
+= keep
+- 4e69ff8e4 Phase 3, part B: continuations suspend and resume through engine frames
+
+= Phase 4: precompiled units encode; programs travel as a jar sidecar
+Precompiled units encode behind NQP_CODE_PRECOMP; object-typed value slots
+are coerced and qbid slots shift past a coercion splice; a compilation
+unit's engine programs ride in a jar sidecar, referenced by index.
+- 2b47462b3 Phase 4, first tranche: precompiled units encode behind NQP_CODE_PRECOMP
+- 4571743fb Code engine: coerce object-typed value slots; shift qbid slots past a coercion splice
+- 4927f37be Phase 4: engine programs travel as a jar sidecar, referenced by index
+
+= Phase 4: engine dispatch sites get inline caches; virtual threads
+Descriptor tables resolve per class; a resumed program's frame gets the
+resuming thread's tc; nqp threads are virtual by default. Two debug knobs
+from the Phase 4 hunt ride along: NQP_DISPATCH_OLDDESC and NQP_CODE_UNCACHED.
+# spans: 7f7a680ca introduces NQP_DISPATCH_OLDDESC / NQP_CODE_UNCACHED; their
+# removal lives in a later section (N10), so the introduction stays in place.
+- 172cd1eba Phase 4: engine dispatch sites get inline caches; descriptor tables resolve per class
+- d0f052cf3 Code engine: a resumed program's frame gets the resuming thread's tc
+- f665c74a1 JVM threads: nqp threads are virtual by default
+- 7f7a680ca Debug knobs from the Phase 4 hunt: NQP_DISPATCH_OLDDESC, NQP_CODE_UNCACHED

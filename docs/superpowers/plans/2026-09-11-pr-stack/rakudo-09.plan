@@ -1,0 +1,51 @@
+pr: r9
+title: JVM unit artifact milestones 1+2: the Makefile enters nqp through UnitMain; spec, plans, ledgers
+branch: pr/09-unit-artifact-m1-m2
+
+# R13 + R14, log lines 211..232 (22 commits). Requires the nqp unit-artifact
+# PR (UnitMain) to be merged first. Process artifacts under docs/superpowers/
+# stay in the PR (user ruling).
+
+= keep
+- 3d193d7cbc docs: design spec for the JVM unit artifact (plan items 5-6)
+
+# moved: cdf0153037, d185296e48, 8cdc0873ad, 87f9956217 pulled earlier past
+# 71ef2f4daa (tools/templates/jvm/Makefile.in only); all four touch docs/ only.
+= docs: unit artifact milestone 1 -- plan, rulings, ledger, reports
+The milestone-1 implementation plan (nqp stage2 as artifacts) and the rulings taken during it:
+the eval server is milestone 3's vehicle, not milestone 1's gate; NQP_UNIT is all-or-nothing;
+static lexical rows after serialize; the spec's final-review corrections (entry order, resume
+road, wrapper ops, backtraces open). The Truffle-only plan records item 4 scheduled after
+milestone 3 and the post-completion gate green (Rakudo builds on the artifact nqp, t/01-sanity
+25/25). The SDD ledger and the per-task briefs and implementer reports kept beside the plan.
+- 080bcb86fd docs: implementation plan for the JVM unit artifact, milestone 1 (nqp stage2 as artifacts)
+- 81b9dcd502 docs: unit artifact -- the eval server is milestone 3's vehicle, not milestone 1's gate
+- 90ccd165c0 docs: unit artifact -- NQP_UNIT is all-or-nothing; static lexical rows after serialize
+- 0bef9f4909 docs: unit artifact milestone 1 landed (nqp stage2 as artifacts, t/nqp through the runner)
+- a5b237db0c docs: item 4 -- the compile-time mechanism and its levers; scheduled after milestone 3
+- e8793d727f docs: unit artifact milestone 1 post-completion gate -- Rakudo builds on the artifact nqp, t/01-sanity 21/25
+- cdf0153037 docs: unit artifact milestone 1 post-completion gate green -- t/01-sanity 25/25
+- d185296e48 docs: unit artifact spec -- final-review corrections
+- 8cdc0873ad docs: unit artifact milestone 1 closed -- final hash, and the SDD ledger kept beside the plan
+- 87f9956217 docs: unit artifact milestone 1 -- the per-task briefs and implementer reports kept beside the plan
+
+= keep
+- 71ef2f4daa Build: the Makefile enters nqp through UnitMain (an artifact nqp.jar has no `nqp` class)
+
+= docs: unit artifact milestone 2 -- plan, spec update, ledger, reports
+The milestone-2 plan (runtime compiles as records in memory; the record road behind NQP_UNIT,
+the deletions to milestone 3) as executed: Task 4 keeps one t/nqp sweep with the knob on and
+the Rakudo gate covers the class road; t/nqp/124 as committed (two child runs, a class
+declared, the jar-without-output case dropped as pre-existing). The spec and the Truffle-only
+plan record milestone 2 done behind the knob, its gate numbers and the open items for
+milestone 3. The SDD ledger and the per-task briefs and reports kept beside the plan.
+- fbf990eaf1 docs: unit artifact milestone 2 plan -- runtime compiles as records in memory
+- d121d16774 docs: milestone 2 plan -- Task 4 keeps one t/nqp sweep (knob on); the Rakudo gate covers the class road
+- 9ee8045dd4 docs: milestone 2 plan -- the EVAL smoke command quoted so NQP does not interpolate; share/lib holds 11 jars
+- 712d4fdf08 docs: milestone 2 plan -- t/nqp/124 also declares a class
+- 0eec13a0ed docs: milestone 2 plan -- t/nqp/124 drops the --target=jar-without-output case
+- 8c0bf2ee66 docs: milestone 2 plan -- t/nqp/124 as committed: two child runs
+- 1df405cfeb docs: unit artifact spec -- milestone 2 done behind the knob; deletions move to milestone 3
+- 1bbda62ab8 docs: unit artifact milestone 2 done -- items 5/6 position, gate numbers, the deviation, open items
+- 5dc6517b81 docs: milestone 2 final hash
+- 5ae25a8d3c docs: unit artifact milestone 2 closed -- the SDD ledger and the per-task briefs and reports

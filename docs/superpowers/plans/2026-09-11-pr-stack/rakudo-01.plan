@@ -1,0 +1,40 @@
+pr: r1
+title: JVM: Gradle build and the runtime layer in Kotlin
+branch: pr/01-gradle-kotlin-runtime
+
+# Section R1, log lines 1..11 (11 commits). Four groups: the StorageSpec
+# follow-through stays its own commit because it is the one place this PR
+# depends on nqp's StorageSpec-as-enum change (survey: N2's 221cd8a03 subject,
+# "StorageSpec as a value + enum tags").
+
+= JVM: add a Gradle build for the org.raku.rakudo runtime layer
+build.gradle.kts, settings and gradle.properties for the runtime layer, and
+the JVM Makefile drives the runtime jar through it instead of javac, finding
+the checkout's own nqp-j rather than an installed one.
+# moved: d363e9c366 pulled earlier over 9a19462f9c..d4839a6711 -- it touches
+# only tools/lib/NQP/Config/Rakudo.pm and tools/templates/jvm/Makefile.in,
+# the Kotlin conversions touch only src/vm/jvm/runtime/org/raku/rakudo/*.
+- 6a1691243d JVM: add a Gradle build for the org.raku.rakudo runtime layer
+- d363e9c366 JVM: drive the runtime jar via Gradle and find the checkout's nqp-j
+
+= JVM: convert the runtime layer to Kotlin; container atomics on VarHandle
+Binder, RakOps, RakudoContainerSpec, RakudoContainerConfigurer and
+RakudoJavaInterop become Kotlin. RakudoContainerSpec's atomics move from
+Unsafe to VarHandle on the way.
+- 9a19462f9c JVM: convert Binder to Kotlin
+- 1af327a0b8 JVM: convert RakOps to Kotlin
+- c89a2ce4d3 JVM: port RakudoContainerSpec atomics from Unsafe to VarHandle
+- ceb4c4657f JVM: convert RakudoContainerSpec and RakudoContainerConfigurer to Kotlin
+- d4839a6711 JVM: convert RakudoJavaInterop to Kotlin
+
+= JVM runners: overridable nqp heap, in-tree nqp home, native access
+The nqp compile heap is J_NQP_MAXHEAP (default 14G; the RakuAST-era
+BOOTSTRAP no longer fits 8G). The dev runner falls back to the in-tree
+Gradle nqp home, enables native access, and passes nqp.library.path on as
+jna.library.path.
+- c960c9c8b5 JVM: make the nqp compile heap overridable, default 14G
+- 2dd9fb66b5 JVM dev runner: fall back to in-tree Gradle nqp home
+- 6ff32bd3c5 JVM runner: native access, and nqp.library.path for jna.library.path
+
+= keep
+- d6d6fe7bb8 JVM: follow NQP's StorageSpec to enums

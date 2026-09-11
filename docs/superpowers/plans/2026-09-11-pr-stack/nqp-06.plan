@@ -1,0 +1,57 @@
+pr: n6
+title: JVM: NFG on TruffleString, and the engine as the only regex road
+branch: pr/06-nfg-trufflestring
+
+# Section N9 of the survey (log lines 286..297, 12 commits). Two themes that share the
+# grapheme-indexing commits: NFG on TruffleString, and the Truffle engine as the only regex road.
+
+= keep
+- 39f10b138 NFG groundwork: canonical-equivalence string ops + NFGString value type
+
+= NFG: grammar engine and string ops grapheme-indexed; per-source caches
+# moved: a465f1001 (nqp-truffle NFGString.kt, NqpCursor.kt) and ff2678ef8 (runtime
+# CompilationUnit.kt) pulled ahead of 2d4907c12, 29ad0be06, 55a055460, 11d11f514, ed0a27b81 and
+# 3ba08a417 -- none of those touches either file (they touch Optimizer/Compiler/RxDescriptor/
+# TruffleEncoder.nqp, NFG.kt, Ops.kt, the dispatch and CallFrame set). Both are NFG fixes.
+Str is grapheme-indexed on the JVM: chars/substr/index and regex positions count graphemes with
+synthetics, engine and runtime in one grapheme space (NFGString lives in nqp-truffle, the runtime
+keeps the truffle-free NFG.graphemeClusters). Segmentation, the engine's atom array and one
+interned NFGString are cached per source string (weak keys), turning the O(n^2) parse of a large
+source linear. The engine-program sidecar's grapheme-counted " len:content" framing is split with
+one forward BreakIterator walk, O(n), so a multi-unit grapheme no longer misaligns the programs.
+- 4fece491a NFG grapheme layer: grapheme-index the grammar engine + string ops
+- 48f499880 NFG: cache grapheme segmentation per source string (fix O(n^2) parse)
+- a465f1001 NFGString: cache the value per source and its chars/atoms per instance
+- ff2678ef8 Engine-program sidecar: split framing by grapheme, in O(n)
+
+= Engine regex: classic path grapheme-indexed, every rule on the engine
+The classic regex codegen's last raw UTF-16 reads (literal, charrange, enumcharlist) go through
+the grapheme ops and the LTM NFA's base-codepoint array is cached per source. NQP::Optimizer
+leaves a lexical used inside an engine callback block lexical instead of lowering it to a local.
+nibbler's getlexdyn is compensated at encode time (getlexreldyn from the caller's caller), which
+closes the last of the 38 rules that bailed to the classic path: a NQP_RX_BAIL build reports zero.
+- 2d4907c12 NFG classic regex path: grapheme-index the reads + keep engine-callback lexicals
+- 29ad0be06 Engine regex: encode nibbler's getlexdyn instead of bailing to classic
+
+= Engine regex: delete the classic per-node bytecode codegen
+# NET-ZERO: NQP_RX_STRICT (a hard error on any fallback) is introduced by the first commit and
+# removed by the second, its behaviour being the default once the fallback is gone; it vanishes.
+Every nqp and Rakudo grammar rule encodes to the Truffle engine -- a full build in which any
+fallback was a hard error proved it end to end -- so the per-node bytecode regex codegen
+(~1660 lines of QAST::Compiler: regex_jast, every rxtype method, the helpers) goes.
+as_jast(QAST::Regex) hands the rule to the engine unconditionally; RxDescriptor.bail and the
+descriptor size cap die naming the rule and reason (NQP_RX_SURVEY still collects gaps). The
+SKIP/ONLY/SKIP_ANON triage knobs, which only forced the vanished path, go with it.
+- 55a055460 Engine regex: NQP_RX_STRICT makes the bytecode fallback a hard error
+- 11d11f514 Engine regex: delete the classic per-node bytecode codegen
+
+= Code engine: frame-free blocks phase A (knob-gated), desugars by default
+A block the encoder proves frame-free runs with cf == null: enterDirect/enterEngine skip newFrame
+and deliver the return value into the caller's registers (wire header word needsFrame, VERSION 2;
+cf-free checkarity/posparam; explodeFlattening retargeted to tc). Gated behind NQP_CODE_NOFRAME,
+off by default. Frames the unwinder tears past give back liveInvocations, so the outer-resolution
+search stops hunting exited mainlines. Registered op desugars apply whenever one exists (all 19
+build a fresh tree); NQP_CODE_NO_DESUGAR is the exclusion knob, the old inclusion knob retired.
+- ed0a27b81 Code engine: frame-free blocks (calling-convention port, phase A)
+- 3ba08a417 CallFrame: give back liveInvocations for unwind-torn frames
+- 2dceb1e0b Code engine: apply registered desugars by default

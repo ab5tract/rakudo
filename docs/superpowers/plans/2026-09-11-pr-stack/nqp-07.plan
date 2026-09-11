@@ -1,0 +1,97 @@
+pr: n7
+title: JVM: jesp -- the calling convention, sited ops, and strict encoding
+branch: pr/07-jesp-calling-convention
+
+# Sections N10 + N11 of the survey (log lines 298..322, 25 commits). N10 is one group per
+# diamond; N11 is the HLL simplification and the strict-refusal campaign.
+
+= keep
+- 712939bb4 Drop the finished hunts' debug and A/B environment knobs
+
+= keep
+- 54f140eb3 jesp: resumable literal callees take the direct road; dispatch records materialize on demand
+
+= keep
+- 9283b469b jesp diamond 3: the type-check family and native arithmetic as sited Truffle operations
+
+= keep
+- e3a16c3fd jesp diamond 4: add_I/sub_I/mul_I as a sited operation; decont answers plain values structurally
+
+= keep
+- 9e83158bb jesp diamond 5: frame-free blocks on by default, and the two rules that make it correct
+
+= keep
+# moved: 6d7866664 pulled ahead of 88bf01a45 (Compiler.nqp, Ops.kt), e622bbd9f and 1865ad4e7
+# (TruffleEncoder.nqp only) -- it touches nqp-truffle NqpOps/NqpProgramBuilder/NqpRootNode/
+# NqpTypeOps only. It does not cross the stage0 refresh; that refresh now sits with the compiler
+# changes (the new ops, the encoder) that produced it.
+- 6d7866664 jesp diamond 6: hllize as a sited operation; checkarity/flatArgs off the boundary
+
+= JVM: note/sayfh/printfh ops, NQP_CODE_WHY frame verdicts, stage0 refresh
+note prints a line on stderr; printfh/sayfh write a string or a line through a handle's writable,
+registered in the JVM op table and encoded through the classlib registry. NQP_CODE_WHY prints each
+block's frame verdict with its inputs (stdout, never exported to make). Bare implicit magicals
+($/ $! $_ $¢) kept as bare slots by an early re-formation no longer force a frame. stage0 is
+regenerated from the current stage2 so the bootstrap compiler knows the new ops and env-gated
+traces in the compiler sources can use nqp::note.
+- 88bf01a45 JVM: add the note, sayfh and printfh ops
+- e622bbd9f Code engine: NQP_CODE_WHY also prints each block's frame verdict with its inputs
+- 1865ad4e7 Code engine: bare implicit magicals do not force a frame
+- 48f1e0147 Bootstrap refresh: stage0 from the current stage2
+
+= jesp diamond 7: frame-free across languages, by language name
+# moved: 1b9cde8d1 (NqpDispatch.kt only) pulled ahead of 263665446 (NqpOps.java only) and
+# b013a8757 (CompilationUnit.kt only) to sit with the diamond it corrects.
+The encoder records per block whether any op reads the current language off the frame (%hll_ops)
+as bit 1 of the wire's frame word; NqpDispatch's entry decisions become needsFrame || (!hllFree &&
+!sameHll); getattr boxes a native slot read with the block's own unit. Only a different language
+NAME crosses frame-free: a bootstrap's two `nqp` configs (compiler and compilee) stay framed, so
+stage2's NQPHLL no longer binds to stage1's setting. JESP_HLLFREE=0 keeps diamond 5's rule.
+- c36996b3f jesp diamond 7: frame-free across languages when the block reads no current language
+- 1b9cde8d1 jesp diamond 7: only a different language NAME crosses frame-free
+
+= jesp: prologue and return boundaries go; arguments read from the frame
+# moved: 5d8157754 (NqpOps.java, NqpProgramBuilder.java, NqpRootNode.java) pulled ahead of
+# b013a8757 (CompilationUnit.kt only).
+storeReturnTyped, posparam and truthy are plain inlinable code; the caller-less return, the
+optional and converting parameter fetches and an object's boolification stay behind a boundary.
+FlatArgs reads the frame's own argument array when the arity check answered the frame's own
+callsite (nothing flattened), so the array no longer escapes through tc.flatArgs and escape
+analysis virtualizes it in the inlined direct-road callees.
+- 263665446 jesp: the prologue and return boundaries go
+- 5d8157754 jesp: the argument array is read from the frame, not parked on the thread context
+
+= keep
+- b013a8757 jesp diamond 8: the engine-program loader walks simple graphemes without the iterator
+
+= keep
+- 908df5c3b jesp: p6sink as a sited operation; an outer lexical read or bind no longer forces a frame
+
+= keep
+- 11d834bba jesp/HLL: drop hllize from %hll_ops (slice 1 of the HLL simplification)
+
+= keep
+- b487e31d9 jesp/encoder: split encode_op under the 64KB limit; reconcile numify census
+
+= jesp/encoder: the strict-refusal campaign (NQP_CODE_STRICT) to green
+NQP_CODE_STRICT=1 makes an encoder refusal a hard error naming the block and op, not a silent
+bytecode fallback; the nqp bootstrap builds green under it: falsey, stringify/intify/numify,
+pre/postinc/dec, the dispatcher register/delegate/track/guard desugars, savecapture (31), nqp::for
+as FORLOOP (32), indexingoptimized; AttrSite keys on class handle and attribute name. Fixed on the
+strict-green build: getlexdyn walks from the current frame, throw and loop controls force a frame,
+repeat's body inside the loop Block, an untyped if/ternary takes its arms' common type, hllizeIn.
+- 9d3981e9d WIP jesp/encoder: strict-refusal campaign (NQP_CODE_STRICT), 11 ops, for in progress
+- 51c45a5fe jesp/encoder: strict-refusal campaign green -- for, postinc/postdec, indexingoptimized; AttrSite keyed by name
+- 2148ee5c1 jesp/encoder+runtime: first runtime regressions of the strict-green build
+- 5aeb58b15 jesp/encoder: an untyped if/ternary takes its arms' common type, as Compiler.nqp does
+- 156e55e93 runtime: hllize's transform road takes the block's language, not the frame's
+
+= jesp/encoder+engine: custom_args blocks on the engine
+The encoder's verdict line is a class method Compiler.nqp calls for the custom_args bypass, so a
+census counts every block; the 60000-char program gate applies to the string-constant road only,
+not the LZ4 sidecar. Then the bypass goes: P6BINDSIG (33) binds through RakOps.p6bindsig over the
+frame's own csd/args and returns from the program when the binder auto-threaded a Junction;
+P6TRYBINDSIG (34) answers 1/0 for the assertparamcheck around it; patch_params emits an empty
+header (required 0, accepted -1) for such a block so the arity check still stores csd/args.
+- 9f39e00b6 jesp/encoder: verdicts for custom_args blocks; no size gate on the sidecar road
+- 112b1649c jesp/encoder+engine: custom_args blocks on the engine (P6BINDSIG, P6TRYBINDSIG)

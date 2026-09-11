@@ -1,0 +1,218 @@
+pr: r2
+title: JVM: Rakudo on newdisp -- scaffolding, the flip, semantics parity
+branch: pr/02-rakudo-on-newdisp
+
+# Sections R2 + R3 + R4 (R4 without its last commit, which opens r3):
+# log lines 12..73, 62 commits. 17 groups.
+#
+# Moves in this file are all file-disjoint (checked with git show --stat):
+#  - the five watched-runner commits touch only tools/build/run-watched.raku
+#    and tools/build/watched-run.raku, which nothing else in 12..73 touches;
+#  - the R2 frontend fixes / runtime-and-runner split swaps two docs-free
+#    runs whose files do not overlap (see the per-group notes);
+#  - in R4 the diagnostics, op-gap and native groups are gathered across
+#    each other where the stats prove the files disjoint.
+# The revert pair a691c24c81 / 99faeae96d is inside one group and nets to
+# nothing.
+
+# ---------------------------------------------------------------- R2
+
+= keep
+- 195d01488c Let the JVM use the ignorecase/ignoremark string ops
+
+= Add a watched runner for long builds and test sweeps
+tools/build/watched-run.raku runs a command tee'd to a log, gives up on a
+silence longer than --stall or a total longer than --max (SIGINT, SIGTERM,
+SIGKILL in turn so the child's own JVMs unwind first), echoes --show
+matches with elapsed seconds, and in -t mode runs many test files --jobs
+at a time, each under its own watchdog and log. All timing lives in one
+react block. run-watched.raku is the first cut it grew out of.
+# moved: ebe919924e, ef861a191f, 9f57d0e888 and 78a2844993 pulled earlier
+# to sit with b24c0cc3b1 -- all five touch only the two runner scripts,
+# which no other commit in lines 12..73 touches.
+- b24c0cc3b1 Add a watched runner for long builds and test runs
+- ebe919924e run-watched: move all timing into a react block, add --show
+- ef861a191f run-watched: compile --show patterns before the child starts
+- 9f57d0e888 run-watched: parallel -t mode for running many test files
+- 78a2844993 Add a watched runner for long builds and test sweeps
+
+= RakuAST: give the new-dispatch sites non-moar branches
+The seven QAST::Op dispatch emissions get a non-moar branch in the shapes
+the legacy frontend already used: onlystar bodies consult the dispatch
+cache, private and qualified calls go through Mu's dispatch:<!> and
+dispatch:<::>, coercions call the metaobject, .? and smartmatch fall back
+to the general path. Routines claim $*DISPATCHER with takedispatcher so
+callsame works, dispatch:<...> names arrive as Str literals, and
+arguments bind through the runtime binder (custom-args on jvm).
+- 3cc89d0f99 RakuAST: give the new-dispatch sites non-moar branches
+- f76b11cbee RakuAST/JVM: bind arguments with the runtime binder
+- bddeaa5bb0 RakuAST: make the non-moar onlystar proto dispatch work
+- cda8ffba3c RakuAST: set up dispatch on backends without new-dispatch
+
+= RakuAST: six frontend fixes the JVM's CORE.c build surfaced
+ScopePhaser's typed attributes are tested with isconcrete, not boolified
+(a Bool type object's Bool method recursed during the setting build); a
+routine whose compilation calls itself is named in the error; chars vs
+codes above the BMP and a heredoc stopper passed as a native str;
+@!compstuff is not indexed after a fixup drained it; begin-time failures
+are rethrown under RAKUDO_DEBUG_TRAIT while a setting builds; and the
+code ref table holds one slot per cuid.
+# moved: 15334af85c and 576cea15e0 pulled earlier over 8e9d43fe90 and
+# ece6ad4897 -- begintime/package/traits/impl/regex.rakumod against
+# Ops.nqp, RakOps.kt, create-jvm-runner.pl and rakudo-j-build.in.
+- db5b936249 RakuAST: don't boolify ScopePhaser's typed attributes
+- 1ae3324f13 RakuAST: name a routine whose compilation calls it
+- 19e815b429 RakuAST: two UTF-16 assumptions that only bite on JVM
+- 818e483432 RakuAST: don't index an @!compstuff an earlier fixup drained
+- 15334af85c RakuAST/JVM: make begin-time failures visible while building a setting
+- 576cea15e0 RakuAST: one code ref table slot per cuid
+
+= JVM: p6sink into the runtime; Proc::Async, runner stack and flags
+p6sink yields the sinkee as MoarVM's does and moves out of line into
+RakOps (the inline can/callmethod pair cost one indy site per sunk
+statement, over the per-class ceiling on its own). A merged Proc::Async
+stream ends after one report. The runners give the compiler a 64MB
+stack and stop passing -noverify. The Kotlin layer's locals are
+camelCase.
+# moved: 4c8d35bbc9, 426bb5105c and 1d59200288 pulled earlier over
+# 1f193e0e0c, 043778969c and 19ad97bd79 -- Proc/Async.rakumod,
+# create-jvm-runner.pl, Binder.kt/RakudoJavaInterop.kt against
+# var-lowering.rakumod and code.rakumod.
+- 8e9d43fe90 JVM: p6sink yields the sinkee, and moves into the runtime
+- ece6ad4897 JVM runners: give the compiler a 64MB stack
+- 4c8d35bbc9 JVM: a merged Proc::Async stream ends after one report
+- 426bb5105c JVM runners: stop passing -noverify
+- 1d59200288 JVM: camelCase the Kotlin variables
+
+= RakuAST: three lowering fixes for frames the runtime binder binds
+A for body's frame is not lowered when its code has custom-args (the
+binder binds the lexical, the body read the local); an onlystar proto
+returns its candidate's result raw on non-moar backends, container and
+all; a block thunk's topic parameter carries a type, since the binder
+reads the Parameter rather than lowered QAST.
+- 1f193e0e0c RakuAST: don't lower in a frame whose signature needs the binder
+- 043778969c RakuAST: an onlystar proto returns its candidate's result raw
+- 19ad97bd79 RakuAST: give a block thunk's topic parameter a type
+
+# ---------------------------------------------------------------- R3
+
+= Build the newdisp dispatchers on the JVM; assign and rv-decont use them
+src/vm/moar/dispatchers.nqp joins the JVM bootstrap, and the first gates
+flip: p6attrinited dispatches to raku-is-attr-inited, p6assign to
+raku-assign, p6decontrv_internal to raku-rv-decont (with p6box and the
+language-revision child the desugar reads). 99-misc.t asks a Parameter
+for its .raku.
+- a0605f0d7e Build the newdisp dispatchers on the JVM backend too
+- ce21534b38 Ask a Parameter for its .raku, not its .perl
+- a4753e926e Assign through the raku-assign dispatcher on the JVM too
+- 11082bb9fc Decont return values through the raku-rv-decont dispatcher on the JVM too
+
+= JVM: lower parameters again; a failed bind reads in Raku's terms
+The lowered form now reproduces the binder's semantics on the JVM, so
+custom-args is no longer unconditional there and lex-to-local lowering
+works at all. A failed lowered-parameter check raises through a
+bind_error handler (p6bindfailerror re-runs the JVM binder over the
+frame) instead of "Bind check failed", and a parameter with two names
+goes to the full binder. qast-deep-has-op stops at non-QAST leaves.
+# The revert pair a691c24c81 / 99faeae96d nets to nothing here: the
+# container-vivification fix moved to the nqp side.
+- 64b319ee2c Stop qast-deep-has-op recursing into non-QAST leaves
+- a691c24c81 RakuAST: don't vivify a container for a lowered parameter's local
+- 7db19cba51 JVM: report a failed parameter bind in Raku's terms
+- 99faeae96d Revert "RakuAST: don't vivify a container for a lowered parameter's local"
+- 7b918f0d2f JVM: bind an aliased named parameter with the full binder
+- 94b5dea8e0 RakuAST/JVM: lower parameters instead of always using the binder
+
+= Coerce via raku-coercion and register Raku's HLL dispatchers on the JVM
+Both coercion sites of a lowered parameter dispatch on every backend but
+js, and the Raku HLL config names raku-call, raku-meth-call,
+raku-find-meth, raku-resume-error, raku-hllize, nqp-istype and
+raku-isinvokable on the JVM too -- what lang-call and lang-meth-call
+hand a Raku object to.
+- 6b2af8051c Coerce a parameter through the raku-coercion dispatcher on the JVM too
+- f4e594325e Register Raku's HLL dispatchers on the JVM too
+
+= keep
+- 5c343f58f0 JVM: flip the remaining dispatch gates; everything now runs on newdisp
+
+= JVM: after the flip -- shared wrap, no Mu catch-all, hllized versions
+Routine's newdisp Wrapped role is keyed on js like the dispatchers, so
+.wrap works on the JVM; the legacy catch-all invocation handler on Mu is
+js-only (raku-invoke does its job, and isinvokable stops answering true
+for every object); the version strings handed to Version.new are
+hllized so 'use v6.*' works.
+# moved: dda808f794 pulled earlier over 3a4ea7c227 -- Raku/Actions.nqp
+# against atomicops.rakumod.
+- 7a60dd7af4 Share the newdisp wrap implementation with the JVM
+- 33e97a5d43 JVM: drop the catch-all invocation handler on Mu
+- dda808f794 RakuAST: hllize the version strings handed to Version.new
+
+= Enable atomicint and the integer atomics on the JVM
+nqp-jvm implements the integer atomic op family, so the fence around
+atomicint and its operators comes down, and the corekeys, settingkeys
+and implementation-detail tests drop their jvm-NYI entries for them.
+# moved: e551af5e81 pulled earlier over f1d9fb892c, 47d6ae007c and
+# d7ca3aa758 -- t/02-rakudo/07-implementation-detail-*.t against
+# moar/dispatchers.nqp, Binder.kt/RakOps.kt and BOOTSTRAP.nqp.
+- 3a4ea7c227 Enable atomicint and the integer atomics on the JVM
+- 88688aaaa7 Graduate the integer atomics off the corekeys jvm-NYI lists
+- e551af5e81 Graduate the integer atomics off the implementation-detail jvm lists
+
+# ---------------------------------------------------------------- R4
+
+= RakuAST/JVM: generic coercions and returns resolved per call
+raku-coercion delegates a still-generic coercion type to a closure that
+instantiates it against the calling frame; the JVM binder instantiates
+the is-copy descriptor, passes archetypes its type, and checks a generic
+return that instantiates to a native against its box; the nqp binder's
+coercive branch instantiates a generic parameter type too.
+- f1d9fb892c RakuAST: resolve a generic coercion type per call in raku-coercion
+- 47d6ae007c JVM: teach the binder and return check about generics properly
+- d7ca3aa758 Instantiate a generic coercion in the nqp binder's coercive branch
+
+= JVM: backtraces, continuations, interop and error reporting at parity
+p6staticouter answers null for a mainline (backtraces render again); a
+worker resumes a suspended task through continuationreset so a second
+suspension finds its prompt; marshalled interop arrays are cast to their
+real type; method_not_found_error is installed for the JVM; a constraint
+failure says whether the parameter was omitted; a compose failure is
+filed like every other backend; RAKUDO_DEBUG_STUB traces stubbing.
+# moved: 6c9662f8bf, 130caf9ce4 and 5a1e78e009 pulled earlier over
+# 8cf5fb75a2, 6fea65a567, 0da824a34c, b0a2bed850, 59f7bde15b, 3094e6bff3
+# and ae81fcbae6 -- code.rakumod, Exception.rakumod+Binder.kt and
+# package.rakumod against unicodey.rakumod, RakOps.kt, BOOTSTRAP.nqp,
+# Ops.nqp and code.rakumod (6c9662f8bf jumps only unicodey.rakumod).
+- 0932b266df JVM: answer null for an outermost code's static outer
+- f027733633 Reinstate the pool prompt when a JVM worker resumes a continuation
+- e40eaaeae4 JVM: cast Rakudo's marshalled interop arrays to their real type
+- b1ad04a9f2 JVM: install Raku's method_not_found_error handler
+- 6c9662f8bf RakuAST: trace code-object stubbing and linking on demand
+- 130caf9ce4 JVM: tell a constraint failure whether the parameter was omitted
+- 5a1e78e009 RakuAST: let the JVM file a compose failure like every other backend
+
+= JVM: fill the op gaps -- uniprop-general, p6capturelexwhere, ord, sink
+uniprop-general answers the category name; p6capturelexwhere is ported
+from try-capture-lex-callers and the phaser, exit-handler and attribute
+forks that waited on it and on captureinnerlex come down; ords reads one
+codepoint per surrogate pair; a container is not sunk.
+# moved: 3094e6bff3 pulled earlier over b0a2bed850 and 59f7bde15b
+# (unicodey.rakumod against code.rakumod); f466c1a73e pulled earlier
+# over b0a2bed850, 59f7bde15b, ae81fcbae6 and 46485c6997 (BOOTSTRAP.nqp
+# + RakOps.kt against code.rakumod, Binder.kt, rakudo-j-build.in).
+- 8cf5fb75a2 JVM: implement uniprop-general
+- 6fea65a567 JVM: a container is not sunk
+- 0da824a34c JVM: implement p6capturelexwhere and share the phaser paths
+- 3094e6bff3 JVM: read one codepoint per ord, not one UTF-16 unit
+- f466c1a73e JVM: take down three guards that were waiting on missing ops
+
+= RakuAST/JVM: native returns stay native; sized natives bound at width
+A native-returning routine's inline info drops both the return typecheck
+and the decont wrapper, so spliced code stays natively typed end to end
+(infix:<+> on ints compiles to add_i again); the binder narrows a sized
+native to its declared width.
+- b0a2bed850 RakuAST: record native-returning inline info without the return typecheck
+- 59f7bde15b RakuAST: a native return's wrappers stay out of its inline info
+- ae81fcbae6 JVM: narrow a sized native to its width when the binder binds it
+
+= keep
+- 46485c6997 JVM: give the build runner a bounded heap instead of AggressiveHeap
