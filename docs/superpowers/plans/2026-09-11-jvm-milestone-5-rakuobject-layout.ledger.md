@@ -107,3 +107,110 @@ cd nqp && ./nqp-j-gradle t/jvm/17-object-layout.t
 cd nqp && ./nqp-j-gradle t/jvm/18-rebless-layout.t
 RAKUDO_RAKUAST=1 ./rakudo-j -Ilib t/02-rakudo/mixin-identity.t
 ```
+
+## Task 4 — the Rakudo runtime consumers, the make, the first Rakudo gate
+
+Two Rakudo runtime files stopped naming the generated storage classes:
+
+- `src/vm/jvm/runtime/org/raku/rakudo/Binder.kt` — the private
+  attributive-parameter road asks the STable's `RakuObjectREPRData.layout`
+  for the slot (`slotFor(attrPackage, varName)`) and switches on
+  `layout.kinds[slot]` (`SlotKind.INT/NUM/STR`, everything else boxed),
+  in place of the `nameToHintMap` loop plus the `flattenedSTables[hint]`
+  REPR test. Imports `P6OpaqueREPRData`, `P6int`, `P6num`, `P6str` gone,
+  `RakuObjectREPRData` and `SlotKind` in.
+- `src/vm/jvm/runtime/org/raku/rakudo/RakudoContainerSpec.kt` —
+  `atomic_load` reads `layout.getVolatile(o, slot)` with the `$!value`
+  slot resolved once by `slotForName` and cached in a `@Volatile Int`,
+  in place of the reflected `VarHandle` on the generated class's value
+  field. `MethodHandles`/`VarHandle`/`Field` imports gone.
+- `t/02-rakudo/10-nqp-ops.t:10` — the `todo` text keeps the message and
+  drops the deleted exception class's name.
+
+`grep -rn 'P6Opaque\|field_1' src/vm/jvm t/02-rakudo` is empty (exit 1).
+The brief's comment text for `scalarValueSlot` said "formerly a VarHandle
+on the generated class's field_1"; that literal would have kept the grep
+non-empty, so the comment says "value field" instead — the only wording
+departure from the brief's verbatim Kotlin.
+
+### The make (Step 4)
+
+`RAKUDO_RAKUAST=1 raku tools/build/watched-run.raku --log=... --show='Compiling'
+--show='rror' --show='Stage' --max=2400 -- make`
+
+`=== EXIT=0 verdict=ok elapsed=528s ===`. All three settings recompiled
+(the runtime jar is newer than them): `rakudo.jar` at 2 s, `CORE.c` 5 s →
+455 s, `CORE.d` 455 s → 473 s, `CORE.e` 473 s → 528 s.
+
+| CORE.c stage | milestone 5 task 4 |
+| --- | --- |
+| start | 0.001 |
+| parse | 341.307 |
+| syntaxcheck | 0.000 |
+| ast | 0.001 |
+| optimize | 36.275 |
+| qast | 32.958 |
+| unit | 26.940 |
+| jar | 0.000 |
+| **sum** | **437.48** (milestone 4 baseline 467) |
+
+### The variant gate (Step 5)
+
+`RAKUDO_RAKUAST=1 NQP_LAYOUT_STATS=1 ./rakudo-j -e 'say 1'`:
+
+```
+1
+layout stats: layouts=2120 variants=0 reblesses=0
+```
+
+`variants=0 <= reblesses=0`; under `NQP_LAYOUT_TRACE=1` the same program
+prints 0 `layout: variant` lines and 0 `rebless:` lines, so no variant is
+unaccounted for.
+
+### Gate files
+
+| file | count | note |
+| --- | --- | --- |
+| `t/01-sanity` (2 jobs) | 25 of 25 ok in 198 s | |
+| `t/02-rakudo/mixin-identity.t` | 8/8 | unchanged from task 1 |
+| `t/08-performance/22-rakuast-ct-dispatch.t` | 30/30 | green |
+| `t/08-performance/29-rakuast-attr-self-types.t` | 21/21 | green |
+| `t/08-performance/32-rakuast-native-param-bind.t` | 26/26 | green (the Binder road) |
+| `t/02-rakudo/native-return-coercion.t` | 19/23 | unchanged; reds 7, 17, 18, 19 |
+| `t/02-rakudo/sort-element-kinds.t` | 63/63 | green |
+| `t/02-rakudo/nested-invocation-continuation.t` | 6/6 | green |
+| `t/spec/S04-phasers/keep-undo.t` | 16/16 | run from the main checkout's path (no `t/spec` in the worktree) |
+| `t/02-rakudo/begin-time-attributive-param-method.t` | 6/6 | green |
+| `t/02-rakudo/yada-trait-timing.t` | 2/2 | green |
+| `t/02-rakudo/21-begin-time-compile-sub.t` | RED (compile) | unchanged known red: `Failed to deserialize lexical $?PACKAGE` at line 6 |
+
+The four `native-return-coercion.t` reds: #7 "boxed Int operand keeps the
+result boxed", #17 "boxed Int to native num still requires explicit
+coercion", #18 "boxed Int return to native num still requires coercion",
+#19 "subset return to native num still requires coercion".
+
+### Benches, before and after
+
+`RAKUDO_RAKUAST=1 NQP_DISPATCH_STATS=1 ./rakudo-j docs/bench/jesp/plusquick.raku`
+and `RAKUDO_RAKUAST=1 ./rakudo-j docs/bench/jesp/attrquick.raku`, one run
+each on the task 4 build.
+
+| road | before (ns/op) | after (ns/op) | delta |
+| --- | --- | --- | --- |
+| `$a + $b` (plusquick) | 82.625 | 85.525 | +3.5 % |
+| getattr | 68.75 | 71.65 | +4.2 % |
+| bindattr | 57.05 | 57.65 | +1.1 % |
+| getattr_i | 107.3 | 85.95 | −19.9 % |
+| decont | 78.35 | 77.25 | −1.4 % |
+| bigint+ | 172.4 | 133 | −22.9 % |
+| create | 573.25 | 463.25 | −19.2 % |
+
+No road regressed above the brief's 10 % bar, so nothing is investigated
+before task 5. `create`, `getattr_i` and `bigint+` — the three the storage
+family was meant to move — are all about 20 % faster.
+
+Dispatch stats from the plusquick run:
+`hits=90247539 misses=11614 slowEvals=976 invokes=13845 directs=13826
+noTarget=19 badExpectation=0 notCodeRef=0`,
+`byKind[value,syscall,mapped,invoke,resumable]=[0, 95661, 45117402, 13446,
+45021030]` — identical to the "before" run except `slowEvals` 364 → 976.
