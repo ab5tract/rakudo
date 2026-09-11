@@ -1,6 +1,6 @@
 use Test;
 
-plan 5;
+plan 6;
 
 # A `method` with an attributive parameter, built inside a BEGIN block in a
 # class body, must not force the enclosing class to compose. Composing it
@@ -53,6 +53,17 @@ plan 5;
     }
     is C.new.run, 2,
         'the non-BEGIN attributive-param method path still works';
+}
+
+# The other half of the same fix: a parameter DEFAULT holding a code
+# object. The default is a nested block reached from the signature
+# prologue, so it records a deferred code-ref slot exactly as a `where`
+# clause does; losing that slot left the placeholder qbid 0 -- the unit's
+# mainline -- in the CODEREF cell, and calling the default ran the whole
+# compilation unit instead of the block.
+{
+    is BEGIN { sub g($x = { 42 }) { $x() }; g() }, 42,
+        'a BEGIN-time parameter default holding a code object calls that code';
 }
 
 # An attributive parameter naming an attribute the class does not have must
