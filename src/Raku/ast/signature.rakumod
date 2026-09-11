@@ -340,6 +340,11 @@ class RakuAST::Signature
         my $bindings := QAST::Stmts.new();
         my $parameters := $!parameters // [];
         if $needs-full-binder {
+#?if js
+            # No new-dispatch to resume a failed bind, so bind directly.
+            $bindings.push(QAST::Op.new( :op('p6bindsig') ));
+#?endif
+#?if moar
             $bindings.push(QAST::Op.new(
                 :op('if'),
                 QAST::Op.new(
@@ -352,6 +357,20 @@ class RakuAST::Signature
                 ),
                 QAST::Op.new( :op('p6bindsig') )
             ));
+#?endif
+#?if jvm
+            # As on MoarVM, but as a plain op: a dispatch instruction here
+            # would cost an invokedynamic per full-binder prologue.
+            $bindings.push(QAST::Op.new(
+                :op('if'),
+                QAST::Op.new( :op('p6bindwillresume') ),
+                QAST::Op.new(
+                    :op('assertparamcheck'),
+                    QAST::Op.new( :op('p6trybindsig') )
+                ),
+                QAST::Op.new( :op('p6bindsig') )
+            ));
+#?endif
         }
         else {
             if $!implicit-invocant {
@@ -364,9 +383,11 @@ class RakuAST::Signature
                 $bindings.push($!implicit-slurpy-hash.IMPL-TO-QAST($context));
             }
         }
+#?if !js
         if $multi {
             $bindings.push(QAST::Op.new( :op('bindcomplete') ));
         }
+#?endif
         $bindings
     }
 
@@ -1262,9 +1283,17 @@ class RakuAST::Parameter
         # owning routine compiles, which can happen during BEGIN (for
         # example, a trait_mod multi applied to an attribute, or a
         # method in a role body).
+        # The JVM binds a named parameter by a single name, so an alias of any
+        # length needs the binder there; elsewhere only a three-name one does.
+#?if jvm
+        my int $inline-names := 1;
+#?endif
+#?if !jvm
+        my int $inline-names := 2;
+#?endif
         $!owner.set-custom-args
             if nqp::isconcrete($!owner)
-            && ($!sub-signature || nqp::elems($!names) > 2);
+            && ($!sub-signature || nqp::elems($!names) > $inline-names);
         self.IMPL-SET-CUSTOM-ARGS-FOR-GENERIC;
 
         $!target.to-begin-time($resolver, $context) if $!target;
@@ -1707,11 +1736,25 @@ class RakuAST::Parameter
                         QAST::Op.new(
                             :op('bind'),
                             $temp-qast-var,
+#?if !js
                             QAST::Op.new(
                                 :op<dispatch>,
                                 QAST::SVal.new(:value<raku-coercion>),
                                 QAST::Var.new(:name($low-param-type), :scope<local>),
-                                $temp-qast-var)))));
+                                $temp-qast-var)
+#?endif
+#?if js
+                            # No new-dispatch: ask the coercion's metaobject
+                            # directly. CoercionHOW.coerce has its own
+                            # non-moar path for exactly this.
+                            QAST::Op.new(
+                                :op('callmethod'), :name('coerce'),
+                                QAST::Op.new( :op('how'),
+                                    QAST::Var.new(:name($low-param-type), :scope<local>) ),
+                                QAST::Var.new(:name($low-param-type), :scope<local>),
+                                $temp-qast-var)
+#?endif
+                            ))));
         }
         elsif $is-coercive {
             $get-decont-var := -> { NQPMu }
@@ -1730,11 +1773,21 @@ class RakuAST::Parameter
                     QAST::Op.new(
                         :op('bind'),
                         $temp-qast-var,
+#?if !js
                         QAST::Op.new(
                             :op<dispatch>,
                             QAST::SVal.new(:value<raku-coercion>),
                             QAST::WVal.new(:value($param-type)),
-                            $temp-qast-var))));
+                            $temp-qast-var)
+#?endif
+#?if js
+                        QAST::Op.new(
+                            :op('callmethod'), :name('coerce'),
+                            QAST::Op.new( :op('how'), QAST::WVal.new(:value($param-type)) ),
+                            QAST::WVal.new(:value($param-type)),
+                            $temp-qast-var)
+#?endif
+                        )));
         }
 
         # If it's optional, do any default handling.

@@ -284,6 +284,64 @@ object RakOps {
         return theCsd
     }
 
+    /* Like p6bindsig, but reports whether binding worked instead of erroring,
+     * for a frame whose bind failure the invoking dispatch will turn into a
+     * resumption. Returns 1 on success and 0 on failure; a junction counts
+     * as a failure, the same answer MoarVM's Binder.try_bind_sig gives. The
+     * (possibly flattened) callsite and arguments are left on the frame and
+     * in tc.flatArgs for the emitted code to reload its locals from. */
+    @JvmStatic
+    fun p6trybindsig(tc: ThreadContext, csd: CallSiteDescriptor, args: Array<Any?>?): Long {
+        var theCsd = csd
+        var theArgs = args
+        val cf = tc.curFrame!!
+        if (theCsd.hasFlattening) {
+            theCsd = theCsd.explodeFlattening(cf, theArgs!!)
+            theArgs = tc.flatArgs
+        }
+        cf.csd = theCsd
+        cf.args = theArgs
+        val gcx = key.getGC(tc)
+        val sig = cf.codeRef.codeObject!!
+            .get_attribute_boxed(tc, gcx.Code, "$!signature", HINT_CODE_SIG)
+        val params = sig!!
+            .get_attribute_boxed(tc, gcx.Signature, "@!params", HINT_SIG_PARAMS)
+        val ok = Binder.bind(tc, gcx, cf, params!!, theCsd, theArgs, false, null) == Binder.BIND_RESULT_OK
+        /* The binder can call code that overwrites flatArgs; restore it. */
+        tc.flatArgs = theArgs
+        return if (ok) 1 else 0
+    }
+
+    /**
+     * Report why binding failed, for the HLL bind_error hook. A lowered
+     * parameter's check has already failed and no dispatch wanted to resume
+     * on it, so re-run the binder over the arguments the frame was entered
+     * with to find out which parameter did not match and raise the language's
+     * own error. The capture is an nqp one, straight off the failing frame,
+     * so this cannot go through p6bindcaptosig -- that takes a Raku Capture.
+     */
+    @JvmStatic
+    fun p6bindfailerror(cap: SixModelObject?, code: SixModelObject?, tc: ThreadContext): SixModelObject? {
+        val capture = cap as? CallCaptureInstance
+            ?: throw ExceptionHandling.dieInternal(tc, "p6bindfailerror needs a capture")
+        val gcx = key.getGC(tc)
+        val sig = code!!.get_attribute_boxed(tc, gcx.Code, "\$!signature", HINT_CODE_SIG)
+        val params = sig!!.get_attribute_boxed(tc, gcx.Signature, "@!params", HINT_SIG_PARAMS)
+
+        /* Bind into the frame that failed, not this one, so anything the
+         * binder reports is phrased against it. */
+        val frame = tc.curFrame!!.caller ?: tc.curFrame!!
+        val error = arrayOfNulls<Any>(3)
+        Binder.bind(tc, gcx, frame, params!!, capture.descriptor!!, capture.args, false, error)
+        if (error[0] is String)
+            throw ExceptionHandling.dieInternal(tc, error[0] as String)
+        if (error[0] != null)
+            Ops.invokeDirect(tc, error[0] as SixModelObject?,
+                error[1] as CallSiteDescriptor, error[2] as Array<Any?>)
+        /* The binder found nothing to complain about, so say what we know. */
+        throw ExceptionHandling.dieInternal(tc, "Bind check failed")
+    }
+
     @JvmStatic
     fun p6bindcaptosig(sig: SixModelObject?, cap: SixModelObject?, tc: ThreadContext): SixModelObject? {
         val cf = tc.curFrame!!
@@ -349,6 +407,29 @@ object RakOps {
     private val storeThrower = CallSiteDescriptor(
         byteArrayOf(CallSiteDescriptor.ARG_OBJ), null)
 
+    /* Return-value decontainerization through the raku-rv-decont(-6c)
+     * dispatcher, with the dispatch site cached per routine rather than per
+     * bytecode instruction: an invokedynamic on every routine return is a
+     * large slice of the per-class indy budget, which the core setting
+     * overflows. */
+    private val rvDecontSites =
+        java.util.concurrent.ConcurrentHashMap<SixModelObject, org.raku.nqp.dispatch.DispatchCallSite>()
+    private val rvDecontSiteType = java.lang.invoke.MethodType.methodType(Void.TYPE)
+    private val rvDecontCallSite = CallSiteDescriptor(
+        byteArrayOf(CallSiteDescriptor.ARG_OBJ), null)
+
+    @JvmStatic
+    fun p6decontrv_rt(routine: SixModelObject?, value: SixModelObject?, sixc: Long,
+                      tc: ThreadContext): SixModelObject? {
+        val site = rvDecontSites.computeIfAbsent(routine!!) {
+            org.raku.nqp.dispatch.DispatchCallSite(rvDecontSiteType)
+        }
+        org.raku.nqp.dispatch.Dispatch.dispatchWithDescriptor(site,
+            if (sixc != 0L) "raku-rv-decont-6c" else "raku-rv-decont",
+            rvDecontCallSite, tc, arrayOf<Any?>(value))
+        return Ops.result_o(tc.curFrame!!)
+    }
+
     @JvmStatic
     fun p6store(cont: SixModelObject?, value: SixModelObject?, tc: ThreadContext): SixModelObject? {
         val spec = cont!!.st.ContainerSpec
@@ -358,7 +439,10 @@ object RakOps {
         else {
             val meth = Ops.findmethodNonFatal(cont, "STORE", tc)
             if (Ops.isnull(meth) == 0L) {
-                Ops.invokeDirect(tc, meth,
+                /* Through the dispatcher: STORE resolves to a multi's proto,
+                 * and a raw invocation of its {*} would resume whatever
+                 * unrelated dispatch is innermost. */
+                Ops.invokeMethodViaDispatch(tc, meth,
                     STORE, arrayOf<Any?>(cont, value))
             }
             else {
@@ -377,6 +461,8 @@ object RakOps {
         byteArrayOf(CallSiteDescriptor.ARG_OBJ, CallSiteDescriptor.ARG_OBJ, CallSiteDescriptor.ARG_OBJ), null)
     private val rvThrower = CallSiteDescriptor(
         byteArrayOf(CallSiteDescriptor.ARG_OBJ, CallSiteDescriptor.ARG_OBJ), null)
+    private val targetTypeSite = CallSiteDescriptor(
+        byteArrayOf(CallSiteDescriptor.ARG_OBJ, CallSiteDescriptor.ARG_OBJ), null)
 
     @JvmStatic
     fun p6typecheckrv(rv: SixModelObject?, routine: SixModelObject?, bypassType: SixModelObject?, tc: ThreadContext): SixModelObject? {
@@ -388,9 +474,10 @@ object RakOps {
              * to call instantiate_generic before doing the type check. */
             val HOW = rtype.st.HOW
             val archetypesMeth = Ops.findmethod(HOW, "archetypes", tc)
-            /* NOTE: two args against the one-arg invocantCallSite, as in the
-             * Java original. */
-            Ops.invokeDirect(tc, archetypesMeth, Ops.invocantCallSite, arrayOf<Any?>(HOW, rtype))
+            /* The type must ride along: DefiniteHOW's nullary archetypes()
+             * answers its non-generic default, which under the dispatch
+             * binder is exactly what a dropped extra argument produced. */
+            Ops.invokeDirect(tc, archetypesMeth, targetTypeSite, arrayOf<Any?>(HOW, rtype))
             val Archetypes = Ops.result_o(tc.curFrame!!)
             val genericMeth = Ops.findmethodNonFatal(Archetypes, "generic", tc)
             if (genericMeth != null) {
@@ -402,6 +489,21 @@ object RakOps {
                     (cc as ContextRefInstance).context = tc.curFrame!!
                     Ops.invokeDirect(tc, ig, genIns, arrayOf<Any?>(HOW, rtype, cc))
                     rtype = Ops.result_o(tc.curFrame!!)
+                    /* A generic that instantiated to a native type checks
+                     * against its box: the routine body produces boxed
+                     * values. Same mapping the raku-rv-typecheck-generic
+                     * dispatcher applies on MoarVM. */
+                    val ni = Ops.gethllsym("Raku", "NativeInstantiation", tc)
+                    if (ni != null && Ops.isnull(ni) == 0L) {
+                        val boxMeth = Ops.findmethodNonFatal(ni, "box", tc)
+                        if (boxMeth != null) {
+                            Ops.invokeDirect(tc, boxMeth, targetTypeSite,
+                                arrayOf<Any?>(ni, rtype))
+                            val boxed = Ops.result_o(tc.curFrame!!)
+                            if (boxed != null && Ops.isnull(boxed) == 0L)
+                                rtype = boxed
+                        }
+                    }
                 }
             }
 
@@ -450,13 +552,47 @@ object RakOps {
     @JvmStatic
     fun p6capturelex(codeObj: SixModelObject?, tc: ThreadContext): SixModelObject? {
         val gcx = key.getGC(tc)
-        val closure = codeObj!!.get_attribute_boxed(tc,
+        /* Only a Raku Code carries the handle to re-capture. Anything else
+         * is handed straight back, as the raku-capture-lex-callers
+         * dispatcher does on MoarVM -- an attribute's build closure, for
+         * one, reaches here as a bare code ref. */
+        if (codeObj == null || Ops.istype(codeObj, gcx.Code, tc) == 0L)
+            return codeObj
+        val closure = codeObj.get_attribute_boxed(tc,
                 gcx.Code, "$!do", HINT_CODE_DO) as CodeRef
         val wantedStaticInfo = closure.staticInfo.outerStaticInfo
         if (tc.curFrame!!.codeRef.staticInfo === wantedStaticInfo)
             closure.outer = tc.curFrame
         else if (tc.curFrame!!.outer!!.codeRef.staticInfo === wantedStaticInfo)
             closure.outer = tc.curFrame!!.outer
+        return codeObj
+    }
+
+    /** Captures the closure's outer from whichever calling frame runs the
+     * static code its outer names, the way MoarVM's try-capture-lex-callers
+     * syscall does. This is what lets a phaser cloned at frame exit close
+     * over the live frames rather than whatever compile-time frames it was
+     * created under. */
+    @JvmStatic
+    fun p6capturelexwhere(codeObj: SixModelObject?, tc: ThreadContext): SixModelObject? {
+        val gcx = key.getGC(tc)
+        /* Only a Raku Code carries the handle to re-capture. Anything else
+         * is handed straight back, as the raku-capture-lex-callers
+         * dispatcher does on MoarVM -- an attribute's build closure, for
+         * one, arrives here as a bare code ref. */
+        if (codeObj == null || Ops.istype(codeObj, gcx.Code, tc) == 0L)
+            return codeObj
+        val closure = codeObj.get_attribute_boxed(tc,
+                gcx.Code, "$!do", HINT_CODE_DO) as CodeRef
+        val wantedStaticInfo = closure.staticInfo.outerStaticInfo ?: return codeObj
+        var frame = tc.curFrame
+        while (frame != null) {
+            if (frame.codeRef.staticInfo === wantedStaticInfo) {
+                closure.outer = frame
+                break
+            }
+            frame = frame.caller
+        }
         return codeObj
     }
 
@@ -603,6 +739,29 @@ object RakOps {
     private val dispThrower = CallSiteDescriptor(
         byteArrayOf(CallSiteDescriptor.ARG_STR), null)
 
+    /* Sinking a statement used to compile to a `can`/`callmethod sink` pair
+     * inline, which spends one invokedynamic call site per sunk statement.
+     * The core setting has enough of them for that alone to push a class past
+     * HotSpot's 65535-invokedynamic-per-class ceiling, so the whole thing
+     * lives here instead. Returns the sinkee, as MoarVM's p6sink does. */
+    @JvmStatic
+    fun p6sink(obj: SixModelObject?, tc: ThreadContext): SixModelObject? {
+        /* A value in a container is not sunk: the raku-sink dispatcher looks
+         * at the sinkee without decontainerizing, so a Scalar an is-rw
+         * routine returned keeps its contents unsunk. Scalar itself has no
+         * sink method worth calling. */
+        if (obj != null && obj.st.ContainerSpec == null && Ops.isconcrete(obj, tc) != 0L) {
+            val meth = Ops.findmethodNonFatal(obj, "sink", tc)
+            if (Ops.isnull(meth) == 0L)
+                /* Through the dispatcher: sink resolves to a multi's proto. */
+                Ops.invokeMethodViaDispatch(tc, meth, invocantCallSite, arrayOf<Any?>(obj))
+        }
+        return obj
+    }
+
+    private val invocantCallSite = CallSiteDescriptor(
+        byteArrayOf(CallSiteDescriptor.ARG_OBJ), null)
+
     @JvmStatic
     fun p6finddispatcher(usage: String?, tc: ThreadContext): SixModelObject? {
         var dispatcher: SixModelObject? = null
@@ -691,8 +850,14 @@ object RakOps {
 
     @JvmStatic
     fun p6staticouter(code: SixModelObject?, tc: ThreadContext): SixModelObject? {
-        if (code is CodeRef)
-            return code.staticInfo.outerStaticInfo!!.staticCode
+        if (code is CodeRef) {
+            /* An outermost frame (a comp unit's mainline) has no static
+             * outer; answer null rather than dying, the way MoarVM does.
+             * Backtrace.nice walks outers with exactly this. */
+            val outer = code.staticInfo.outerStaticInfo
+                ?: return Ops.createNull(tc)
+            return outer.staticCode ?: Ops.createNull(tc)
+        }
         else
             throw ExceptionHandling.dieInternal(tc, "p6staticouter must be used on a CodeRef")
     }

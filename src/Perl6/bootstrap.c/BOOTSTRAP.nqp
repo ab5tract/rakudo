@@ -555,6 +555,15 @@ my class Binder {
                 return nqp::const::BIND_RESULT_FAIL;
             }
 
+            # A generic coercion type (T() with T from a type capture) may
+            # reach here uninstantiated: the nominal instantiation above
+            # lives inside the type-check branch, which a coercive
+            # parameter can skip. Resolve it against the lexpad, which by
+            # now holds the captured types.
+            if $flags +& nqp::const::SIG_ELEM_TYPE_GENERIC
+              && $param_type.HOW.archetypes($param_type).generic {
+                $param_type := $param_type.HOW.instantiate_generic($param_type, $lexpad);
+            }
             my $coercion_type := $param_type.HOW.wrappee($param_type,:coercion);
             $oval := $coercion_type.HOW.coerce($coercion_type, $oval);
         }
@@ -1882,8 +1891,8 @@ BEGIN {
     # Ensure Rakudo runtime support is initialized.
     nqp::p6init();
 
-#?if moar
-    # On MoarVM, to get us through the bootstrap, put the NQP dispatchers in
+#?if !js
+    # To get us through the bootstrap, put the NQP dispatchers in
     # place as the Raku ones; they will get replaced later in the bootstrap.
     nqp::sethllconfig('Raku', nqp::hash(
       'call_dispatcher',        'nqp-call',
@@ -2301,12 +2310,7 @@ BEGIN {
         }
 
         nqp::bindattr($ins, Attribute, '$!container_initializer',
-#?if !jvm
           nqp::p6capturelexwhere($ci.clone)
-#?endif
-#?if jvm
-          $ci.clone
-#?endif
         ) if nqp::isconcrete($ci);
 
         my $cd_ins := $cd;
@@ -2370,12 +2374,7 @@ BEGIN {
             );
         }
         nqp::bindattr($ins, Attribute, '$!build_closure',
-#?if !jvm
           nqp::p6capturelexwhere($bc.clone)
-#?endif
-#?if jvm
-          $bc.clone
-#?endif
         ) if nqp::defined($bc);
 
         $ins
@@ -2444,10 +2443,10 @@ BEGIN {
                     if nqp::eqaddr($type, Mu) || nqp::istype($val, $type) {
                         if $type.HOW.archetypes($type).coercive {
                             my $coercion_type := $type.HOW.wrappee($type, :coercion);
-#?if moar
+#?if !js
                             nqp::bindattr($cont, Scalar, '$!value', nqp::dispatch('raku-coercion', $coercion_type, $val));
 #?endif
-#?if !moar
+#?if js
                             nqp::bindattr($cont, Scalar, '$!value', $coercion_type.HOW.coerce($coercion_type, $val));
 #?endif
                         }
@@ -3176,10 +3175,8 @@ BEGIN {
               nqp::bindattr($cloned, Code, '$!do', $cldo),
               $cloned
             );
-#?if !jvm
             my $phasers := nqp::getattr($cloned, Block, '$!phasers');
             $self."!clone_phasers"($cloned, $phasers) if nqp::ishash($phasers);
-#?endif
 
             my $compstuff := nqp::getattr($cloned, Code, '@!compstuff');
             nqp::atpos($compstuff, 2)($do, $cloned)
@@ -3198,7 +3195,6 @@ BEGIN {
 
     Block.HOW.add_method(Block, '!clone_phasers',
       nqp::getstaticcode(sub ($self, $cloned, $phasers) {
-#?if !jvm
 
         # Helper sub for phasers that require innerlex capturing
         my $cl_phasers := nqp::null;
@@ -3251,12 +3247,10 @@ BEGIN {
 
         nqp::bindattr($cloned, Block, '$!phasers', $cl_phasers)
           unless nqp::isnull($cl_phasers);
-#?endif
     }));
 
     Block.HOW.add_method(Block, '!capture_phasers', nqp::getstaticcode(sub ($self) {
             $self  := nqp::decont($self);
-#?if !jvm
             my $phasers := nqp::getattr($self, Block, '$!phasers');
             if nqp::ishash($phasers) {
 
@@ -3276,7 +3270,6 @@ BEGIN {
                 capture_phaser('QUIT')  if nqp::existskey($phasers, 'QUIT' );
                 capture_phaser('CLOSE') if nqp::existskey($phasers, 'CLOSE');
             }
-#?endif
             $self
     }));
 
@@ -5757,8 +5750,13 @@ BEGIN {
     Perl6::Metamodel::ClassHOW.add_stash(ForeignCode);
     Perl6::Metamodel::ClassHOW.add_stash(Version);
 
-#?if !moar
-    # Default invocation behavior delegates off to invoke.
+#?if js
+    # Default invocation behavior delegates off to invoke. Only the legacy
+    # dispatch backend wants this: under newdisp the raku-invoke dispatcher
+    # does CALL-ME and type-object coercion itself, and a catch-all
+    # InvocationSpec on Mu makes nqp::isinvokable answer true for *every*
+    # Raku object - QRegex interpolation then invokes plain Strs (custom
+    # operator tokens interpolate their name) instead of matching literally.
     my $invoke_forwarder :=
         nqp::getstaticcode(sub ($self, *@pos, *%named) {
             if nqp::can($self, 'CALL-ME') {
@@ -5969,25 +5967,15 @@ nqp::sethllconfig('Raku', nqp::hash(
                             my str $name := nqp::atpos($phaser, 0);
                             if ($name eq 'KEEP' && $valid)
                               || ($name eq 'UNDO' && !$valid) {
-#?if jvm
-                                nqp::atpos($phaser, 1)();
-#?endif
-#?if !jvm
                                 nqp::p6capturelexwhere(
                                   nqp::atpos($phaser, 1).clone
                                 )();
-#?endif
                             }
                         }
 
                         # an ordinary LEAVE phaser
                         else {
-#?if jvm
-                            $phaser();
-#?endif
-#?if !jvm
                             nqp::p6capturelexwhere($phaser.clone)();
-#?endif
                         }
                         ++$i;
                     }
@@ -6000,14 +5988,9 @@ nqp::sethllconfig('Raku', nqp::hash(
                     my int $m := nqp::elems(@posts);
                     my int $i;
                     while $i < $m {
-#?if jvm
-                        nqp::atpos(@posts, $i)($value);
-#?endif
-#?if !jvm
                         nqp::p6capturelexwhere(
                           nqp::atpos(@posts, $i).clone
                         )($value);
-#?endif
                         ++$i;
                     }
                 }
@@ -6026,15 +6009,20 @@ nqp::sethllconfig('Raku', nqp::hash(
             # only have a lone LEAVE phaser, so no frills needed
             # don't bother to CATCH, there can only be one exception
             else {
-#?if jvm
-                $phasers();
-#?endif
-#?if !jvm
                 nqp::p6capturelexwhere($phasers.clone)();
-#?endif
             }
         }
     },
+#?if jvm
+
+    # The JVM binds with its own binder rather than the one above, which is
+    # not built there, so ask that one to bind the capture again and report
+    # what went wrong. Reached when a lowered parameter's check fails and no
+    # dispatch asked to resume on it.
+    'bind_error', -> $capture, $code {
+        nqp::p6bindfailerror($capture, $code);
+    },
+#?endif
 #?if !jvm
 
     'bind_error', -> $capture {
@@ -6088,6 +6076,7 @@ nqp::sethllconfig('Raku', nqp::hash(
             nqp::die("Internal error: inconsistent bind result");
         }
     },
+#?endif
 
     'method_not_found_error', -> $obj, str $name, *@pos, *%named {
         my $class := nqp::getlexcaller('$?CLASS');
@@ -6111,7 +6100,6 @@ nqp::sethllconfig('Raku', nqp::hash(
                )
              );
     },
-#?endif
 
     'lexical_handler_not_found_error', -> $cat, $out_of_dyn_scope {
         if $cat == nqp::const::CONTROL_RETURN {
@@ -6176,7 +6164,7 @@ nqp::sethllconfig('Raku', nqp::hash(
     'int64_multidim_ref', Int64MultidimRef,
 #?endif
 
-#?if moar
+#?if !js
     'call_dispatcher',         'raku-call',
     'method_call_dispatcher',  'raku-meth-call',
     'find_method_dispatcher',  'raku-find-meth',
@@ -6189,7 +6177,7 @@ nqp::sethllconfig('Raku', nqp::hash(
 #?endif
 ));
 
-#?if moar
+#?if !js
 my @types_for_hll_role := nqp::list(Mu, Int, Num, Str, List, Hash, ForeignCode);
 my @transform_type := nqp::list(
     Mu,
@@ -6284,12 +6272,12 @@ nqp::register('raku-hllize', -> $capture {
 # Tell parametric role groups how to create a dispatcher.
 Perl6::Metamodel::ParametricRoleGroupHOW.set_selector_creator({
     my $sel := nqp::create(Sub);
-#?if moar
+#?if !js
     my $onlystar := sub (*@pos, *%named) {
         nqp::dispatch('boot-resume', nqp::const::DISP_ONLYSTAR)
     };
 #?endif
-#?if !moar
+#?if js
     my $onlystar := sub (*@pos, *%named) {
         nqp::invokewithcapture(
             nqp::getcodeobj(nqp::curcode()).find_best_dispatchee(nqp::usecapture()),
@@ -6378,11 +6366,25 @@ Perl6::Metamodel::ParametricRoleGroupHOW.set_default_invoke_handler($role_invoke
 Perl6::Metamodel::ParametricRoleHOW.set_default_invoke_handler($role_invoke_handler);
 Perl6::Metamodel::CurriedRoleHOW.set_default_invoke_handler($role_invoke_handler);
 
+#?endif
+
 # Let ClassHOW and EnumHOW know about the invocation handler.
+#?if js
 Perl6::Metamodel::ClassHOW.set_default_invoke_handler(
     Mu.HOW.invocation_handler(Mu));
 Perl6::Metamodel::EnumHOW.set_default_invoke_handler(
     Mu.HOW.invocation_handler(Mu));
+#?endif
+#?if jvm
+# No catch-all handler on Mu here (see the js-only invoke forwarder above),
+# but a class that really defines CALL-ME still needs an invocation spec so
+# direct nqp-level invocation keeps working; compose_invocation only installs
+# this for types where find_method sees a CALL-ME.
+my $call_me_forwarder := nqp::getstaticcode(sub ($self, *@pos, *%named) {
+    $self.CALL-ME(|@pos, |%named)
+});
+Perl6::Metamodel::ClassHOW.set_default_invoke_handler($call_me_forwarder);
+Perl6::Metamodel::EnumHOW.set_default_invoke_handler($call_me_forwarder);
 #?endif
 
 # Configure the MOP (not persisted as it ends up in a lexical...)

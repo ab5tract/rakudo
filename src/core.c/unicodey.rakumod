@@ -9,11 +9,19 @@ my class Rakudo::Unicodey is implementation-detail {
     method ords(str $str) {  # strtocodes NYI on JVM
         my @ords := array[uint32].new;
         my int $chars = nqp::chars($str);
-        my int $i     = -1;
+        my int $i     = 0;
+        my int $ord;
 
+        # nqp::chars counts UTF-16 units here, and a non-BMP codepoint
+        # takes two of them. nqp::ord reads the pair as the one codepoint
+        # it is, so stepping by one would read the trailing half again as
+        # a lone surrogate.
         nqp::while(
-          nqp::islt_i(++$i,$chars),
-          nqp::push_i(@ords,nqp::ord($str,$i))
+          nqp::islt_i($i,$chars),
+          nqp::stmts(
+            nqp::push_i(@ords,$ord = nqp::ord($str,$i)),
+            ($i = nqp::add_i($i,nqp::isge_i($ord,0x10000) ?? 2 !! 1))
+          )
         );
 
         @ords
@@ -23,8 +31,9 @@ my class Rakudo::Unicodey is implementation-detail {
         NYI('unimatch').throw;
     }
 
-    method uniprop-general(int) is hidden-from-backtrace {
-        NYI('uniprop').throw;
+    my constant $gcprop = nqp::unipropcode("General_Category");
+    method uniprop-general(int $code) {
+        nqp::getuniprop_str($code,$gcprop)
     }
     method uniprop(int, str) is hidden-from-backtrace {
         NYI('uniprop').throw;
