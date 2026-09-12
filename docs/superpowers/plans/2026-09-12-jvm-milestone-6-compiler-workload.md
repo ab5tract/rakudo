@@ -759,29 +759,45 @@ Claude-Session: https://claude.ai/code/session_01T8zpD6QrhN6Pmp5TePheq6"
 
 ---
 
-> **Carried into Tasks 5, 6 and 7 from Task 4's review — read before
-> measuring.** Every remaining sweep compile inherits
-> `NQP_CODE_MAX_COMPILE=2069`, and therefore inherits what it does to the
-> engine's own statistics. `prepareForCompilation` answering false is a
-> RETRYABLE bailout, not a permanent one, so a refused root is
+> **THE SWEEP STOPS BEING GREEDY-SEQUENTIAL HERE (user decision,
+> 2026-09-12). Tasks 6 and 7 do NOT carry Task 4's knob.** They are
+> measured against Task 3's clean baseline instead.
+>
+> Why the design changed. `prepareForCompilation` answering false is a
+> RETRYABLE bailout, not a permanent one, so a size-refused root is
 > resubmitted indefinitely. Task 4's run recorded
 > `RetryableBailoutException: Compilable not ready for compilation` at
-> **1456361**, against **144** in the baseline, and `Compilations` at
-> **1462534** against **6358**.
+> **1456361** against **144** in the baseline, with `Compilations` at
+> **1462534** against **6358** — about one submission in 258 produced a
+> compilation.
 >
-> Two working rules follow:
+> That is not merely wasteful, it is **confounding**. Tier policy works
+> by raising the call counts at which a target submits for compilation,
+> which directly changes how often the refused roots resubmit. Measured
+> on top of Task 4's knob, part of any tier-policy result would be "the
+> retry storm shrank" — a property of the carried knob, not of tier
+> policy. Tasks 6 and 7 would have been measuring tier policy on a
+> system already thrashing.
 >
-> - **Never compare `Compilations` or `Compilation Accuracy` across
->   configurations.** Those fields are dominated by resubmissions in
->   every run from Task 4 onward and measure nothing you want.
-> - **Use `total-compiler-ms`, `nqp-root-ms`, `done` and `failed`
->   instead**, which count real compilations and are unaffected.
+> So: Task 4's knob is **adopted on its own merits** (Task 11 still takes
+> it, build-side only) and is **not carried into the remaining
+> measurements**. Tasks 6 and 7 answer "what does tier policy do to a
+> clean compile", which is the question worth having.
 >
-> The knob still won on the quantities that matter, so it is carried;
-> but a later task reading a freed-capacity story into its own result
-> should remember that capacity here is churned, not freed. The proper
-> fix — marking a size-refused root permanently non-compilable — is a
-> runtime change and belongs to milestone 7.
+> Two rules still apply wherever that knob IS set:
+>
+> - **Never compare `Compilations` or `Compilation Accuracy`** between a
+>   run that sets it and one that does not. Those fields are dominated by
+>   resubmissions and measure nothing you want.
+> - **Use `total-compiler-ms`, `nqp-root-ms`, `Success` and `Permanent
+>   Bailouts`**, which count real compilations and are unaffected.
+>
+> **Milestone 7's first item, alongside the inlining lever:** make a size
+> refusal permanent rather than retryable. Task 4's measured -11.5 % on
+> compiler work was achieved DESPITE 1.46 M wasted submissions, so the
+> knob is underperforming its own idea and a permanent refusal should do
+> better, not worse. It is a runtime change, hence out of this
+> configuration-only phase.
 >
 > **SCREEN EACH KNOB FOR STRUCTURAL APPLICABILITY BEFORE SPENDING A
 > COMPILE (added after Task 5, which spent 433 s on an inert option).**
@@ -940,7 +956,6 @@ Written out with a kept `NQP_CODE_MAX_COMPILE`; drop that prefix if Task
 4 dropped it, and drop `PartialBlockCompilation` if Task 5 dropped it:
 
 ```bash
-NQP_CODE_MAX_COMPILE=<N-1> \
 JDK_JAVA_OPTIONS='-Dpolyglot.engine.TraceCompilation=true -Dpolyglot.engine.CompilationStatistics=true -Dpolyglot.engine.Mode=latency -Dpolyglot.engine.MultiTier=true -Dpolyglot.engine.FirstTierCompilationThreshold=<value> -Dpolyglot.engine.LastTierCompilationThreshold=<value>' \
 NQP_CODE_CLOSE_AT_EXIT=1 RAKUDO_RAKUAST=1 \
 raku tools/build/watched-run.raku \
@@ -1015,7 +1030,6 @@ Carry every knob Tasks 4 to 6 kept and add the thread count. Written out
 with all of them kept; drop whichever their tasks dropped:
 
 ```bash
-NQP_CODE_MAX_COMPILE=<N-1> \
 JDK_JAVA_OPTIONS='-Dpolyglot.engine.TraceCompilation=true -Dpolyglot.engine.CompilationStatistics=true -Dpolyglot.engine.Mode=latency -Dpolyglot.engine.MultiTier=true -Dpolyglot.engine.FirstTierCompilationThreshold=<value> -Dpolyglot.engine.LastTierCompilationThreshold=<value> -Dpolyglot.engine.CompilerThreads=<cores/2>' \
 NQP_CODE_CLOSE_AT_EXIT=1 RAKUDO_RAKUAST=1 \
 raku tools/build/watched-run.raku \
@@ -1598,6 +1612,17 @@ a regeneration, not a rebuild; it does not invalidate any measurement.
 
    Three corrections that must travel with it, all established by Task
    3's review and all easy to get wrong:
+
+   **Milestone 7's SECOND item, and the cheaper of the two: make a size
+   refusal permanent.** `NqpRootNode.prepareForCompilation` returning
+   false is a temporary bailout, so the root is resubmitted forever. With
+   `NQP_CODE_MAX_COMPILE` set, Task 4 measured 1456361 retryable "not
+   ready for compilation" bailouts against 144 in the baseline, and
+   1462534 submissions against 6358 — roughly one submission in 258
+   produced a compilation. The knob's measured -11.5 % on compiler work
+   was achieved despite all of that, so a permanent refusal should beat
+   it. Until then the knob is adopted build-side on a net win whose
+   mechanism is uglier than the number.
 
    - **Frame it as "slow paths visible to the inliner", NOT as "env-gated
      debug prints".** Chain B, the larger per-root cost, has no env gate
