@@ -4,4 +4,7 @@ NOTE: Picked up JDK_JAVA_OPTIONS: -Dpolyglot.engine.TraceCompilation=true
 [engine] opt failed engine=1  id=77    parse_stmt[48213]                                  |Tier 2|Time  6400(6100+300 )ms|Reason: code installation failed: code is too large|UTC 2026-09-12T09:47:56.100|Src n/a
 [engine] opt failed engine=1  id=78    parse_expr[91002]                                  |Tier 2|Time  6600(6300+300 )ms|Reason: code installation failed: code is too large|UTC 2026-09-12T09:47:57.100|Src n/a
 [engine] opt deopt  engine=1  id=90    infix:<+|>[12345]                                  |Reason Transferred to interpreter|UTC 2026-09-12T09:47:58.200|Src n/a
+[engine] opt failed engine=1  id=91    graph_bail[900]                                    |Tier 2|Time  5200(5000+200 )ms|Reason: too big to safely compile. Node count: 41234|UTC 2026-09-12T09:47:59.100|Src n/a
+[engine] opt failed engine=1  id=92    inline_pipe[1500]                                  |Tier 2|Time  5100(4900+200 )ms|Reason: inlining of infix:<+|> failed: code is too large|UTC 2026-09-12T09:47:59.400|Src n/a
+[engine] opt failed engine=1  id=93    misc_fail[700]                                     |Tier 2|Time   300( 280+20  )ms|Reason: inlining budget exhausted|UTC 2026-09-12T09:47:59.700|Src n/a
 ok - warm add
