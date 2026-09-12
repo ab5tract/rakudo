@@ -3242,3 +3242,65 @@ still loses.
 Binaries, metadata and logs stay in `$CLAUDE_JOB_DIR/tmp` and are not
 committed — every runtime change invalidates an image. `blib/` and
 `nqp/build/` untouched; CORE.c output went to the job dir.
+
+Task 12 (Native Image spike): implementer DONE_WITH_CONCERNS — rakudo
+`28cc3ea11b`, nqp untouched. **Recommendation: PARK.** Four images built, two
+working: `nqp-image-opt` 67.6 MiB in 90 s and `rakudo-image` 77.5 MiB in 87 s;
+two dead ends (`nqp-image`, `nqp-image-empty`) where Truffle on the MODULE path
+registers no feature. JVM baseline `nqp-j -e 'say(1)'` 1.93 s wall / 9.8 s CPU.
+
+**Ruling 51 — THE ARTIFACT ROAD IS VALIDATED END TO END, and this is the spike's
+durable result.** An image built from nqp alone **loaded `rakudo.jar` as DATA and
+ran it correctly** — `unit.meta` + `unit.programs` + `unit.serialized.lz4`, zero
+`.class` — with `say(1)` and `@a.map(* * 2).join(",")` both right. Rakudo did not
+exist at image-build time and did not need to. That is precisely what
+unit-artifact milestones 1-4 were built to make possible and nobody had ever
+tested it. It stands regardless of the performance verdict.
+
+**Ruling 52 — PARK, on numbers, not impressions.** Image startup is **2.82 s
+against the JVM's 1.93 s, 1.46x SLOWER on the clock** (though 4.3x cheaper in CPU:
+2.3 s against 9.8 s); Rakudo 5.45 s against 3.66 s. CORE.c through the image
+reached `Stage start` correctly and was **still in parse at 785 s against 297 s
+for the JVM's entire compile** — 2.8x the parse of the compilation-disabled JVM
+run, which is the like-for-like comparison. Killed by the controller on the user's
+instruction, not retried. Not DROPPED: the recipe rebuilds in 90 s and the
+structural result is permanent.
+
+**Ruling 53 — MY COLD-START PREMISE WAS HALF WRONG, and this milestone repeated
+it several times.** I justified the imaging direction partly on "cold start is
+~4.1 s and dominated by the serial artifact load path; an image heap removes
+exactly that". **An image removes CLASS loading, not ARTIFACT loading.** JVM boot
+is only ~0.1 s of the 1.9 s baseline. Our cold start is dominated by reading and
+decoding unit artifacts, which an image does not touch at all. So finding 1 of
+the three that justified pulling this task forward does not support it. Findings 2
+and 3 (guest compilation worth at most 17.5 %; HotSpot carrying the interpreter)
+stand, but 2 now cuts AGAINST imaging rather than for it — see ruling 54.
+
+**Ruling 54 — the engine cache is no longer a reason to pursue imaging.** It would
+hold **nothing today** (zero successful compilations), first-tier code at best
+once the bailout below is fixed, and the entire prize is capped by the 17.5 %
+ceiling. One of the three original reasons for this direction is therefore
+retired.
+
+**MILESTONE 7 LEVER #6, and it is the fourth instance of one pattern: guest
+compilation fails 100 % in the image** because `NFGString.atomsOf` reads a
+`WeakHashMap` from inside `RxMatchRootNode.execute`, illegal on a compiled path,
+so every compilation bails and 39 MiB of Graal sits dead in the binary. **One
+`@TruffleBoundary` fixes it**; the implementer correctly did not make the change,
+holding the no-source-changes constraint. Note the pattern: this, the 442-root
+inlining bailout, the `dieInternal` print branch and the deopt churn are all
+**slow paths visible to the compiler** — the survey ruling 14 called for.
+
+What the builds demanded, most blocking first, recorded as the real measure of how
+far a full image is: Truffle jars on the CLASS path not the module path; no bare
+primitive-type entries in agent metadata (they pull in platform-restricted
+`CEntryPointLiteral.create`); 4 polyglot symbol holders and 6 language classes at
+build-time init (blanket package init crashes the builder); lz4 impl classes;
+`-Djava.class.path=` at run time for `ModuleLoader.jar`; `rakudo-runtime.jar` plus
+a 734-type reflective op surface plus `java.lang.{Math,String,Object}`.
+
+Open and honest: the implementer could not isolate why CORE.c was slower than the
+1.5x short-run penalty predicts, naming absent PGO, serial GC and the suppressed
+blocklist path as untested candidates. The nqp suite was NOT run because the
+harness hardcodes a `java` command line — said rather than contorted, and now
+dispatched to a separate agent with its own driver.
