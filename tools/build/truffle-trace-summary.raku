@@ -37,10 +37,25 @@
 # The spellings of "this root was too large to compile". They are not one
 # message: "code is too large" is the code-installation limit, while "too big
 # to safely compile. Node count: N" is the PermanentBailoutException on graph
-# size in libjvmcicompiler.so. Substring matches, never exact ones -- and the
-# unclassified-reasons report below is what covers the spellings not listed
-# here, which matters more than the list, because the list will go stale.
-my @SIZE-BAILOUT-SPELLINGS = 'code is too large', 'too big to safely compile', 'exceeds';
+# size in libjvmcicompiler.so. Substring matches, never exact ones.
+#
+# ONLY SPELLINGS VERIFIED TO EXIST IN THIS TREE BELONG HERE. Nothing guessed,
+# and in particular nothing as loose as a bare 'exceeds': "inlining of foo
+# exceeds the inlining budget" is an inlining decision about a 40-word root,
+# not a size bailout, and classifying it sets min-too-large-size=40 -- a
+# threshold that would refuse essentially every compilation and destroy the
+# measurement rather than merely bias it.
+#
+# A guessed spelling does not extend this tool's reach; it bypasses the
+# mechanism that already covers the unknown. The unclassified-reasons report
+# below prints any unmatched failure reason with its count and its sizes,
+# loudly, for a human to read. A too-loose entry here converts that loud
+# unknown into a silent wrong answer, and a wrong threshold is invisible to
+# the tool's own alarm by construction: a reason that matched a spelling is,
+# by definition, not unclassified. When a real trace shows a size bailout this
+# list does not know, it will appear in that block -- add it here THEN, with
+# the trace that proves it.
+my @SIZE-BAILOUT-SPELLINGS = 'code is too large', 'too big to safely compile';
 
 sub size-bailout($reason --> Bool) {
     so @SIZE-BAILOUT-SPELLINGS.first({ $reason.contains($_) });

@@ -7,4 +7,5 @@ NOTE: Picked up JDK_JAVA_OPTIONS: -Dpolyglot.engine.TraceCompilation=true
 [engine] opt failed engine=1  id=91    graph_bail[900]                                    |Tier 2|Time  5200(5000+200 )ms|Reason: too big to safely compile. Node count: 41234|UTC 2026-09-12T09:47:59.100|Src n/a
 [engine] opt failed engine=1  id=92    inline_pipe[1500]                                  |Tier 2|Time  5100(4900+200 )ms|Reason: inlining of infix:<+|> failed: code is too large|UTC 2026-09-12T09:47:59.400|Src n/a
 [engine] opt failed engine=1  id=93    misc_fail[700]                                     |Tier 2|Time   300( 280+20  )ms|Reason: inlining budget exhausted|UTC 2026-09-12T09:47:59.700|Src n/a
+[engine] opt failed engine=1  id=94    tiny[40]                                           |Tier 2|Time   120( 110+10  )ms|Reason: inlining of foo exceeds the inlining budget|UTC 2026-09-12T09:48:00.100|Src n/a
 ok - warm add
