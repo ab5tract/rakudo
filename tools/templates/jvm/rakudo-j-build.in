@@ -1,7 +1,29 @@
+# Truffle engine settings for the CORE setting compiles (milestone 6,
+# 2026-09-12). This driver runs exactly three things -- CORE.c, CORE.d and
+# CORE.e -- so these apply to the setting compiles and nothing else. They
+# are deliberately NOT in create-jvm-runner.pl: latency mode pins every
+# root to first tier for the life of the process and disables splitting,
+# which is right for a compile that runs once and exits and wrong for a
+# long-lived Rakudo.
+#
+# Measured on CORE.c, 16-core box, one sample per point:
+#   Mode=latency + FirstTierCompilationThreshold=1600  434s -> 337s
+#   ...plus CompilerThreads=1                          337s -> 297s
+# Tier policy works by abolishing second-tier compilation, which was 54%
+# of compiler time for a quarter of the compilations. One compiler thread
+# works by letting the queue discard superseded recompiles: compilation is
+# ordered by call count, so one thread gets the 1033 hottest targets and
+# skips a tail that never repays itself.
+#
+# Bounds worth knowing before changing these. Disabling guest compilation
+# entirely costs 360s, so all of it is worth at most 17.5% here and the
+# stock default captured about a third of that. MultiTier is already
+# true by default and LastTierCompilationThreshold is inert under latency
+# (firstTierOnly forces its gate false), so neither is set.
 $ENV{RAKUDO_HOME} = '@sq_escape(@base_dir@/gen/build_rakudo_home)@';
 
-@if(platform!=windows exec {'@java@'} ('@java@', '-Xss512m', '-Xmx14g', '-XX:+AllowParallelDefineClass', @j_truffle_opts@'-cp', '@sq_escape(@classpath@@j_truffle_jar@)@', 'org.raku.nqp.runtime.unit.UnitMain', 'rakudo.jar', @ARGV);)@
-@if(platform==windows my $exit = system {'@java@'} ('@java@', '-Xss512m', '-XX:+AggressiveHeap', '-XX:+AllowParallelDefineClass', @j_truffle_opts@'-cp', '@sq_escape(@classpath@@j_truffle_jar@)@', 'org.raku.nqp.runtime.unit.UnitMain', 'rakudo.jar', @ARGV);
+@if(platform!=windows exec {'@java@'} ('@java@', '-Xss512m', '-Xmx14g', '-XX:+AllowParallelDefineClass', '-Dpolyglot.engine.Mode=latency', '-Dpolyglot.engine.FirstTierCompilationThreshold=1600', '-Dpolyglot.engine.CompilerThreads=1', @j_truffle_opts@'-cp', '@sq_escape(@classpath@@j_truffle_jar@)@', 'org.raku.nqp.runtime.unit.UnitMain', 'rakudo.jar', @ARGV);)@
+@if(platform==windows my $exit = system {'@java@'} ('@java@', '-Xss512m', '-XX:+AggressiveHeap', '-XX:+AllowParallelDefineClass', '-Dpolyglot.engine.Mode=latency', '-Dpolyglot.engine.FirstTierCompilationThreshold=1600', '-Dpolyglot.engine.CompilerThreads=1', @j_truffle_opts@'-cp', '@sq_escape(@classpath@@j_truffle_jar@)@', 'org.raku.nqp.runtime.unit.UnitMain', 'rakudo.jar', @ARGV);
 if ($exit == -1) {
     print STDERR "Failed to execute: $!\n";
     exit(-2);
