@@ -412,3 +412,81 @@ Nothing above the appended lines was touched. The plan file
 `2026-09-12-jvm-milestone-6-compiler-workload.md` has uncommitted controller
 edits too and was deliberately LEFT uncommitted, being outside the
 implementer's commit scope.
+
+Task 2: fix round 1/5 (4 addressed + the test gap, 0 open — optional colon in the
+Reason match; real-format fixture lines with a colon-free `opt deopt` line keeping
+the other spelling covered; loud `(failed=N, reasons-parsed=0)`; head cut at the
+first whitespace-then-pipe so `infix:<+|>[12345]` survives whole; `unparsed=` and
+`non-trace-lines=` tallies; too-large roots listed by size with an explicit
+UNSIZED-excluded warning; `nqp-root-ms=` beside `total-compiler-ms`; assertions
+for `events=5`, `unparsed=0`, `reasons-parsed=3`; suite 8 -> 16. Commit rakudo
+`3f14c9c6ed`). The implementer reproduced the bug against the shipped tool before
+fixing it, and noted why it was survivable: the unparsed failures grouped under an
+EMPTY key rather than vanishing, so the mean-time assertion kept passing.
+Task 2: re-review round 1 (opus) — all four ADDRESSED plus the test gap,
+independently verified: the re-reviewer decompiled the same jar and confirmed all
+eight trace formats, built its own real-format line and OBSERVED
+`min-too-large-size=31337`, confirmed the colon-free deopt reason parses, ran the
+suite at 16/16, and confirmed by `git show --numstat` that the ledger hunk is
+77 insertions / 0 deletions, so the controller's rulings are provably
+byte-unaltered rather than merely present. New breakage: none; the head cut is
+strictly wider than the old split, since all eight formats write `%-50s` followed
+by whitespace before the first pipe.
+
+**Ruling 7 — the adversarial pass found Critical 1's failure mode by a second
+route; that is a fix round, not a deferral.** `min-too-large-size` selected only
+on `code is too large`, but this tree's own
+`/usr/lib/jvm/java-25-graalvm/lib/libjvmcicompiler.so` also carries
+`too big to safely compile. Node count: ...`, the PermanentBailoutException on the
+graph-size limit — a different spelling of the same phenomenon. Observed on a
+mixed trace: the graph-size root was silently dropped, leaving a plausible
+TOO-HIGH minimum, and on a trace carrying only that spelling, a bare `none` with
+NO annotation, because the reasons-parsed guard correctly does not fire (the
+reason parsed; it simply was not recognised). Too-high is the dangerous direction:
+Task 4 sets the threshold above the offender and the knob misses the roots it
+exists to skip. Also found: the round-1 head fix was not mirrored on the tail, so
+a reason text containing a pipe is truncated — realistic, because Rakudo operator
+names appear in inlining-failure reasons, and it defeats any spelling alternation
+because a truncated reason matches nothing. Both are load-bearing for Tasks 3 and
+4, so round 2 was dispatched rather than parking them. The durable part of the fix
+is not the list of spellings but the requirement to PRINT unclassified failure
+reasons with their sizes, so a future GraalVM inventing a fourth spelling is loud
+instead of silently absent. Costs if wrong: a wider selector could in principle
+classify a non-size bailout as one, which would push the minimum DOWN and make the
+threshold conservative — the safe direction, and visible in the printed list.
+
+Task 2: fix round 2/5 (2 addressed, 0 open — commit stamped 19:35, the fourth;
+nothing squashed). FINDING A: `min-too-large-size` no longer selects on one
+spelling. `@SIZE-BAILOUT-SPELLINGS` is a substring alternation over `code is too
+large`, `too big to safely compile` and `exceeds`, so the graph-size
+PermanentBailoutException joins the population instead of vanishing from it. The
+half that outlives the list is the new **unclassified failure reasons** report:
+every parsed failure reason that matched no spelling is printed beneath the
+minimum, named, with the sizes of the roots carrying it. In the fixture that
+reads `count=1  sizes: 700  inlining budget exhausted` directly under
+`min-too-large-size=900` — a size BELOW the minimum, which is exactly the alarm
+shape: a fourth spelling now shows up as a line to read rather than as an
+absence. FINDING B: the head fix is mirrored on the tail. A tail piece that does
+not look like a field start (`^ <[A..Z]> \w* ':'? \s`) is rejoined to the piece
+before it, so `inlining of infix:<+|> failed: code is too large` survives whole
+and matches the spelling it was cut off from. The rejoin rule is a SHAPE test,
+not a list of known field names, so an unfamiliar future field still reads as a
+field and the worst misfire is an over-long value, never a truncated one.
+
+Task 2: fix round 2/5 red run, on the record. Fixture grew by three
+`FAILED_FORMAT`-generated lines (`graph_bail[900]` on the graph-size spelling,
+`inline_pipe[1500]` with a pipe inside its reason, `misc_fail[700]` on an
+unclassifiable reason) plus a `trace-unknown-bailout.log` where every failure is
+an unknown spelling. Against the round-1 tool, six assertions failed and the two
+symptoms printed verbatim: `min-too-large-size=48213` — the plausible too-high
+number, with the 900- and 1500-word roots silently absent — and the reason
+`inlining of infix:<+` truncated at the pipe. After the fix, 21/21, and the same
+mixed-spelling trace reports **min-too-large-size=900**.
+
+Task 2: fix round 2/5 reality checks unchanged from round 1. The Step 6 smoke
+log still parses (`events=2 done=2 unparsed=0`), and the round-1 line built by
+`sprintf` from the verbatim `FAILED_FORMAT` still gives `min-too-large-size=31337`.
+The new `trace-unknown-bailout.log` prints an honest `min-too-large-size=none`
+with `count=1  sizes: 555  graph too chunky for the backend` underneath it.
+The plan file is no longer modified in the working tree; this commit carries
+the controller's round-2 ledger additions, appended-to and otherwise untouched.
