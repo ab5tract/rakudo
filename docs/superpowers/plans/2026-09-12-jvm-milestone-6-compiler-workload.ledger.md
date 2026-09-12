@@ -3686,3 +3686,69 @@ Two defects recorded, no source touched, `blib` untouched (last written 12:29
 by Task 1). Full report:
 `.superpowers/sdd/2026-09-12-jvm-milestone-6-compiler-workload/task-10-report.md`;
 findings written into `docs/jvm-perf-findings-2026-09.md`.
+
+Task 10 (loop bench): DONE — rakudo `9b9c405d99`, measured at rakudo `fa16081af3`
+/ nqp `41c294b02`. No source changed, `blib` untouched.
+plusquick stock: **ns/op 85.825**, `hits=90247946 misses=11623 slowEvals=976
+invokes=13867 directs=13848 noTarget=19`. Milestone 5's 85.525 and slowEvals 976
+**reproduced exactly**. resume-smoke unchanged (9 lines, exit 0), with the caveat
+that no stored transcript exists and the judgement is against
+`docs/jvm-jesp.md`'s description.
+
+**Ruling 63 — the +3.5 % plusquick regression milestone 5 left open is NOT
+ESTABLISHED, and the question was mis-framed.** Four identical stock runs at ONE
+build gave **85.825 / 89.375 / 87.400 / 89.175 ns/op — a 4.1 % spread, WIDER than
+the 3.5 % delta being explained** — with a byte-identical dispatch-stats line
+every time. Milestone 5 ran one sample per side. So the thing this task inherited
+may simply not exist.
+
+The noise has a named cause, and it is a **benchmark design flaw**: plusquick's
+mainline has **two OSR call targets, one per `while` loop**, so its 5 M warm-up
+warms a DIFFERENT target than the one timed; the timed target's compiles land
+200 ms and 470 ms into a 3.010 s window, 15.6 %. Future ns/op comparisons need a
+median of five or more runs, and the bench wants fixing.
+
+**Both milestone 5 leads are ruled out CATEGORICALLY, not merely unsupported.**
+`DecontSite` and `BigIntSite` are `NqpTypeOps.Site`s carrying a per-site
+`misses: Int`; they touch neither `slowEvals` nor the stats line's `misses`, so
+neither could have produced the observation. Lead 2 is additionally stale —
+`bigintArith` does check both operands' layouts. Variant layouts ruled out by
+measurement: `NQP_LAYOUT_STATS=1` gives `layouts=2122 variants=0 reblesses=2`.
+
+The counter itself is inert: **all 976 `slowEvals` are `NqpDispatch.AttrSrc.slow`
+over three keys** — `$!dispatchees` (RakuObject8L), `@!dispatchees`, `$!do`
+(RakuObject16L) — all at start-up, deterministic, with no `slow unbox` or
+`slow source`. 976 boundary crossings cannot buy 116 ms. Best remaining account,
+labelled a FIT: `AttrSrc.eval`'s null-slot branch counts an unvivified attribute
+as a slow eval even though the layout matched; confirming it needs the counter
+split, which is a source change and was correctly left as a finding.
+
+**Ruling 64 — the dispatch counters are NOT free, and every jesp number on record
+is inflated by them.** Six runs: **85.8-89.4 ns/op with `NQP_DISPATCH_STATS=1`,
+75.3 and 82.9 without.** That is a 10-15 % instrumentation cost. Milestone 5's
+82.625/85.525 pair was internally consistent — both sides instrumented — so its
+A/B stands, but **no jesp ns/op figure should be quoted as the runtime's actual
+cost per operation.** Record the instrumented/uninstrumented distinction beside
+any future number.
+
+**Two real defects found incidentally, both left unfixed as findings** (milestone
+7, and they belong with the slow-path family):
+- **`NqpTypeOps.decont:267` calls `miss(site)` only when `ost !== st`.** A site
+  with a MATCHING STable but a mismatching layout re-crosses the boundary forever,
+  never pinning and never appearing in any counter — invisible by construction.
+  This is lead 1's defect, real and confirmed, even though it did not cause the
+  thing it was nominated for.
+- **`AttrSrc.slow` merges two branches into one counter**, so a layout-matched
+  null slot is indistinguishable from a real slow path.
+
+Trace diagnostics (not the baseline): 86 `opt done` / 33 `opt deopt` / 24
+`opt inval.` over ~70 roots by `id=`. Hot roots `<anon>[775]` 6/5/4,
+`<anon>[1051]` 4/3/3, `find_method[499]` and `find_method[271]` 4/3/2 each,
+`infix:<+>[272]` 2/0/0. Reasons: uncommon trap 28, **`validRootAssumption local
+tags updated` 14**, dispatch site 6, JVMCI invalidate 5, Profiled Return Type 4.
+**The per-local tag signature IS present and sits on the two OSR roots — but it
+ends each loop rather than slowing it**, so tonight's third hypothesis is present
+and not culpable here.
+
+Also recorded: `docs/bench/jesp/resume-smoke.raku` has no `.expected` beside it,
+so "unchanged" is a judgement call. One file would remove it.
