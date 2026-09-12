@@ -3009,3 +3009,39 @@ to the findings doc and milestone 7:
 Operational note recorded: `--stall`/`--max` were raised to 1560 s because
 watched-run's watchdog keys on output SILENCE, and this run is silent through all
 of parse. It finished in 360 s and approached neither.
+
+**Task 12 PULLED FORWARD to next (user, 2026-09-12), out of plan order.** It sat
+at position 12 of 14, behind the cold-start profile, the green subset, the loop
+bench and the adoption edits. The user asked whether nqp-j had been imaged yet;
+it had not, and the plan's ordering is now wrong, because three findings from
+this milestone all point at imaging and the third is hours old:
+
+1. Cold start is ~4.1 s and dominated by the serial artifact load path — exactly
+   what an image heap removes.
+2. Guest-level Truffle compilation is worth **at most 17.5 %** on a real CORE.c
+   compile (360 s with compilation off against 297 s at the best setting). The JIT
+   this milestone spent its whole sweep tuning is a small prize.
+3. **Ruling 49:** the reason that penalty is 21 % rather than an order of
+   magnitude is that HotSpot never stopped compiling the INTERPRETER's own
+   bytecode, 1-5 JVMCI threads throughout. The host JIT is doing much of the
+   heavy lifting — and precompiling the interpreter is precisely what an image
+   does, without warm-up.
+
+We have spent the evening tuning guest compilation while host compilation was
+quietly doing the heavier work. That is the ranking change.
+
+Controller pre-verified so the spike does not spend time on it: `native-image` is
+present at `/usr/lib/jvm/default/bin/native-image`, `java` is Oracle GraalVM
+25.2.4, and **no image exists anywhere** in the tree or the job scratch — Task 12
+had never been dispatched (briefs ran only to task 7).
+
+Dispatched (opus) with: no-source-changes as a HARD constraint (a demanded source
+change is a finding, not an edit, because rebuilding the runtime would invalidate
+every measurement this milestone has taken); config files to scratch only; the two
+questions the brief requires answered explicitly (which kind of image, and what
+the auxiliary engine cache would actually hold given finding 2); a JVM baseline
+measured first; and a ~90-minute working time-box inside the plan's four-hour
+ceiling, on the grounds that "it would not build, and here is what it demanded" is
+a valid close.
+
+Tasks 8, 9, 10 and 11 are unaffected and still owed; none of them blocks this.
