@@ -735,6 +735,30 @@ Claude-Session: https://claude.ai/code/session_01T8zpD6QrhN6Pmp5TePheq6"
 
 ---
 
+> **Carried into Tasks 5, 6 and 7 from Task 4's review — read before
+> measuring.** Every remaining sweep compile inherits
+> `NQP_CODE_MAX_COMPILE=2069`, and therefore inherits what it does to the
+> engine's own statistics. `prepareForCompilation` answering false is a
+> RETRYABLE bailout, not a permanent one, so a refused root is
+> resubmitted indefinitely. Task 4's run recorded
+> `RetryableBailoutException: Compilable not ready for compilation` at
+> **1456361**, against **144** in the baseline, and `Compilations` at
+> **1462534** against **6358**.
+>
+> Two working rules follow:
+>
+> - **Never compare `Compilations` or `Compilation Accuracy` across
+>   configurations.** Those fields are dominated by resubmissions in
+>   every run from Task 4 onward and measure nothing you want.
+> - **Use `total-compiler-ms`, `nqp-root-ms`, `done` and `failed`
+>   instead**, which count real compilations and are unaffected.
+>
+> The knob still won on the quantities that matter, so it is carried;
+> but a later task reading a freed-capacity story into its own result
+> should remember that capacity here is churned, not freed. The proper
+> fix — marking a size-refused root permanently non-compilable — is a
+> runtime change and belongs to milestone 7.
+
 ### Task 5: Knob 2 — `engine.PartialBlockCompilation`
 
 Where Task 4 refuses a big root outright, this splits it. The two are
