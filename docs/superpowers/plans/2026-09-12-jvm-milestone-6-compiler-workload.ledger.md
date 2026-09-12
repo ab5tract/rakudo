@@ -801,3 +801,66 @@ three times in the whole log. The refusal to teach the selector the
 would set the threshold to 27 and destroy every later measurement) rather than
 only in the report. Deferred as instructed: the Task 1 wall-clock citation of
 457 s against the markers file's 460 s.
+
+Task 3: fix round 1/5 (1 Important + 2 Minor addressed, 0 open — both recursion
+chains with counts, our entry points named with file and line, speculation stated
+explicitly, promotion from candidate to lever with candidate fixes, the
+selector-refusal reasoning moved into the doc, 0.3 % -> 0.9 %, the swapped root
+times un-swapped. Commit rakudo `0c0521a538`.) The implementer went past the
+finding: it traced Chain A, which the review had NOT examined, to
+`handleCreateOp_` -> `CreateOp.doCreate` -> `NqpTypeOps.create` ->
+`VMArray.allocate` -> `ExceptionHandling.dieInternal(ExceptionHandling.kt:47)` in
+238 of 238 dumps.
+Task 3: re-review round 1 (opus) — every item ADDRESSED, no new breakage, ledger
+hunk +98/-0. It re-derived the decomposition itself by segmenting the 442
+in-trace dumps and classifying each: records=442, chainA=238, chainB=204, both=0,
+neither=0 — a clean partition, so the identity is real and not two off-by-ones.
+Cross-checks all hold (476 = 238x2 for `dieInternal`, `VMArray.allocate`,
+`NqpTypeOps.create` and `handleCreateOp_` alike; 408 = 204x2; 165+39 = 204;
+`Permanent Bailouts: 444` = 442 + the 2 too-large). **The implementer's counts
+are right and the FIRST review's 237/203/448 were wrong** — a whole-file
+top-frequency heuristic that summed to 440 with 8 unattributed, missing 2 dumps
+led by `AbstractRepository.<init>` and 3 led by `getSimpleName() [494]`, and
+counting the 6 statistics-block reprints.
+
+**Ruling 13 — my `@CompilationFinal` suggestion was wrong, and the reviewer
+showed why.** I proposed marking `noisyExceptions` `@CompilationFinal` so Graal
+would fold the branch away instead of cutting the inlining at a boundary. It
+would be a NO-OP: `@CompilationFinal` on an INSTANCE field folds only when the
+receiver is a partial-evaluation constant, and `tc` comes off the frame
+(`NqpRootNode.java:125`), so `tc.gc` is an ordinary field load and never
+constant. Folding would need a `static final` hoist — which is what every other
+env flag in the tree already is. And even hoisted it is worse ALONE than the
+boundary, because folding the flag removes only the `printStackTrace` branch
+while the rest of `dieInternal`, its 40-frame `StringBuilder` walk and its
+`VMExceptionInstance` construction, stays inlinable. Recorded conclusion:
+**`@TruffleBoundary` is the fix; a `static final` hoist is a cheap complement,
+not an alternative.** Costs if wrong: none — this replaced my suggestion with a
+better one before anyone spent a milestone on it.
+
+**Ruling 14 — my "env-gated debug prints" framing was also wrong; the milestone 7
+item is "slow paths visible to the inliner".** The reviewer surveyed all 35
+`System.getenv` sites in `nqp/src/vm/jvm/runtime` and `nqp/nqp-truffle/src`:
+every one except `GlobalContext.kt:287` is already a `val` or `static final`,
+hence foldable. `noisyExceptions` is the lone mutable instance `var` — an
+outlier, not a pattern — so the project's env-gating rule is NOT the culprit and
+must not be softened. Decisive counter-example: chain B, the larger per-root
+cost at 204 roots, has no env gate at all; it is JDK exception construction. The
+two real patterns, both milestone 7 surveys: (1) `nqp/src/vm/jvm/runtime`
+contains **zero** `@TruffleBoundary` against 113 in `nqp/nqp-truffle/src`, so
+that whole older tree is called from Truffle nodes with every slow path visible
+to the inliner, and chain A is merely the first one measured; (2) six inline
+`System.getenv()` calls on runtime paths (`Ops.kt:6834`, `Ops.kt:9026`,
+`UnitWriter.kt:33`, `NqpPolyglot.kt:54`, `NqpCodeEngine.java:93`), worse in kind
+because a `getenv` in a compiled graph cannot fold at all. Plan Task 11's
+findings-doc requirements now carry all three corrections. Costs if wrong: a
+milestone 7 survey scoped slightly wide, which is the safe direction.
+
+Task 3: minor (deferred): the findings doc renders `ExceptionHandling.kt:46`
+(the `if (tc.gc.noisyExceptions)` guard) and `:47` (the `printStackTrace()` call)
+as one line; the line cited is the call, not the guard.
+Task 3: minor (deferred): the report cites Task 1's CORE.c wall as 457 s where
+the markers file gives 460 s.
+
+Task 3: complete (commits `3db3362101`..`0c0521a538`, review clean after one fix
+round; plus controller commit `28f06cac14` reframing Task 4).
