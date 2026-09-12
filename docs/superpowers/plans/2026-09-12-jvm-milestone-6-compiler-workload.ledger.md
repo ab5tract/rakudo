@@ -2252,3 +2252,37 @@ producing zero tier-2 compiles:
 the milestone entirely. Per the user's rule this is the sweep's last compile and
 there is no confirmation build. Full report:
 .superpowers/sdd/2026-09-12-jvm-milestone-6-compiler-workload/task-7-report.md
+
+**Provenance check (user question, 2026-09-12): are Task 7's thread numbers ours
+or Truffle's, and why does thread count matter at all under Loom?** The user
+instructed that any figure originating in OUR codebase rather than in external
+Truffle defaults be removed immediately. Checked directly rather than defended.
+**Nothing is removed: every figure is Truffle's.**
+
+- `CompilerThreads` default **-1**: `iconst_m1` at offset 185 into
+  `putstatic CompilerThreads` in `OptimizedRuntimeOptions`, inside
+  `truffle-runtime-25.2.4.jar`. External.
+- The resolution to a thread count: `BackgroundCompileQueue` calls
+  `Runtime.availableProcessors()` and builds a `TruffleThreadPoolExecutor` with
+  a `TruffleCompilerThreadFactory`. Same jar. External.
+- **Our tree sets no compiler-thread count anywhere.** The sole match for the
+  option name across `nqp/src`, `nqp/nqp-truffle/src`, `tools` and `src` is a
+  COMMENT at `NqpPolyglot.kt:19`, a historical note from the engine merge saying
+  the option used to apply twice when each engine built its own context.
+
+**Why the count still matters under Java 25 / Loom, two independent reasons.**
+(1) Truffle does not use virtual threads for this pool:
+`BackgroundCompileQueue$TruffleCompilerThreadFactory` constructs a plain
+`Thread` subclass and calls `setDaemon`; there is no `ofVirtual` on that path.
+That is Truffle's construction inside its own jar, not a choice we make or can
+flag. (2) Even if it did, virtual threads would not change the result. They
+solve BLOCKING — few carrier threads servicing many waiting tasks. Graal
+compilation does not wait, it burns CPU, so N virtual compilations still need N
+cores. Task 7 measured CPU contention between the single-threaded compile driver
+and the compilation pool on a 16-core box, which is a scheduling-capacity
+question virtual threads are not about.
+
+Where this tree DOES use virtual threads is guest-level concurrency only:
+`Ops.kt:1125` (`Thread.ofVirtual().start`) and `Ops.kt:7182`
+(`Thread.ofVirtual().unstarted`), i.e. NQP-level thread creation. A separate
+axis from how the engine schedules its own compilations.
