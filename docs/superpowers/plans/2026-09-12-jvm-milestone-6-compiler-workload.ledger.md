@@ -3752,3 +3752,33 @@ and not culpable here.
 
 Also recorded: `docs/bench/jesp/resume-smoke.raku` has no `.expected` beside it,
 so "unchanged" is a judgement call. One file would remove it.
+
+**Ruling 65 — USER DECISION 2026-09-12: the rebase is PUNTED; the findings doc is
+the milestone's last deliverable.** The user's reasoning, recorded because it is
+better than "do it later": these commits are documentation plus one build-config
+change, and **nothing here is covered by a `t/spec` run, let alone a `t/` one**.
+Gating them on a rebase would prove nothing about them, and the rebase's own risk
+(57 upstream commits, a rewritten PR stack) is unrelated to what this milestone
+produced. Task 14 carries forward to whenever a code change actually needs the
+gate.
+
+Task 11: **`docs/jvm-perf-findings-2026-09.md` written** (435 lines), controller-
+authored rather than delegated, since it is a synthesis of the whole milestone.
+Every cited path verified to exist. One transcription error caught in review
+before commit: Task 5's `Stage parse` was 335.187, and I had copied the 2-thread
+run's 249.839 into that row.
+
+The doc carries, in this order: the 17.5 % ceiling as the headline; what was
+adopted and its exact scope; **what was deliberately NOT adopted and why**, all
+four; the measurement caveats up front, because every table row inherits them; the
+CORE.c configuration table; the seven-point thread curve with coverage by `id=`;
+the hot-loop section including that the plusquick regression is not established
+and that the dispatch counters cost 10-15 %; the AOT spike closed, with its five
+banked results; the FFI question answered with the user's rule as specified; and
+milestone 7's eight inherited items ranked, six of which are one pattern.
+
+It also carries a "things that cost time to learn" section: the build graph not
+expressing the nqp dependency, milestone 5's two `make` figures, the two knob
+screens, `NqpCheck`'s false rejection of experimental options, the eval server
+exporting `Compilation=false` to its children, and the two in-tree benchmarks that
+have defects of their own.
