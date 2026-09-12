@@ -1155,3 +1155,53 @@ argument this report had already withdrawn as near-tautological. It now rests on
 the same quantities the verdict does -- `total-compiler-ms` -11.5 %, `nqp-root-ms`
 -12.3 %, and the 184 -> 0 predicate outcome -- with the 3.5 % wall gain restated as
 unproven at n = 1.
+
+Task 4: fix round 2/5 (2 Important + the arithmetic addressed, 0 open — the
+retry storm written up with all three consequences and the false
+"nothing measures queue behaviour" retracted; the `Inlined Y` evidence withdrawn
+explicitly; Concern 1 rewritten off the retracted Stage-parse argument; every
+figure corrected. Commit rakudo `013c6ab67c`.)
+Task 4: re-review round 2 (opus) — all four ADDRESSED, every number re-derived
+from the logs. Retry storm independently confirmed: knob run `Compilations`
+1462534, `RetryableBailoutException: Compilable not ready for compilation`
+1456361, `Temporary Bailouts` 1456454, Accuracy 0.999130; baseline 6358 / **144**
+/ Accuracy 0.800566 — a 10113x ratio. Also reproduced exactly: 184 suppressed
+compiles (6 OSR) at 47 Y / 4423 N, small-root 5474 -> 5671 (+197) with Y
+2232 -> 2468 (+236), baseline failures >2069 = 41, and <=2069 bailouts 403 -> 408.
+
+**Ruling 20 — I was wrong about the unique-root count and the implementer was
+right to record the disagreement rather than adopt my number.** I passed along
+"30 unique roots" from an earlier review. The re-reviewer parsed the 184 gated
+compiles itself: **29 distinct `id=` call targets, 28 distinct `name[size]`
+labels**, the collapsing pair being `PERFORM-BEGIN[3274]` and
+`PERFORM-BEGIN[2085]`, which share a name but not an id. No convention yields 30.
+It also settled the convention question: the engine's `id=` identity is primary,
+because that is what the queue and the size predicate act on, while `name[size]`
+merges distinct targets — which the 29-to-28 collapse proves. Costs if wrong:
+none; the deltas were identical under every convention and no conclusion moved.
+
+**Ruling 21 — the summarizer's undercount is real, understood, and deliberately
+NOT fixed.** The implementer found the tool reads 2 low on `done`, 1 low on
+`failed` and 2 low on `inval.` against the engine's counters, and declined to
+edit a closed, reviewed artifact. The re-reviewer pinned the cause exactly:
+`truffle-trace-summary.raku:79` requires `starts-with('[engine] opt ')`, so a
+trace line Truffle wrote INTO a `Stage X :` line is binned as non-trace and
+`unparsed` stays 0. Baseline has 3 such lines, the knob run 4, which reproduces
+every discrepancy exactly. Declining to edit is correct: Tasks 1 and 3 were
+summarized with this tool, and changing it mid-sweep would break comparability
+for a 0.03 % error against deltas of +13 and -36. One nuance now carried into the
+plan: it is NOT a constant bias (3 versus 4 lines), so no later task may correct
+by a fixed offset — read the statistics block instead. Costs if wrong: nothing;
+the error is two orders of magnitude below every delta being compared.
+
+Task 4: complete (commits `f72f4be91e`..`013c6ab67c`, review clean after two fix
+rounds; plus controller commits `6d68f22697`, `8240de93f5` and this one).
+**Three conditions travel with the knob into Tasks 5-7**, per the re-review:
+(1) `Compilations` and `Compilation Accuracy` are poisoned for every downstream
+run inheriting `NQP_CODE_MAX_COMPILE` — compare `Success`, `Permanent Bailouts`
+and `total-compiler-ms` only, and this is the one that will bite if forgotten
+because those fields look authoritative; (2) the threshold is sensitive, 2069
+sitting directly beneath `PERFORM-BEGIN[2085]` at 26 compiles and 41.8 s, so an
+encoder change moves roots across it and no later task may read the knob as pure
+subtraction; (3) milestone 7's deep-inlining lever is 442 baseline / 447 forward,
+not 408 — the cluster was hidden, not fixed.
