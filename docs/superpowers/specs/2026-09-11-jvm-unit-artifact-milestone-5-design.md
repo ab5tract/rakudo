@@ -146,8 +146,11 @@ Every attribute is one of `REF`, `INT`, `NUM`, `STR`, `BIGINT`,
 slots with plain objects. This is what the six flattening REPRs express
 today through their ASM hooks; each keeps one hook instead, "the kind of
 my inlined slot", plus the two description hooks it already has and the
-inlined serialize/deserialize pair retargeted at `(object, slot)`. A
-`CPointer` box target is an `INT` slot.
+inlined serialize/deserialize pair retargeted at `(object, slot)`.
+(Corrected 2026-09-12: this paragraph used to end "a `CPointer` box
+target is an `INT` slot". `CPointer` was never a legal box target — the
+old road's hook for it was dead code, and it was deleted rather than
+carried over.)
 
 ### The layout, our Shape
 
@@ -396,11 +399,19 @@ runtime jar rebuild.
   `NQP_LAYOUT_STATS=1` prints layouts, variants and pinned sites at exit.
 - **Interop:** exception translation as today with `cf.leave()` on both
   paths; a member with an unsupported parameter shape refuses at
-  plan-build time with the member's descriptor, not at call time.
+  plan-build time with the member's descriptor. (Corrected 2026-09-12:
+  one member whose handle the lookup *refuses* — `unreflect` throwing
+  `IllegalAccessException` for a public member of a class this module
+  may not reach — does not refuse at plan-build time, because that would
+  cost its whole class its interop; it gets an `UnusablePlan` that dies
+  at call time naming the member, and every other member of the class
+  keeps its road.)
 - **Diagnostics,** all env-gated, never a bare print:
   `NQP_LAYOUT_TRACE=1` (layout creation, each rebless with before/after
-  class and slot lists), `NQP_INTEROP_TRACE=1` (multi-dispatch plan
-  selection).
+  class and slot lists). (Corrected 2026-09-12: this bullet also
+  promised `NQP_INTEROP_TRACE=1` for multi-dispatch plan selection. It
+  was never implemented and is struck rather than added — the plan
+  cache's misses are not a road anyone has needed to watch.)
 - **Ruled out:** any fallback to the old road. There is no generated
   class to fall back to; the milestone is all-or-nothing like the unit
   road was.
@@ -539,9 +550,11 @@ reading (`variants <= reblesses`, for the one legitimate compiler mixin
 | runtime jar directory | 7 jars, **no `asm*.jar`** |
 | ASM / `ByteClassLoader` / `defineClass` greps | all empty in both trees |
 | nqp suite (`testNqp`) | 151 files, 13182 tests; **the same nine pre-existing reds** as the pre-milestone-5 runtime |
-| `nqp/t/jvm/17-object-layout.t` | 47/47 |
+| `nqp/t/jvm/17-object-layout.t` | **50/50** (the file grew three uint cases with the encoder fix) |
 | `nqp/t/jvm/18-rebless-layout.t` | 14/14 |
-| `t/02-rakudo/mixin-identity.t` | 8/8 |
+| `t/02-rakudo/mixin-identity.t` | **9/9**, one todo — the review's "`does` keeps `WHICH`" assertion is red on MoarVM too (`.WHICH` carries `.^name`, which a mixin changes; only the object id survives, and the `===` beside it pins that), so it stands as a todo naming the reason rather than weakened |
+| `t/02-rakudo/native-argument-snapshot.t` | **9/9** (after the encoder fix below) |
+| `t/02-rakudo/native-uint-attribute.t` | **7/7** (new with that fix) |
 | `nqp/t/serialization/04-repossession.t` | **20/22 + 2 reader skips** — it could not run at all before (it died at line 18 on a delegate cast) |
 
 The nine pre-existing nqp reds, classified against a throwaway
@@ -584,9 +597,13 @@ corekeys/settingkeys cluster less 6d — `03-corekeys.t`, `03-corekeys-6c/6d/6e.
 
 *New, each confirmed by a solo run* (3):
 
-1. **`t/02-rakudo/native-argument-snapshot.t` 1/9 — a milestone-5
-   regression, and the one real finding of this gate.** An **unsigned**
-   native attribute throws
+1. **`t/02-rakudo/native-argument-snapshot.t` 1/9 — read at the time as a
+   milestone-5 regression; it was not one.** (Corrected 2026-09-12: the
+   cause was a pre-existing `TruffleEncoder` bug, byte-identical since
+   milestone 4 and older than the layout work — see "Fix (2026-09-12)"
+   below. Neither of task 2's kept UINT rulings is implicated; the
+   paragraph below is left as the gate wrote it, suspicions included.)
+   An **unsigned** native attribute throws
    `java.lang.ArrayIndexOutOfBoundsException: Index 15 out of bounds for length 15`.
    `int` and `int32` attributes are fine; `uint` and `uint32` are not.
    Minimal reproducers:
@@ -599,13 +616,14 @@ corekeys/settingkeys cluster less 6d — `03-corekeys.t`, `03-corekeys-6c/6d/6e.
    #   -> java.lang.IllegalStateException: nqpp: unknown tag 51 at 128 of 160 words
    ```
 
-   The suspect is the pair of UINT rulings task 2 took (a UINT box target
-   routed to `unboxIntSlot`; `set_int`/`set_uint` masking through
-   `sizedValue`), both of which were kept on the argument that no such
-   type exists in stage0 or CORE.c — true of the built setting, but not
-   of user code. The test dates from 2026-07-06, so it was green through
-   milestone 4. **Not fixed here** (task 7 does not touch runtime code);
-   it is the first item for whoever opens the next session.
+   The suspect at the time was the pair of UINT rulings task 2 took (a
+   UINT box target routed to `unboxIntSlot`; `set_int`/`set_uint`
+   masking through `sizedValue`), both of which were kept on the
+   argument that no such type exists in stage0 or CORE.c — true of the
+   built setting, but not of user code. The test dates from 2026-07-06,
+   so it was green through milestone 4. **That suspicion was wrong**: the
+   bug was in the encoder's callsite flags and neither ruling is
+   implicated. Fixed in nqp `7e7aaca61`; see "Fix (2026-09-12)".
 2. **`t/02-rakudo/long-int-literal.t` 8/33.** Dies compiling `-Ⅼ`
    (U+216C) with `Confused`. A Unicode numeric-literal parse problem with
    no connection to the object layout; the file dates from 2026-09-06,
@@ -665,10 +683,11 @@ object already in the SC), with that reason in the skip text, exactly as
 
 ### Parked residuals
 
-One milestone-5 regression is open — **unsigned native attributes**
-(`t/02-rakudo/native-argument-snapshot.t`, above); it is the next
-session's first item, not a parked residual. The rest are real, narrow,
-and none of them milestone-5 regressions:
+**No milestone-5 regression is open.** The one candidate — unsigned
+native attributes (`t/02-rakudo/native-argument-snapshot.t`, above) —
+turned out to be a pre-existing encoder bug and is fixed (nqp
+`7e7aaca61`, "Fix (2026-09-12)"). What remains is real, narrow, and none
+of it a milestone-5 regression:
 
 - **`t/02-rakudo/native-return-coercion.t` 19/23**, unchanged from
   milestone 4 (reds #7, #17, #18, #19, all `dies-ok` cases about boxed
@@ -687,22 +706,24 @@ and none of them milestone-5 regressions:
 - The task-3 site minors (stale `NqpDispatch` comments; `DecontSite`
   never `miss()`ing on a layout mismatch; `resolveBigInt` indexing
   `kinds[unboxIntSlot]` unchecked; `BigIntSite` not re-verifying
-  `rd.layout === layout`; `AttrSite`'s unfenced triple publication, an
-  inherited shape) and the task-5 interop minors (an `unreflect` failure
-  on a public method of a non-public declaring class fails the whole
-  class at plan-build time where the old road failed at first call;
-  interop test cases that never read the exact cache). The ledger's
-  "Deferred minors" section has the whole list.
+  `rd.layout === layout`) and one task-5 interop minor (interop test
+  cases that never read the exact cache). The ledger's "Deferred minors"
+  section has the whole list. Two of that list are **no longer parked**:
+  the final review's fix wave (2026-09-12) published each `AttrSite`
+  entry through one immutable holder, so the key and the handles can no
+  longer be read torn, and gave a member whose handle `unreflect`
+  refuses an `UnusablePlan` that dies at call time instead of failing
+  its whole class's interop at plan-build time.
 
 Out of scope and still out: `DynamicObject`/`Shape`, an `Assumption` per
 STable, polyglot `InteropLibrary` exports, Native Image, t/spec.
 
 ### Next
 
-First the unsigned-native-attribute regression above (a runtime fix in
-task 2's territory, with `native-argument-snapshot.t` as its gate), then
-the perf measurement session (truffle-only plan item 4, the compiler's
-own workload), then the engine merge — one Truffle language.
+The unsigned-native-attribute failure is fixed (it was an encoder bug,
+not a runtime one), so the next item is the perf measurement session
+(truffle-only plan item 4, the compiler's own workload), and then the
+engine merge — one Truffle language.
 
 ### Fix (2026-09-12)
 

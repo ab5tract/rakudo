@@ -343,7 +343,9 @@ None of these blocked a task; each is recorded so it is not rediscovered.
   on a layout mismatch (a perf nit, not a correctness one);
   `NqpTypeOps.resolveBigInt` indexes `kinds[unboxIntSlot]` unchecked;
   `BigIntSite` does not re-verify `rd.layout === layout`; `AttrSite`'s
-  triple publication is unfenced (an inherited shape, not new).
+  triple publication is unfenced (an inherited shape, not new) — *this
+  last one was fixed in the final review's wave, 2026-09-12: one
+  immutable `AttrEntry` per resolution.*
 - **Task 4.** A dead `RakuObjectREPRData`-era import in `Binder.kt` (left
   deliberately: a settings rebuild is not worth one import, and task 6
   rebuilt anyway); the `variants <= reblesses` gate was measured on
@@ -356,26 +358,70 @@ None of these blocked a task; each is recorded so it is not rediscovered.
   in the fix round); an `unreflect` failure on a public method of a
   non-public declaring class fails the whole class at plan-build time
   where the old road failed at the first call (probed clean over 12
-  classes / ~600 members); a `dispatchName()` accessor.
+  classes / ~600 members) — *fixed in the final review's wave,
+  2026-09-12: such a member gets an `UnusablePlan` that dies at call
+  time*; a `dispatchName()` accessor.
 - **Task 6.** The rakudo-side asm jar names and the dead nqp-j runners —
   both closed in task 7, above.
 
 ## Close (2026-09-12)
 
-Heads: nqp `739ce7517` → `a927b5fa1`, rakudo `b64c52cb1c` → the docs
-commit below.
+Heads: nqp `739ce7517` → `df564ddbb`, rakudo `b64c52cb1c` → this
+commit. (The task-7 close read `a927b5fa1` / the docs commit below; the
+uint fix, nqp `7e7aaca61` + rakudo `edfd05c484`, and then the final
+review's fix wave landed on top, none of them rewriting anything.)
 
 The closing t/ sweep: 420 files, 6039 s, `EXIT=1 verdict=ok`, 22 files
 red — **2 fixed** since milestone 4 (`04-settingkeys-6d.t`,
 `36-rakuast-begin-compiled-remark.t`) and **3 new**, each confirmed by a
-solo re-run. One of the three is a real milestone-5 regression:
-**unsigned native attributes** (`uint`, `uint32`) throw
-`ArrayIndexOutOfBoundsException` when boxed and die with
-`nqpp: unknown tag 51` when written — `int` and `int32` are unaffected,
-and the suspects are task 2's two kept UINT rulings (findings 3 and 4),
-whose justification was "no such type in stage0 or CORE.c", true of the
-setting but not of user code. `t/02-rakudo/native-argument-snapshot.t`
-(1/9) is its gate. Not fixed in task 7, which touches no runtime code.
+solo re-run. One of the three read as a milestone-5 regression —
+**unsigned native attributes** (`uint`, `uint32`) throwing
+`ArrayIndexOutOfBoundsException` when boxed and dying with
+`nqpp: unknown tag 51` when written, `int` and `int32` unaffected — and
+the suspects named here were task 2's two kept UINT rulings (findings 3
+and 4). **That attribution was wrong, and the milestone has no open
+regression.** The cause was a pre-existing `TruffleEncoder` bug:
+`encode_args` patched the callsite argument flag with the wire RESULT
+type, and `$T_UINT` is 4, which is that flag's NAMED bit, so a
+positional uint decoded as a named object argument and the reader ate
+the following word as a pool index. The encoder is byte-identical
+between the milestone-4 head (nqp `739ce7517`) and this milestone's, so
+the bug is older than the layout work; milestone 4's task 11 had seen
+the file red and cleared it as a cold-run artifact. Fixed in nqp
+`7e7aaca61` (uint arguments travel in the int slot; only a uint RESULT
+stays `$T_UINT`), with `t/02-rakudo/native-argument-snapshot.t` back at
+**9/9** and a new `native-uint-attribute.t` at **7/7**. Neither of task
+2's UINT rulings is implicated.
+
+**Final review (2026-09-12) and its fix wave.** The whole-branch review
+came back "with fixes": five Important findings and one
+fix-before-merge, all landed as new commits on top of the heads above
+(nothing rewritten). (1) `RakuObjectREPRData.layoutFor` built its
+variant map lazily in a plain `HashMap` on the rebless road, so two
+threads reblessing into one type could each build a variant layout for
+the same storage class and lose one of the maps — it is an eagerly
+initialised `ConcurrentHashMap` with `computeIfAbsent` now. (2) An
+`AttrSite` published its key (`resolved`, `ch`, `name`) and its handles
+as separate fields, so a reader could see a new key beside the old
+handles; each resolution is now one immutable `AttrEntry`
+(layout + handles + key) stored into one `@CompilationFinal` reference,
+which also makes the BUILDALL guard implicit and retires `sameKey` /
+`sameKeyOrUnset`. (3) `createPlans` failed a whole class's interop when
+`unreflect` refused one member; such a member now gets an
+`UnusablePlan` that dies at call time naming it. (4) `encode_args`
+refuses an argument flag outside 0..3, so the next flag/type confusion
+cannot slip a stream silently. (5) These records were corrected (this
+paragraph, the spec's `## Done`, and `docs/jvm-truffle-only-plan.md`
+row 9). Fix-before-merge: `t/02-rakudo/mixin-identity.t` now carries the
+`does` keeps `WHICH` assertion the review asked for — and it is red,
+**as it is on MoarVM too**: `.WHICH` is `.^name ~ '|' ~ nqp::objectid`,
+`does` changes the type in place, and stock `raku` answers
+`Foo+{Modified}|<id>` against `Foo|<id>` for exactly this program
+(checked 2026-09-12). The object-id half *is* preserved, which is what
+the `===` test beside it pins. Rather than weaken the assertion to the
+id half, it stands as a `todo` naming that reason, so the file is 9/9
+with one todo and the expectation stays visible. Everything else the
+review raised is parked for the perf session or the next milestone.
 
 The gate numbers, the bench table and the full sweep diff are
 written up in the spec's "Done (2026-09-12)" section
