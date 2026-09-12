@@ -595,6 +595,28 @@ root at or above the smallest size that actually failed to install will
 also fail, so refusing it up front costs nothing. Record the arithmetic
 in the ledger.
 
+**Do not read the number alone.** Read the `--- failures by reason ---`
+block, the `by size:` list and the `unclassified failure reasons` block
+beside it, and record in the ledger what you saw there. Two checks, both
+cheap:
+
+- **Is the minimum plausible against its neighbours?** If the smallest
+  root is orders of magnitude below the next entry in `by size:`, find
+  out which reason matched it before trusting it. A threshold set from a
+  spuriously tiny root would refuse nearly every compilation on this
+  run, which does not bias the measurement, it destroys it.
+- **Did anything land in the unclassified block?** That block exists to
+  make an unrecognised size-bailout spelling loud. If it names a reason
+  that is plainly about size, the selector needs that spelling and the
+  minimum currently reads high.
+
+Task 2's review established the selector matches only the two spellings
+verified to exist in this tree: `code is too large` from the trace, and
+`too big to safely compile` from `libjvmcicompiler.so`. Anything else is
+deliberately left to the unclassified block and a human, because a
+guessed-at loose substring converts a loud unknown into a silent wrong
+answer.
+
 If Task 3 reported `min-too-large-size=none`, this knob has nothing to
 act on: record that, skip to Task 5, and note in the findings doc that
 the 2026-09-07 observation did not reproduce.
