@@ -2149,3 +2149,106 @@ inconsistency, rated it Major rather than Critical because no number, verdict or
 shipping claim depends on it, and it does not. Costs if wrong: nothing now; had
 it gone unfixed, milestone 7 would have inherited an overstated prior about its
 own third lever.
+
+Task 6 (clean): re-review round 1 (opus) — items 1-3 ADDRESSED and independently
+re-verified (`Splits : 0` read at the cited lines; the retry explanation checked
+rather than accepted, with volume arithmetic 144 x 3853/6358 = 87.3 against 44
+observed and `Tier 2` trace lines 1379 -> 1; both phrasing fixes reproduce, flush
+distances 9942/16939/9243 confirmed). Item 4 refusal upheld. One Major finding,
+the ruling-34 inconsistency, resolved by ruling 37 rather than a further fix
+round, at the reviewer's own recommendation. Ledger hunk 110/0, prior content
+byte-unaltered.
+Two nits it recorded as immaterial: "submissions fell 39 %" uses `Compilations`
+while `Queues` fell 75 % (16196 -> 4098), so the stated figure is the conservative
+one; and "tier-2 promotions are its classic source" is a mechanism assertion the
+aggregate count cannot prove, appropriately hedged, with the quantitative claim
+resting on volume.
+
+Task 6 (clean): complete (commits `09f52a45b0`..`3b216f6311`, review clean after
+one fix round; plus controller commits `c4a7ab4197` and `b4dfe0a4de`).
+**This is the milestone's shipping number: wall 434 -> 337 s (-22.4 %),
+total-compiler-ms 2143944 -> 783440 (-63.5 %), from tier policy alone,
+build-side only.**
+
+Task 7: implementer dispatched (opus); BASE rakudo `b4dfe0a4de`. Baseline is Task
+6 CLEAN (not Task 3, not the combination run): the thread knob is layered on the
+adopted tier policy. Both screens mandatory first. Note that Task 4's review
+predicted a flat wall clock would demote this knob before it ran; that did not
+happen — wall tracked compiler work in both Task 4 and Task 6, so contention is
+real and the knob is worth its compile. At 783 s of compiler work across a 337 s
+wall the engine is still running about 2.3 cores.
+
+Task 7: KEEP. `engine.CompilerThreads=3` layered on the adopted tier policy.
+Wall 337 -> 327 s (-10 s, -2.97 %); total-compiler-ms 783440 -> 619075
+(-164365, -21.0 %); nqp-root-ms 727228 -> 565834 (-22.2 %); Success 3334 -> 3000
+(-334); Permanent Bailouts 372 -> 366 (statistics channel; summarizer 366, raw
+grep 370); Utilization 2.501061 -> 1.996044; Splits 0 -> 0; tier-2 compiles 0 on
+both sides. Stages: parse 253.998 -> 248.832, optimize 32.017 -> 27.217, qast
+25.389 -> 25.524, unit 23.476 -> 24.030, stage sum 334.881 -> 325.604 (-9.277);
+optimize/qast/unit again recovered from their flushed value lines (356808,
+374643, 383918) per the Task 3 --stagestats artifact. One compile, EXIT=0,
+elapsed=327s, blib untouched, NQP_CODE_MAX_COMPILE unset (empty `env` grep plus
+an explicit `unset` in the driver).
+
+Task 7 SCREEN A: the declared default is -1 (`OptimizedRuntimeOptions.<clinit>`,
+`iconst_m1`), not 0 and not a literal count; the option is STABLE, not
+experimental (its descriptor says so — only the tier options it rides with are).
+`BackgroundCompileQueue`'s constructor resolves -1 as
+`max(1, min(procs/4 + log2(max(log2(procs),1)), 16))`, which at procs=16 is
+**6**, and 6 was then OBSERVED at runtime on this box in a control run with no
+CompilerThreads option (`/proc/<pid>/task/*/comm`, 5 consecutive samples). The
+brief's `cores/2` = 8 would therefore have been a 33 % INCREASE over the real
+default and would have probed the opposite direction; 3 was chosen instead as a
+clean halving of the true default that still sits just above the baseline's
+measured average demand (Utilization 2.50), so bursts queue but steady state
+does not starve. 2 was rejected as below average demand.
+
+Task 7 SCREEN B: implemented in `com.oracle.truffle.runtime.BackgroundCompileQueue`,
+read once at pool construction via `OptimizedCallTarget.getOptionValue` and used
+as both core and max size of `BackgroundCompileQueue$TruffleThreadPoolExecutor`
+(threads named `TruffleCompilerThread`). On our path: that same class emits the
+Queues/Dequeues/Time-waiting-in-queue lines present in both this run's and the
+baseline's statistics blocks. Only three classes in the jar reference the option.
+
+Task 7 IN FORCE, three channels, one direct: (a) 14 `/proc` samples spanning the
+whole 327 s compile, every one showing exactly 3 `TruffleCompiler` threads
+against the 6 observed under the default — a plain file read, no JVMCI attach,
+so it cannot perturb the wall it sits beside; (b) Utilization 2.501061 ->
+1.996044, structurally bounded by 3; (c) `Time waiting in queue` average
+54 184.82 -> 1 900 656.61 ns, a 35x rise. The probe's missing
+`nqp-code check passed` marker was NOT treated as a signal; real-path acceptance
+was verified with `nqp-j-gradle -e 'say("engine-ok")'`.
+
+Task 7 mechanism, labelled a FIT to observed quantities and not asserted (ruling
+5 — the trace records no enqueue events; every number below is a statistics-block
+counter, not an inference): Queues 4098 -> 4726, Dequeues 343 -> 1343 of which
+`Stale compilation task` 190 -> 1137, Compilations 3853 -> 3422, Queue Accuracy
+0.916301 -> 0.715827, retryable "not ready" 44 -> 2. Capacity halved, each task
+waits ~35x longer, far more tasks are stale when a thread reaches them and are
+dropped rather than compiled. Consequence for how the win is described: a large
+share of the -21 % is **compilation never performed**, not contention relieved —
+clean for a run-once 327 s build whose dropped compiles were servicing
+superseded targets, and NOT transferable to a long-lived Rakudo process. Neither
+of the dispatch's two predicted outcomes occurred in pure form: wall fell
+modestly AND less compilation was done, with no wall penalty from the drop.
+
+Task 7 caveat carried forward: `CompilerThreads=3` is hardware-specific. The
+default formula gives 6 at 16 cores but only 2 at 4 cores, so a literal 3 would
+RAISE the thread count on a small machine. Task 11 should adopt it as a value
+measured on this box, or guard it by core count.
+
+**Knobs in force at the end of the sweep (this run's exact set):**
+
+    -Dpolyglot.engine.Mode=latency -Dpolyglot.engine.FirstTierCompilationThreshold=1600 -Dpolyglot.engine.LastTierCompilationThreshold=40000 -Dpolyglot.engine.CompilerThreads=3
+
+**The line Task 11 adopts** — identical minus `LastTierCompilationThreshold`,
+which Task 6 established is parsed but structurally inert under `Mode=latency`
+(`firstTierOnly` forces its gate false) and which this run re-confirms inert by
+producing zero tier-2 compiles:
+
+    -Dpolyglot.engine.Mode=latency -Dpolyglot.engine.FirstTierCompilationThreshold=1600 -Dpolyglot.engine.CompilerThreads=3
+
+`NQP_CODE_MAX_COMPILE` is not in the shipping configuration; it was dropped from
+the milestone entirely. Per the user's rule this is the sweep's last compile and
+there is no confirmation build. Full report:
+.superpowers/sdd/2026-09-12-jvm-milestone-6-compiler-workload/task-7-report.md
