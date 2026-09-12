@@ -2105,3 +2105,47 @@ each block a handful of times pays warm-up costs it never amortises. Candidate
 directions, none investigated: pre-seeding local tags for known-polymorphic
 roots; widening tags eagerly rather than on first violation; or accepting boxed
 locals in the encoder's own hot roots to trade peak speed for stability.
+
+**Ruling 37 — SUPERSEDES RULING 34. My defect-independence argument was half
+sound, and I drew the line generously toward myself.** I asked the re-review to
+adjudicate my own narrowing and to say bluntly if I was rationalising. It did,
+and it was right on both counts.
+
+What is sound: the refusal PREDICATE is size-only, so which roots the knob
+*refuses* is genuinely defect-independent.
+
+What I over-read: the check does not diff the refusal set. It diffs the set of
+roots **actually compiled**, which is downstream of queue dynamics the defect
+demonstrably perturbed — 2.08 M resubmissions, Utilization 5.22 against 2.50,
+Dequeues 389 against 343. Compilation counts are threshold- and time-driven, so
+`encode_var[6418]` at 13x against 0x is precisely the quantity MOST exposed to
+that perturbation, not a function of the size predicate at all.
+
+The leak my own figures contained: 149 unique-to-clean minus 131 over-threshold
+leaves **18 sub-threshold compiles** the size predicate does not explain and the
+defect does — and the "exactly the Success delta" equality holds only because
+those 18 are silently offset by 18 unique-to-combination compiles. I quoted the
+equality as though it were a clean identity.
+
+So the defensible claim is narrower than ruling 34 states: **direction and rough
+population size are robust; the exact equality and the 13x multiplicity are
+not.** Ruling 34 is therefore reworded here rather than deleted, since it remains
+a good hypothesis for milestone 7:
+
+- "CONFIRMED at the mechanism level" -> **CONSISTENT, pending milestone 7**.
+- "exactly the Success delta (3334 - 3203 = 131)" -> 131 over-threshold roots
+  against a Success delta of 131, an equality that depends on an 18-compile churn
+  term cancelling, not on the size predicate.
+- "the strongest form of evidence this milestone has produced" -> **struck**. It
+  is not. The strongest evidence this milestone produced is the replicate pair's
+  noise floor and the tier-2 elimination verified to the millisecond.
+- The +139126 ms aggregate (~1062 ms per compile) -> **struck entirely**, as
+  ruling 36 said it would be and as the committed text did not do.
+
+Recorded process failure, not just a content one: ruling 36 described a narrowing
+that the already-committed ruling 34 did not implement, and I did not check the
+committed text against the narrowing I had just written. The reviewer caught the
+inconsistency, rated it Major rather than Critical because no number, verdict or
+shipping claim depends on it, and it does not. Costs if wrong: nothing now; had
+it gone unfixed, milestone 7 would have inherited an overstated prior about its
+own third lever.
