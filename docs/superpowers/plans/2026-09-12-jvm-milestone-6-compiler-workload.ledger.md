@@ -3045,3 +3045,41 @@ ceiling, on the grounds that "it would not build, and here is what it demanded" 
 a valid close.
 
 Tasks 8, 9, 10 and 11 are unaffected and still owed; none of them blocks this.
+
+**Task 12 SCOPE EXTENDED mid-task (user, 2026-09-12): keep the image, and compile
+CORE.c with it at `CompilerThreads=1`.** Two parts, sent to the running agent.
+(a) The binary must NOT be deleted — it survives inside the job for part (b),
+though the "no kept binary" rule still holds for the tree and anything durable.
+(b) **The new headline measurement: CORE.c compiled by the native image with the
+adopted tier policy and one compiler thread**, ranked ahead of the nqp startup
+numbers.
+
+**Why this is even possible, and why nobody has tested it.** CORE.c is Rakudo's
+setting, compiled by `rakudo.jar`, and the spike images nqp alone. But since
+unit-artifact milestone 4 **every unit jar is `unit.meta`-only with zero `.class`
+files** — units are DATA (wire programs plus a serialized context), and runners
+enter through `org.raku.nqp.runtime.unit.UnitMain <unit jar>`. So an image
+containing the nqp RUNTIME, engine and language may load `rakudo.jar` as data at
+run time and compile CORE.c without Rakudo having existed at image-build time.
+**That is exactly what the artifact road was built for, and it has never been
+tried.**
+
+Baselines to beat, all measured tonight on the JVM with the same tier policy:
+**297 s at 1 thread**, 337 s at the default 6, 360 s with compilation off.
+
+**Controller expectation, registered before the result and genuinely uncertain in
+BOTH directions.** The image removes HotSpot's warm-up of the interpreter, which
+ruling 49 says is doing much of the heavy lifting. But AOT-compiled code is
+typically slower at peak than fully-warmed JIT code, and a 300-second compile
+gives HotSpot enormous time to warm. **The image could plausibly LOSE on a
+workload this long while winning handsomely on short ones.** The agent was told
+not to smooth the result toward either story.
+
+If the image cannot run Rakudo at all, that is a first-class finding and was
+demanded precisely — which class, reflection registration, resource, service
+loader, FFM downcall or serialization-reader feature it refuses on. **That list is
+the real measure of how far a full Rakudo image is, and we have never had it.**
+The no-source-changes constraint is NOT relaxed for this; a demanded source change
+remains a finding.
+
+Time-box extended to ~2.5 hours of working time for the added scope.
