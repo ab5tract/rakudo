@@ -2032,3 +2032,76 @@ milestone 7; the objection is jurisdictional, not technical. This run's verdict
 rests on Task 3 alone. Relaxing ruling 33 is a user decision.
 Also noted: the report never had a "prediction section" to strengthen — ruling 33
 had directed the clean run be measured against Task 3 alone, so none was written.
+
+Task 6 (clean): fix round 1/5 (4 items, 3 adopted, 1 REFUSED WITH REASON — commit
+rakudo `3b216f6311`). The implementer verified `Splits : 0` in both logs itself
+rather than taking it from the controller, struck concern 2, explained the retry
+drop (volume alone predicts ~87 against 44 observed, so promotions-to-zero
+accounts for the rest), and corrected both phrasing nits with measured distances
+(the collided stage values flush 9942 / 16939 / 9243 lines after their labels,
+not on the following line).
+
+**Ruling 36 — the implementer was RIGHT to refuse the prediction item into its
+report, and I am narrowing ruling 34 rather than overriding it.** It objected
+that the root-multiset check is a cross-run comparison against the
+broken-knob run — the comparison ruling 33 postponed, on the run ruling 18 called
+meaningless for cross-configuration use — and that relaxing a user ruling is not
+a controller's call to make inside a task report. It recorded the check as
+reviewer-supplied, did not adopt it, filed it for milestone 7, and flagged it in
+two places so the user can reverse it in one. That is the correct handling of a
+boundary it could not itself move, and better than quietly complying.
+
+My narrowing, with the distinction that matters: **the refusal SET is
+defect-independent.** Which roots the knob refuses is decided entirely by
+`programSize <= MAX_COMPILE_SIZE`; whether the refusal is retryable or permanent
+changes how much waste it causes, not which roots are affected. So the
+set-membership half of the check — 131 roots at or above 2069 compiling here and
+not there, `encode_var[6418]` 13 times against 0 — is admissible and does not
+reopen what the user closed. The millisecond aggregate (+139126 ms) IS a
+cross-run performance figure and stays out of any marginal-value claim; it is
+retained only as an internal coherence check (~1062 ms per compile, consistent
+with roots of that size).
+
+Where it lives, therefore: in THIS ledger as a controller record of a
+pre-registered prediction, explicitly NOT as a marginal-value claim, and NOT in
+the findings doc's tier-policy row, which stands against Task 3 alone as ruling
+33 directs. The clean run's own report correctly carries none of it. The scoped
+re-review is asked to adjudicate this independently, since it is my own
+prediction being verified and I should not be the only judge of whether its
+evidence is admissible.
+
+**Milestone 7 lever #3, found by a user question (2026-09-12): deoptimisation
+churn.** The user asked why `encode_var[6418]` is compiled 13 times in a single
+process. Checked directly in the clean run's trace rather than reasoned about:
+
+- **One call-target id** (`id=3067`), so it is not distinct roots sharing a
+  name[size] label. It is the same target compiled and discarded repeatedly.
+- Its event counts: **13 `done`, 11 `deopt`, 8 `inval.`**
+- Its reasons: **10 `uncommon trap`**, **6 `validRootAssumption local tags
+  updated`**, 1 `Profiled Return Type`, 1 `JVMCI invalidate`, 1 `dispatch site`.
+
+Two distinct causes, and the second is specific to how this interpreter is built.
+Uncommon traps are ordinary speculation failures: Graal optimises away paths not
+yet seen, the code meets one, and it falls back. `validRootAssumption local tags
+updated` is the **Bytecode DSL's** per-local type-tag guard: it tracks a tag per
+local to keep values unboxed, guarded by a per-root assumption, and observing a
+local hold a type outside its tag set invalidates the whole root's code.
+
+`encode_var` is the worst case for both: it handles every variable form the
+encoder meets — lexical, local, contextual, attribute, across value types — so
+each new shape can widen a tag or break a speculation, and each costs a full
+recompile of a 6418-word root. On a run-once compile it never reaches the stable
+state it is converging towards.
+
+Whole-run reason counts (clean run): `Unknown` 2030, `uncommon trap` 1192,
+`dispatch site` 580, `JVMCI invalidate` 539, `validRootAssumption local tags
+updated` 245, `Profiled Return Type` 113, `missing exception handler` 6,
+`Profiled Argument Types` 1. **Caveat: the largest bucket is `Unknown`, so the
+aggregate is suggestive; the per-root figures above are exact.**
+
+This is independent of milestone 7's other two levers (the permanent-refusal fix
+and the 442-root inlining bailout) and shares their theme: a compiler that runs
+each block a handful of times pays warm-up costs it never amortises. Candidate
+directions, none investigated: pre-seeding local tags for known-polymorphic
+roots; widening tags eagerly rather than on first violation; or accepting boxed
+locals in the encoder's own hot roots to trade peak speed for stability.
