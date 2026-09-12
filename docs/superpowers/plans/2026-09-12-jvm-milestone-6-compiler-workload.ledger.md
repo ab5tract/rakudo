@@ -260,3 +260,35 @@ Task 1: minor (deferred, for the final review): the implementer speculated that
 the 1122 s gap was "the Configure regeneration plus a fully cold gen/" without
 checking the M5 record for a second figure; the diligence it applied to CORE.c
 was not applied one row up, where it mattered most.
+
+Task 1: fix round 1/5 (2 addressed, 0 open — comparator swapped to M5's 1133 s
+clean figure with the method in the row label; "What 1122 s is, in words"
+subsection naming Configure.pl + `make clean` + `make`; plus the
+gen/jvm/BOOTSTRAP accuracy correction and the benign-cp sentence; commit rakudo
+`aa0169ed5a` amended to `1477806f7b`).
+Task 1: re-review (opus) — FINDING 1 ADDRESSED, FINDING 2 ADDRESSED, accuracy
+sub-item PRESENT, benign-cp sentence PRESENT, NEW BREAKAGE NONE. Diff was 110
+insertions / 9 deletions in one file; all nine deletions inside the implementer's
+own entry and exactly the passages the findings required removing. Controller
+blocks verified intact and consistent with the same correction now in the plan
+and the spec. Ruling 5's arithmetic re-checked independently (150+29+398+457+82
+= 1116).
+
+**Controller annotation (re-review Minor, closed here rather than in a fix
+round).** The implementer's status line above still reads `make 1122 s (M5
+1054)` with an unqualified comparator. That comparison is RETRACTED: read it as
+**M5 1133 s clean; 1054 s was incremental**, per Ruling 5. The line stays as the
+historical record of what was first reported. Minor findings do not enter the
+fix loop, and curating this ledger is the controller's job, not the
+implementer's.
+
+Task 1: minor (deferred): the deferred-minor line about the unreported `cp`
+message is now stale — the fix added exactly that sentence. Left standing
+because it is a controller line and the record of what the review found.
+Task 1: minor (deferred): the baseline table's column header is a bare
+"milestone 5"; it is unambiguous only because the make row carries its method in
+the row label. Other rows state no method. A future table should put the method
+in the header.
+
+Task 1: complete (commits `0a43dbed1e`..`1477806f7b`, review clean; plus
+controller commit `98f2db7132` correcting the plan and the spec at source).
