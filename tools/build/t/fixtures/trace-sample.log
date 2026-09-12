@@ -1,6 +1,7 @@
 NOTE: Picked up JDK_JAVA_OPTIONS: -Dpolyglot.engine.TraceCompilation=true
 [engine] opt done   engine=1  id=34    org.graalvm.polyglot.Value<Program>.execute        |Tier 1|Time    72(  63+9   )ms|AST    3|Inlined   0Y   0N|IR    309/   639|CodeSize    3948|Addr 0x7f0412473f00|CompId 2010   |UTC 2026-09-12T09:47:49.972|Src n/a
 [engine] opt done   engine=1  id=2     <anon>[0]                                          |Tier 1|Time    37(  31+6   )ms|AST    2|Inlined   0Y   0N|IR    103/   184|CodeSize     711|Addr 0x7f041246c280|CompId 2011   |UTC 2026-09-12T09:47:49.972|Src n/a
-[engine] opt failed engine=1  id=77    parse_stmt[48213]                                  |Tier 2|Time  6400(6100+300 )ms|Reason code installation failed: code is too large|UTC 2026-09-12T09:47:56.100|Src n/a
-[engine] opt failed engine=1  id=78    parse_expr[91002]                                  |Tier 2|Time  6600(6300+300 )ms|Reason code installation failed: code is too large|UTC 2026-09-12T09:47:57.100|Src n/a
+[engine] opt failed engine=1  id=77    parse_stmt[48213]                                  |Tier 2|Time  6400(6100+300 )ms|Reason: code installation failed: code is too large|UTC 2026-09-12T09:47:56.100|Src n/a
+[engine] opt failed engine=1  id=78    parse_expr[91002]                                  |Tier 2|Time  6600(6300+300 )ms|Reason: code installation failed: code is too large|UTC 2026-09-12T09:47:57.100|Src n/a
+[engine] opt deopt  engine=1  id=90    infix:<+|>[12345]                                  |Reason Transferred to interpreter|UTC 2026-09-12T09:47:58.200|Src n/a
 ok - warm add

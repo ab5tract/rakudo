@@ -3,7 +3,7 @@ use Test;
 my $tool = $*PROGRAM.parent(2).add('truffle-trace-summary.raku');
 my $fix  = $*PROGRAM.parent.add('fixtures/trace-sample.log');
 
-plan 8;
+plan 16;
 
 my $out = run($*EXECUTABLE, $tool, $fix, :out).out.slurp(:close);
 
@@ -19,6 +19,39 @@ ok  $out.contains('parse_expr'),
     'names the roots in the top-roots table';
 ok  $out ~~ / 'mean=6500' /,
     'reports the mean time of a reason group in ms';
+
+# Pins the accepted-line count. Without this nothing noticed that a whole
+# class of lines had stopped parsing -- which is how the "Reason:" colon in
+# TraceCompilationListener.FAILED_FORMAT got through as a silent zero.
+ok  $out.contains('events=5'), 'accepts every trace line in the fixture';
+ok  $out.contains('unparsed=0'),
+    'no [engine] opt line is dropped without a tally';
+
+# FAILED_FORMAT writes "|Reason: %s|" with a colon; DEOPT/INV/UNQUEUED write
+# "|Reason %s|" without one. Three of the five events carry a reason, and all
+# three must parse -- two with the colon, one without.
+ok  $out.contains('reasons-parsed=3'),
+    'parses Reason with and without the colon';
+
+# infix:<|> and infix:<+|> are real Rakudo operators, so a root name can
+# contain the field separator. The name must survive whole.
+ok  $out.contains('infix:<+|>[12345]'),
+    'a root name containing | is not split mid-name';
+
+ok  $out.contains('too-large roots: 2 (2 sized, 0 unsized)'),
+    'shows the population behind the minimum, not just the minimum';
+
+ok  $out.contains('total-compiler-ms=13109'),
+    'totals every root';
+ok  $out.contains('nqp-root-ms=13037'),
+    'totals the bracketed (NQP) roots separately';
+
+# A failure whose reason field is named something else must be loud, never a
+# bare "none" that Task 4 would read as "nothing was too large".
+my $noreason = $*PROGRAM.parent.add('fixtures/trace-noreason.log');
+my $out3 = run($*EXECUTABLE, $tool, $noreason, :out).out.slurp(:close);
+ok $out3.contains('min-too-large-size=none  (failed=1, reasons-parsed=0)'),
+   'says so loudly when failures parsed but their reasons did not';
 
 my $empty = $*PROGRAM.parent.add('fixtures/empty.log');
 $empty.spurt('');
