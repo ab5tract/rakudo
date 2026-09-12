@@ -3373,3 +3373,73 @@ regressions.
 No source change in either tree, no image rebuilt or deleted, no build script
 touched. `blib/` and `nqp/build/` verified untouched; the nqp tree is clean and
 rakudo shows only the untracked files that predate the task.
+
+Task 12b (nqp suite through the image): COMPLETE — rakudo `78e2d2344f`, nqp
+untouched, `blib/` and `nqp/build/` byte-identical, no image rebuilt or deleted.
+Invocation: `<image> -Xmx4g -Dnqp.execname=<self> -Djava.class.path=<nqp>/build/jvm/share/lib <...>/share/lib/nqp.jar <file>`,
+wrapped in a 3-line shim under the job tmp and driven by stock `prove -r --timer
+--exec`; the tree harness was left untouched, as the previous agent's report
+required. Only `rakudo-image` runs: `nqp-image` cannot start at all ("No language
+and polyglot implementation was found") and **`nqp-image-opt` dies during the
+first parse** on `MissingReflectionRegistrationError: Ops.exception(ThreadContext)`
+— `say(1+1)` suffices, because its metadata registers `Ops` as an enumerated
+method list while the Rakudo config registers 722 types `allDeclaredMethods`.
+
+**Ruling 55 — the image's runtime is SEMANTICALLY IDENTICAL to the JVM's. This is
+the strongest correctness statement the milestone has produced.** 151 files,
+13144 tests, 139 passed, 12 red. **The nine known reds are nine for nine
+identical down to individual test numbers** — 021-contextual (2, 5-6, 9, 32-33),
+022-optional-args (7), 044-try-catch (57), 112-continuations (15-16), qregex
+21/845 (572-589, 591, 594, 601), p5regex (78, 159-160), qast exiting at test 10 of
+184, jvm/01-continuations (16-17, 19), jvm/11-dispatch exiting after 140 of 160.
+**Nothing moved either way.** The 41 "missing" tests are exactly the three new
+reds' unrun tests. Combined with ruling 51 (an image loading `rakudo.jar` as
+data), the artifact road and the image runtime are both validated.
+
+Three NEW reds, all metadata gaps at the runtime's edge, none semantic:
+- `t/nqp/082-decode.t`: `UnsupportedCharsetException: windows-1252` — charsets not
+  compiled in. A build flag, and **Rakudo would hit it too. This was on nobody's
+  list.**
+- `t/nativecall/02-libc.t`: `MissingForeignRegistrationError: Cannot perform
+  downcall with leaf type (long,long,long)long`, thrown inside **`buildnativecall`
+  — symbol lookup is ITSELF an FFM downcall**, so it fails before any user
+  signature is reached.
+- `t/nativecall/01-basic.t`: same cause disguised as `NullPointerException` at
+  `NativeCallOps.kt:116`, swallowed by the test's own `try`/`CATCH`; a probe
+  without the `try` reproduces the identical FFM error.
+
+**Ruling 56 — the park verdict stands, but the trade is CPU for clock, not simply
+"slower".** Suite wall **648 s against 599 s, +8 %**, for **717 CPU-seconds
+against roughly 3000**. The per-file penalty is worst on small files and shrinks
+with size (001-literals 3.41 s vs 2.10 s, 1.62x; qregex 18.2 s vs 14.6 s, 1.24x).
+**The image never wins, it CONVERGES — the JVM buys its clock with 6-8 cores of
+JIT.** Worth recording because on a loaded box, a shared CI runner, or anywhere
+CPU is the scarce resource rather than wall time, that 4x arithmetic inverts. Not
+a reason to unpark, but a reason the park is about THIS machine's idle cores.
+
+**Ruling 57 — NativeCall is the real AOT blocker, and it is an OPEN set. This
+largely answers Task 13's tabled question before Task 13 runs.** The user asked
+(2026-09-11) whether a rule that a `native`-trait callable cannot have its
+signature rewritten dynamically would give the closed set of descriptor shapes an
+image needs. The evidence says such a rule would fix the wrong axis: **signatures
+are built at run time from user `is native` declarations**, so for a Rakudo
+DISTRIBUTION image the shape set is open no matter how immutable each individual
+signature is. It would only close for an image of one specific Raku program, which
+is Native Image's normal model but not what "ship rakudo-j as a binary" means.
+`nqp::decode` with a named encoding is the same open-world problem. Task 13 should
+start from this rather than re-derive it.
+
+Carried concerns, two of which outlive the task:
+- **The tracing agent that generates image metadata is STRUCTURALLY insufficient
+  here**: classlib ops resolve BY NAME, so it under-registers silently and fails
+  at an arbitrary op, arbitrarily late. Not a gap to fill but a method that cannot
+  work for this codebase.
+- **`try` hides missing-registration errors as nonsense NPEs**;
+  `NQP_VERBOSE_EXCEPTIONS=1` should be the first triage step on any image.
+- Guest compilation bailed 100 % throughout, so this is an interpreter-only
+  correctness result — trustworthy as such, but **the suite has never run through
+  an image with a working optimising runtime; repeat it if the `@TruffleBoundary`
+  of milestone 7 lever #6 lands.**
+- Methodological note worth keeping: `grep -c '^not ok'` gives 60 for qregex, 39
+  of them `# TODO`. Diff against the baseline's per-test numbers or invent
+  regressions.
