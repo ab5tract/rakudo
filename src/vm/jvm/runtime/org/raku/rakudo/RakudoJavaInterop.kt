@@ -1,14 +1,16 @@
 package org.raku.rakudo
 
 import org.raku.nqp.runtime.AdaptorUnit
+import org.raku.nqp.runtime.ArgMarshal
 import org.raku.nqp.runtime.BootJavaInterop
-import org.raku.nqp.runtime.BytecodeVersion
 import org.raku.nqp.runtime.CallFrame
 import org.raku.nqp.runtime.CallSiteDescriptor
+import org.raku.nqp.runtime.CalloutPlan
 import org.raku.nqp.runtime.ExceptionHandling
 import org.raku.nqp.runtime.GlobalContext
 import org.raku.nqp.runtime.Ops
 import org.raku.nqp.runtime.ThreadContext
+import org.raku.nqp.runtime.VarArityPlan
 import org.raku.nqp.sixmodel.Boxable
 import org.raku.nqp.sixmodel.STable
 import org.raku.nqp.sixmodel.SixModelObject
@@ -20,85 +22,91 @@ import java.net.URLClassLoader
 import java.util.ArrayList
 import java.util.Arrays
 import java.util.HashMap
+import java.util.concurrent.ConcurrentHashMap
 
-import org.raku.rakudo.RakOps.GlobalExt
-
-import java.lang.invoke.CallSite
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
-import java.lang.invoke.MethodType
-import java.lang.invoke.MutableCallSite
 
 import java.lang.reflect.Array as JArray
 import java.lang.reflect.Constructor
-import java.lang.reflect.Field
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
-import org.objectweb.asm.ClassWriter
-import org.objectweb.asm.Handle
-import org.objectweb.asm.Opcodes
-import org.objectweb.asm.Type
-
 open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
 
-    class DispatchCallSite : MutableCallSite {
-
-        private var methname: String
+    /** One overloaded name's dispatcher: today's selection (descriptor
+     *  match, then the casting pass) with the chosen candidate cached per
+     *  tuple of argument classes for exact matches. Descriptors are the
+     *  JDK's own (MethodType.toMethodDescriptorString, Class.descriptorString),
+     *  byte-identical to the ASM Type strings they replace. */
+    class MultiPlan : VarArityPlan {
+        private val methname: String
         private var handleList: Array<*>? = null
-        private var forCtors: Boolean
-        private var declaringClass: String? = null
+        private val forCtors: Boolean
+        private val declaringClass: String?
         private var handleDescs: Array<String?>? = null
-        private var handlePos = -1
-        private var offset = 0
-        private var tc: ThreadContext? = null
+        /* One plan is shared by every caller of the adapted class, so the
+         * candidate cache is read and written from several threads. */
+        private val exact = ConcurrentHashMap<List<Class<*>?>, Int>()
 
-        @JvmField val fallback: MethodHandle
-
-        companion object {
-            /* Written nowhere, read nowhere — preserved from the Java
-             * original. */
-            @JvmField var scf: CallFrame? = null
-
-            private val FALLBACK: MethodHandle = try {
-                MethodHandles.lookup().findVirtual(DispatchCallSite::class.java,
-                        "fallback", MethodType.genericMethodType(3, true))
-            } catch (e: ReflectiveOperationException) {
-                throw LinkageError(e.message, e)
-            }
-        }
-
-        constructor(methname: String, type: MethodType, handleList: Array<*>) : super(type) {
+        constructor(descriptor: String, methname: String, handleList: Array<*>) : super(descriptor) {
             this.methname = methname
-            this.fallback = FALLBACK.bindTo(this)
             this.handleList = handleList
             this.forCtors = false
+            this.declaringClass = null
         }
 
-        constructor(methname: String, type: MethodType, declaringClass: String) : super(type) {
+        constructor(descriptor: String, methname: String, declaringClass: String) : super(descriptor) {
             this.methname = methname
-            this.fallback = FALLBACK.bindTo(this)
+            this.handleList = null
             this.forCtors = true
             this.declaringClass = declaringClass
         }
 
+        /** The name this dispatcher was built for; kept for diagnostics, as
+         *  the DispatchCallSite it replaces did. */
+        fun dispatchName(): String = methname
+
+        override fun run(tc: ThreadContext, cf: CallFrame, csd: CallSiteDescriptor, args: Array<Any?>) {
+            val parsed = parseArgArray(tc, args)
+
+            if (forCtors && handleList == null)
+                handleList = Class.forName(declaringClass!!, false, ClassLoader.getSystemClassLoader()).constructors
+
+            val key: List<Class<*>?> = parsed.map { it?.javaClass }
+            var pos = exact[key] ?: -1
+            if (pos < 0) {
+                pos = findHandle(parsed)
+                /* Only an exact descriptor match is cacheable: the casting
+                 * pass rewrites parsed in place, so its choice depends on
+                 * more than the argument classes. */
+                if (pos >= 0) exact[key] = pos
+                else pos = findHandleWithArgsCasting(tc, parsed)
+                if (pos < 0) failDispatch(tc, parsed)
+            }
+
+            val result = if (forCtors) (handleList!![pos] as Constructor<*>).newInstance(*parsed)
+                         else (handleList!![pos] as MethodHandle).invokeWithArguments(*parsed)
+            RakudoJavaInterop.filterReturnValueMethod(result, tc)
+        }
+
         @Throws(Throwable::class)
-        fun parseArgArray(inArgs: Array<Any?>): Array<Any?> {
+        fun parseArgArray(tc: ThreadContext, inArgs: Array<Any?>): Array<Any?> {
             // XXX: checking the first arg for concreteness is a hack to identify static methods
-            offset = if (forCtors || Ops.isconcrete(inArgs[0] as SixModelObject?, tc!!) == 0L) 1 else 0
-            val gcx = RakOps.key.getGC(tc!!)
+            val offset = if (forCtors || Ops.isconcrete(inArgs[0] as SixModelObject?, tc) == 0L) 1 else 0
+            val gcx = RakOps.key.getGC(tc)
             val outArgs = arrayOfNulls<Any>(inArgs.size - offset)
             for (i in offset until inArgs.size) {
-                if (Ops.islist(inArgs[i] as SixModelObject?, tc!!) == 1L) {
-                    outArgs[i - offset] = BootJavaInterop.marshalOutRecursive(inArgs[i] as SixModelObject, tc!!, null)
+                if (Ops.islist(inArgs[i] as SixModelObject?, tc) == 1L) {
+                    outArgs[i - offset] = BootJavaInterop.marshalOutRecursive(inArgs[i] as SixModelObject, tc, null)
                 }
-                else if (Ops.istype(inArgs[i] as SixModelObject?, gcx.List, tc!!) == 1L
-                     || Ops.istype(inArgs[i] as SixModelObject?, gcx.Array, tc!!) == 1L) {
-                    outArgs[i - offset] = RakudoJavaInterop.marshalOutRecursive(inArgs[i] as SixModelObject, tc!!, null)
+                else if (Ops.istype(inArgs[i] as SixModelObject?, gcx.List, tc) == 1L
+                     || Ops.istype(inArgs[i] as SixModelObject?, gcx.Array, tc) == 1L) {
+                    outArgs[i - offset] = RakudoJavaInterop.marshalOutRecursive(inArgs[i] as SixModelObject, tc, null)
                 }
                 else {
-                    outArgs[i - offset] = RakudoJavaInterop.parseSingleArg(inArgs[i] as SixModelObject?, tc!!)
+                    outArgs[i - offset] = RakudoJavaInterop.parseSingleArg(inArgs[i] as SixModelObject?, tc)
                 }
             }
             return outArgs
@@ -106,13 +114,13 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
 
         @Throws(Throwable::class)
         fun findHandle(parsedArgs: Array<Any?>): Int {
-            handlePos = -1
+            var handlePos = -1
             var descs = handleDescs
             if (descs == null) {
                 descs = arrayOfNulls(handleList!!.size)
                 for (i in handleList!!.indices) {
                     if (forCtors) {
-                        descs[i] = Type.getConstructorDescriptor(handleList!![i] as Constructor<*>)
+                        descs[i] = ctorDescriptor(handleList!![i] as Constructor<*>)
                     }
                     else {
                         descs[i] = (handleList!![i] as MethodHandle).type().toMethodDescriptorString()
@@ -128,7 +136,7 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
             return handlePos
         }
 
-        fun failDispatch(parsedArgs: Array<Any?>?): Nothing {
+        fun failDispatch(tc: ThreadContext, parsedArgs: Array<Any?>?): Nothing {
             var types = "void"
             var first = true
             if (parsedArgs != null) {
@@ -142,24 +150,23 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
                     }
                 }
             }
-            throw ExceptionHandling.dieInternal(tc!!,
+            throw ExceptionHandling.dieInternal(tc,
                 "Couldn't find a " + (if (forCtors) "constructor" else "method") + " with types " + types + ".")
         }
 
         fun argsMatch(desc: String, parsedArgs: Array<Any?>): Boolean {
             var fakeDesc = ""
             for (arg in parsedArgs) {
-                fakeDesc += Type.getType(arg!!.javaClass)
+                fakeDesc += arg!!.javaClass.descriptorString()
             }
             val trimmed = desc.substring(desc.indexOf("(") + 1, desc.lastIndexOf(")"))
             return trimmed == fakeDesc
         }
 
         @Throws(Throwable::class)
-        fun deepArrayCast(obj: Any, type: Type): Any? {
-            var elemType = type
-            val typeDepth = type.dimensions
-            elemType = elemType.elementType
+        fun deepArrayCast(tc: ThreadContext, obj: Any, type: String): Any? {
+            val typeDepth = arrayDepth(type)
+            val elemType = type.substring(typeDepth)
 
             var objDepth = 0
             var value: Any = obj
@@ -172,50 +179,50 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
                 return null
             }
 
-            val targetType = castObjectToType(value, elemType)
+            val targetType = castObjectToType(tc, value, elemType)
             if (targetType != null) {
-                return deepArrayCast(obj, elemType, type.dimensions)
+                return deepArrayCast(tc, obj, elemType, typeDepth)
             }
 
             return null
         }
 
         @Throws(Throwable::class)
-        fun deepArrayCast(obj: Any, type: Type, depth: Int): Any? {
+        fun deepArrayCast(tc: ThreadContext, obj: Any, type: String, depth: Int): Any? {
             var retVal: Any? = null
             var klass: Class<*>? = null
-            when (type.sort) {
-                Type.BOOLEAN ->
+            when (type[0]) {
+                'Z' ->
                     klass = java.lang.Boolean.TYPE
-                Type.BYTE ->
+                'B' ->
                     klass = java.lang.Byte.TYPE
-                Type.SHORT ->
+                'S' ->
                     klass = java.lang.Short.TYPE
-                Type.INT ->
+                'I' ->
                     klass = Integer.TYPE
-                Type.LONG ->
+                'J' ->
                     klass = java.lang.Long.TYPE
-                Type.CHAR ->
+                'C' ->
                     klass = Character.TYPE
-                Type.FLOAT ->
+                'F' ->
                     klass = java.lang.Float.TYPE
-                Type.DOUBLE ->
+                'D' ->
                     klass = java.lang.Double.TYPE
-                Type.OBJECT ->
-                    klass = Class.forName(type.internalName.replace('/', '.'), false, tc!!.gc.byteClassLoader)
-                Type.ARRAY -> {}
+                'L' ->
+                    klass = Class.forName(objectName(type), false, ClassLoader.getSystemClassLoader())
+                '[' -> {}
                 else -> {}
             }
             if (depth == 1) {
                 retVal = JArray.newInstance(klass, (obj as Array<*>).size)
                 for (i in obj.indices) {
-                    val value = castObjectToType(obj[i]!!, type)
+                    val value = castObjectToType(tc, obj[i]!!, type)
                     JArray.set(retVal, i, value)
                 }
             }
             else {
                 for (i in (obj as Array<*>).indices) {
-                    val value = deepArrayCast(obj[i]!!, type, depth - 1)
+                    val value = deepArrayCast(tc, obj[i]!!, type, depth - 1)
                     if (retVal == null)
                         retVal = JArray.newInstance(value!!.javaClass, obj.size)
                     JArray.set(retVal, i, value)
@@ -225,10 +232,10 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
         }
 
         @Throws(Throwable::class)
-        fun castObjectToType(obj: Any, type: Type): Any? {
+        fun castObjectToType(tc: ThreadContext, obj: Any, type: String): Any? {
             var retVal: Any? = null
-            when (type.sort) {
-                Type.BOOLEAN -> {
+            when (type[0]) {
+                'Z' -> {
                     if (obj.javaClass == java.lang.Long::class.java) {
                         retVal = (obj as Long) != 0L
                     }
@@ -236,36 +243,36 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
                         retVal = obj
                     }
                 }
-                Type.BYTE ->
+                'B' ->
                     if (obj.javaClass == java.lang.Long::class.java) {
                         retVal = (obj as Long).toByte()
                     }
-                Type.SHORT ->
+                'S' ->
                     if (obj.javaClass == java.lang.Long::class.java) {
                         retVal = (obj as Long).toShort()
                     }
-                Type.INT ->
+                'I' ->
                     if (obj.javaClass == java.lang.Long::class.java) {
                         retVal = (obj as Long).toInt()
                     }
-                Type.LONG ->
+                'J' ->
                     if (obj.javaClass == java.lang.Long::class.java) {
                         retVal = obj
                     }
-                Type.CHAR ->
+                'C' ->
                     if (obj.javaClass == String::class.java) {
                         retVal = obj
                     }
-                Type.FLOAT ->
+                'F' ->
                     if (obj.javaClass == java.lang.Double::class.java) {
                         retVal = (obj as Double).toFloat()
                     }
-                Type.DOUBLE ->
+                'D' ->
                     if (obj.javaClass == java.lang.Double::class.java) {
                         retVal = obj
                     }
-                Type.OBJECT -> {
-                    val argType = Class.forName(type.internalName.replace('/', '.'), false, tc!!.gc.byteClassLoader)
+                'L' -> {
+                    val argType = Class.forName(objectName(type), false, ClassLoader.getSystemClassLoader())
                     if (argType.isAssignableFrom(obj.javaClass)) {
                         retVal = obj
                     }
@@ -297,9 +304,9 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
                         retVal = obj as String
                     }
                 }
-                Type.ARRAY ->
+                '[' ->
                     if (obj.javaClass.componentType != null) {
-                        retVal = deepArrayCast(obj, type)
+                        retVal = deepArrayCast(tc, obj, type)
                     }
                 else ->
                     throw ArrayIndexOutOfBoundsException(1)
@@ -309,14 +316,14 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
         }
 
         @Throws(Throwable::class)
-        fun findHandleWithArgsCasting(parsedArgs: Array<Any?>): Int {
+        fun findHandleWithArgsCasting(tc: ThreadContext, parsedArgs: Array<Any?>): Int {
             for (j in handleDescs!!.indices) {
                 var possible = false
-                val mtypes = Type.getArgumentTypes(handleDescs!![j])
+                val mtypes = argumentDescriptors(handleDescs!![j]!!)
                 if (mtypes.size != parsedArgs.size) continue
 
                 for (i in mtypes.indices) {
-                    val newValue = castObjectToType(parsedArgs[i]!!, mtypes[i])
+                    val newValue = castObjectToType(tc, parsedArgs[i]!!, mtypes[i])
 
                     if (newValue != null) {
                         possible = true
@@ -334,81 +341,49 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
             return -1
         }
 
-        @Throws(Throwable::class)
-        fun fallback(intc: Any?, incf: Any?, incsd: Any?, args: Array<Any?>): Any? {
-            tc = intc as ThreadContext
-            val cf = incf as CallFrame?
-            val csd = incsd as CallSiteDescriptor?
-            val parsedArgs = parseArgArray(args)
+        companion object {
+            /* The descriptor arithmetic ASM's Type used to do for us. */
 
-            Ops.debugnoop(args[0] as SixModelObject?, intc)
+            /** "(Ljava/lang/String;I)V" for a constructor. */
+            @JvmStatic
+            fun ctorDescriptor(c: Constructor<*>): String =
+                c.parameterTypes.joinToString("", "(", ")") { it.descriptorString() } + "V"
 
-            /* debug
-            for(int i = 0; i < parsedArgs.length; ++i ) {
-                System.out.println("parsed arg " + i + " as " + parsedArgs[i].getClass());
-            }
-            // */
-
-            if (forCtors) {
-                this.handleList = Class.forName(Type.getObjectType(declaringClass!!.replace('/', '.')).internalName,
-                    false, tc!!.gc.byteClassLoader).constructors
+            /** The leading '[' count of a field descriptor. */
+            @JvmStatic
+            fun arrayDepth(desc: String): Int {
+                var i = 0
+                while (desc[i] == '[') i++
+                return i
             }
 
-            // first, check for a cached handle, only recheck if it doesn't match
-            if (handlePos == -1 || handleDescs != null && !argsMatch(handleDescs!![handlePos]!!, parsedArgs)) {
-                handlePos = -1
-                handlePos = findHandle(parsedArgs)
-            }
-            // we should have a handle now, unless we have to cast arguments around
-            if (handlePos == -1) {
-                handlePos = findHandleWithArgsCasting(parsedArgs)
-            }
-            // that should have worked, if not there's nothing we can dispatch to
-            if (handlePos == -1) {
-                failDispatch(parsedArgs)
-            }
+            /** The binary class name inside an "Lpkg/Cls;" descriptor. */
+            @JvmStatic
+            fun objectName(desc: String): String =
+                desc.substring(1, desc.length - 1).replace('/', '.')
 
-            /* debug
-            if(forCtors) {
-                System.out.println("ctor cand: " + ((Constructor) this.handleList[handlePos]).toGenericString());
-            } else {
-                System.out.println("mhand cand: " + (MethodHandle) this.handleList[handlePos]);
+            /** The parameter descriptors of a method descriptor, in order. */
+            @JvmStatic
+            fun argumentDescriptors(desc: String): List<String> {
+                val out = ArrayList<String>()
+                var i = desc.indexOf('(') + 1
+                val end = desc.lastIndexOf(')')
+                while (i < end) {
+                    val start = i
+                    while (desc[i] == '[') i++
+                    if (desc[i] == 'L') i = desc.indexOf(';', i) + 1 else i++
+                    out.add(desc.substring(start, i))
+                }
+                return out
             }
-            // */
-
-            val rfh: MethodHandle
-            try {
-                rfh = MethodHandles.lookup().findStatic(RakudoJavaInterop::class.java, "filterReturnValueMethod",
-                    MethodType.fromMethodDescriptorString(
-                        "(Ljava/lang/Object;Lorg/raku/nqp/runtime/ThreadContext;)Ljava/lang/Object;",
-                        tc!!.gc.byteClassLoader))
-            } catch (nsme: ReflectiveOperationException) {
-                /* Java multi-caught NoSuchMethodException|IllegalAccessException;
-                 * their least common ancestor with no other subtypes in play. */
-                throw ExceptionHandling.dieInternal(tc!!,
-                    "Couldn't find the method for filtering return values from Java.")
-            }
-
-            val out: Any?
-            if (forCtors) {
-                val instance = (handleList!![handlePos] as Constructor<*>).newInstance(*parsedArgs)
-                out = rfh.invoke(instance, tc)
-            }
-            else {
-                val retVal = (handleList!![handlePos] as MethodHandle).invokeWithArguments(*parsedArgs)
-                out = rfh.invoke(retVal, tc)
-            }
-
-            return out
         }
     }
 
     companion object {
         /**
-         * Helper for not having to write recursive bytecode generation.
-         * Public because of runtime visibility: the emitted adaptor bytecode
-         * invokestatics org/raku/rakudo/RakudoJavaInterop.marshalOutRecursive
-         * by name and descriptor.
+         * Helper for not having to write recursive marshalling at every call
+         * site. Public because ArgMarshal.ArrayArg reaches it through the
+         * lambda argMarshalFor installs, and MultiPlan calls it by name.
          */
         @JvmStatic
         @Throws(Throwable::class)
@@ -558,8 +533,8 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
             return outArg
         }
 
-        /* Resolved at runtime by name and hardcoded descriptor string
-         * (see the findStatic in DispatchCallSite.fallback). */
+        /* Called directly by MultiPlan.run: it both converts the Java result
+         * and performs the frame's return. */
         @JvmStatic
         fun filterReturnValueMethod(`in`: Any?, tc: ThreadContext): Any? {
             val gcx = RakOps.key.getGC(tc)
@@ -674,122 +649,10 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
 
             // the conditional is rather sketchy, but seems to be needed to
             // correctly return a new instance when we're called from
-            // ConstructorDispatchCallSite, probably because of
+            // the constructor dispatcher, probably because of
             // Raku' .new creating a new CallFrame or something..?
             return if (Ops.result_o(tc.curFrame!!) != null) Ops.result_o(tc.curFrame!!) else Ops.result_o(tc.curFrame!!.caller!!)
         }
-
-        /* Bound as an invokedynamic bootstrap Handle by name and descriptor
-         * from the emitted adaptor bytecode. */
-        @JvmStatic
-        fun multiBootstrap(lookup: MethodHandles.Lookup, name: String, type: MethodType, vararg hlist: Any?): CallSite {
-            val cs = DispatchCallSite(name, type, hlist)
-            cs.setTarget(cs.fallback)
-            return cs
-        }
-
-        /* Bound as an invokedynamic bootstrap Handle by name and descriptor
-         * from the emitted adaptor bytecode. */
-        @JvmStatic
-        fun constructorBootstrap(lookup: MethodHandles.Lookup, name: String, type: MethodType, declClass: String): CallSite {
-            val cs = DispatchCallSite(name, type, declClass)
-            cs.setTarget(cs.fallback)
-            return cs
-        }
-    }
-
-    override fun marshalOut(c: MethodContext, what: Class<*>, ix: Int) {
-        val mv = c.mv!!
-
-        if (what.componentType != null
-            || java.util.List::class.java.isAssignableFrom(what)
-            || java.util.Map::class.java.isAssignableFrom(what)) {
-            emitGetFromNQP(c, ix, storageForType(what))
-            mv.visitVarInsn(Opcodes.ALOAD, c.tcLoc)
-            mv.visitLdcInsn(Type.getType(what))
-            mv.visitMethodInsn(Opcodes.INVOKESTATIC, "org/raku/rakudo/RakudoJavaInterop", "marshalOutRecursive",
-                Type.getMethodDescriptor(Type.getType(Object::class.java), TYPE_SMO, TYPE_TC, Type.getType(Class::class.java)))
-            /* The helper returns Object; the value feeds a parameter of the
-             * marshalled type, and without the cast the verifier rejects the
-             * adaptor ("Object not assignable to [Ljava/lang/Object;"). */
-            mv.visitTypeInsn(Opcodes.CHECKCAST, Type.getInternalName(what))
-        }
-
-        else {
-            super.marshalOut(c, what, ix)
-        }
-    }
-
-    protected open fun startVarArityCallout(cc: ClassContext, desc: String): MethodContext {
-        val mc = MethodContext()
-        mc.cc = cc
-        val mv = cc.cv!!.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "qb_" + (cc.nextCallout++),
-                Type.getMethodDescriptor(Type.VOID_TYPE, TYPE_CU, TYPE_TC, TYPE_CR, TYPE_CSD, TYPE_AOBJ),
-                null, null)
-        mc.mv = mv
-        mv.visitCode()
-        cc.descriptors.add(desc)
-
-        mc.argsLoc = 4
-        mc.csdLoc = 3
-        mc.cfLoc = 5
-        mc.tcLoc = 1
-
-        mv.visitTypeInsn(Opcodes.NEW, "org/raku/nqp/runtime/CallFrame")
-        mv.visitInsn(Opcodes.DUP)
-        mv.visitVarInsn(Opcodes.ALOAD, 1) // tc
-        mv.visitVarInsn(Opcodes.ALOAD, 2) // cr
-        mv.visitMethodInsn(Opcodes.INVOKESPECIAL, "org/raku/nqp/runtime/CallFrame", "<init>", Type.getMethodDescriptor(Type.VOID_TYPE, TYPE_TC, TYPE_CR))
-        mv.visitVarInsn(Opcodes.ASTORE, 5) // cf;
-
-        mc.tryStart = org.objectweb.asm.Label()
-        mv.visitLabel(mc.tryStart)
-
-        mv.visitVarInsn(Opcodes.ALOAD, 5) // cf
-        mv.visitVarInsn(Opcodes.ALOAD, 3) // csd
-        mv.visitVarInsn(Opcodes.ALOAD, 4) // args
-        emitInteger(mc, 1)
-        emitInteger(mc, -1)
-        mv.visitMethodInsn(Opcodes.INVOKESTATIC, TYPE_OPS.internalName, "checkarity", Type.getMethodDescriptor(TYPE_CSD, TYPE_CF, TYPE_CSD, TYPE_AOBJ, Type.INT_TYPE, Type.INT_TYPE))
-        mv.visitVarInsn(Opcodes.ASTORE, 3) // csd
-        mv.visitVarInsn(Opcodes.ALOAD, 1) // tc
-        mv.visitFieldInsn(Opcodes.GETFIELD, TYPE_TC.internalName, "flatArgs", TYPE_AOBJ.descriptor)
-        mv.visitVarInsn(Opcodes.ASTORE, 4) // args
-
-        return mc
-    }
-
-    protected open fun createAdaptorMultiDispatch(cc: ClassContext, mlist: ArrayList<Method>) {
-        val name = "mmd+" + mlist[0].name
-        val desc = "method/" + name + "/([Ljava/lang/Object;)Ljava/lang/Object;"
-
-        val mc = startVarArityCallout(cc, desc)
-
-        // what if this is the only static one?
-        if (!Modifier.isStatic(mlist[0].modifiers)) marshalOut(mc, mlist[0].declaringClass, 0)
-        val disphandle = Handle(Opcodes.H_INVOKESTATIC, "org/raku/rakudo/RakudoJavaInterop", "multiBootstrap",
-                "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;[Ljava/lang/Object;)" +
-                "Ljava/lang/invoke/CallSite;")
-        val candhandles = arrayOfNulls<Handle>(mlist.size)
-        var i = 0
-        for (next in mlist) {
-            candhandles[i++] = Handle(
-                    if (Modifier.isStatic(next.modifiers)) Opcodes.H_INVOKESTATIC else Opcodes.H_INVOKEVIRTUAL,
-                    next.declaringClass.name.replace('.', '/'),
-                    next.name,
-                    Type.getMethodDescriptor(next))
-        }
-
-        mc.mv!!.visitVarInsn(Opcodes.ALOAD, 1)
-        mc.mv!!.visitVarInsn(Opcodes.ALOAD, 5)
-        mc.mv!!.visitVarInsn(Opcodes.ALOAD, 3)
-        mc.mv!!.visitVarInsn(Opcodes.ALOAD, 4)
-        @Suppress("UNCHECKED_CAST")
-        mc.mv!!.visitInvokeDynamicInsn(mlist[0].name,
-                "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;",
-                disphandle, *(candhandles as Array<Any>))
-
-        endCallout(mc)
     }
 
     override fun computeHOW(tc: ThreadContext, name: String): SixModelObject? {
@@ -801,98 +664,47 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
         return mo
     }
 
-    protected open fun createConstructorDispatchAdaptor(cc: ClassContext, ks: Array<Constructor<*>>) {
-        val desc = "method/mmd+new/([Ljava/lang/Object;)L" + ks[0].declaringClass.name.replace('.', '/') + ";"
-        val className = Type.getInternalName(ks[0].declaringClass)
-        val mc = startVarArityCallout(cc, desc)
-
-        val disphandle = Handle(Opcodes.H_INVOKESTATIC, "org/raku/rakudo/RakudoJavaInterop", "constructorBootstrap",
-                "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/String;)" +
-                "Ljava/lang/invoke/CallSite;")
-
-        preMarshalIn(mc, ks[0].declaringClass, 0)
-
-        mc.mv!!.visitVarInsn(Opcodes.ALOAD, 1)
-        mc.mv!!.visitVarInsn(Opcodes.ALOAD, 5)
-        mc.mv!!.visitVarInsn(Opcodes.ALOAD, 3)
-        mc.mv!!.visitVarInsn(Opcodes.ALOAD, 4)
-        mc.mv!!.visitInvokeDynamicInsn("new",
-                "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;",
-                disphandle, className)
-
-        endCallout(mc)
-    }
-
-    override fun createAdaptor(target: Class<*>): ClassContext {
-        val cw = ClassWriter(ClassWriter.COMPUTE_MAXS or ClassWriter.COMPUTE_FRAMES)
-        val className = "org/raku/nqp/generatedadaptor/" + target.name.replace('.', '/')
-        cw.visit(BytecodeVersion.EMITTED, Opcodes.ACC_PUBLIC or Opcodes.ACC_SUPER, className, null, "java/lang/Object", null)
-
-        cw.visitField(Opcodes.ACC_STATIC or Opcodes.ACC_PUBLIC, "constants", "[Ljava/lang/Object;", null, null).visitEnd()
-
-        val cc = ClassContext()
-        cc.cv = cw
-        cc.className = className
-        cc.target = target
-
-        val multiDescs = HashMap<String, Int>()
+    override fun createPlans(target: Class<*>): MutableList<CalloutPlan> {
+        val plans = ArrayList<CalloutPlan>()
+        val counts = HashMap<String, Int>()
+        for (m in target.methods) counts[m.name] = (counts[m.name] ?: 0) + 1
+        val multi = HashMap<String, ArrayList<Method>>()
         for (m in target.methods) {
-            if (multiDescs.containsKey(m.name)) {
-                multiDescs[m.name] = multiDescs[m.name]!! + 1
-            }
-            else {
-                multiDescs[m.name] = 1
-            }
+            // synthetics don't get their own Raku-level method, because they
+            // only exist as a visibility aid for the class we adapt
+            if (m.isSynthetic) continue
+            if (counts[m.name]!! > 1) multi.getOrPut(m.name) { ArrayList() }.add(m)
+            plans.add(methodPlan(m))
         }
-        val multiMethods = HashMap<String, ArrayList<Method>>()
-        for (m in target.methods) {
-            if (m.isSynthetic) {
-                // synthetics don't get their own perl6-level method, because
-                // they only exist as a visibility aid for the class we're
-                // generating an adaptor for
-                continue
-            }
-            if (multiDescs[m.name]!! > 1) {
-                if (multiMethods[m.name] == null) {
-                    multiMethods[m.name] = ArrayList()
-                }
-                multiMethods[m.name]!!.add(m)
-            }
-            createAdaptorMethod(cc, m)
-        }
-        for (entry in multiMethods.entries) {
-            createAdaptorMultiDispatch(cc, entry.value)
+        for ((name, ms) in multi) {
+            val handles = Array<Any?>(ms.size) { MethodHandles.lookup().unreflect(ms[it]) }
+            plans.add(MultiPlan("method/mmd+$name/([Ljava/lang/Object;)Ljava/lang/Object;", name, handles))
         }
         for (f in target.fields) {
-            if (f.isSynthetic)
-                continue
-            createAdaptorField(cc, f)
+            if (f.isSynthetic) continue
+            plans.add(fieldGetPlan(f))
+            if (!Modifier.isFinal(f.modifiers)) plans.add(fieldSetPlan(f))
         }
         for (c in target.constructors) {
-            if (c.isSynthetic)
-                continue
-            createAdaptorConstructor(cc, c)
+            if (c.isSynthetic) continue
+            plans.add(constructorPlan(c))
         }
-        // what we actually want to do is grab all the methods we generated in
-        // the for() directly above and generate a varargs shortname
-        // &new()-equivalent, which dispatches among the generated
-        // adaptorConstructors - which aren't really constructors but static
-        // methods
+        // a varargs shortname &new()-equivalent, dispatching among the
+        // constructors the same way the mmd+ method dispatchers do
         if (target.constructors.isNotEmpty())
-            createConstructorDispatchAdaptor(cc, target.constructors)
-        createAdaptorSpecials(cc)
-
-        finishClass(cc)
-        /* debug
-        try {
-            java.nio.file.Files.write(new java.io.File(className.replace('/','_') + ".class").toPath(), cc.cv.toByteArray());
-        } catch (java.io.IOException e) {
-            e.printStackTrace();
-        }
-        // */
-
-        return cc
+            plans.add(MultiPlan("method/mmd+new/([Ljava/lang/Object;)L" + target.name.replace('.', '/') + ";",
+                "new", target.name))
+        plans.addAll(specialPlans(target))
+        return plans
     }
+
+    override fun argMarshalFor(what: Class<*>): ArgMarshal =
+        if (what.componentType != null
+            || java.util.List::class.java.isAssignableFrom(what)
+            || java.util.Map::class.java.isAssignableFrom(what))
+            ArgMarshal.ArrayArg(what) { smo, tc, cls -> RakudoJavaInterop.marshalOutRecursive(smo, tc, cls) }
+        else
+            super.argMarshalFor(what)
 
     fun addToClassPath(path: String) {
         var thePath = "file:" + path
@@ -922,9 +734,8 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
     }
 
     override fun computeInterop(tc: ThreadContext, klass: Class<*>): SixModelObject {
-        val adaptor = createAdaptor(klass)
-
-        val adaptorUnit = AdaptorUnit(adaptor.constructed!!, adaptor.descriptors, klass.name)
+        val plans = createPlans(klass)
+        val adaptorUnit = AdaptorUnit(plans, klass.name)
         adaptorUnit.initializeCompilationUnit(tc)
 
         val hash = gc.BOOTHash!!.st.REPR.allocate(tc, gc.BOOTHash!!.st)
@@ -941,8 +752,8 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
         val freshType = protoSt.REPR.type_object_for(tc, ThisHOW)
 
         val mult = HashMap<String, SixModelObject?>()
-        for (i in 0 until adaptor.descriptors.size) {
-            val desc = adaptor.descriptors[i]
+        for (i in 0 until plans.size) {
+            val desc = plans[i].descriptor
             val cr = adaptorUnit.lookupCodeRef(i)
 
             val s1 = desc.indexOf('/')

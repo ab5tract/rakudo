@@ -2,7 +2,7 @@ use Test;
 
 BEGIN unless $*VM ~~ "jvm" { plan 0; skip-rest "jvm only test"; done-testing; exit 0; };
 
-plan 30;
+plan 33;
 
 {
     use java::lang::String:from<JavaRuntime>;
@@ -180,6 +180,20 @@ else {
     else {
         skip 2;
     }
+}
+
+# The multi-dispatcher caches its chosen candidate per tuple of argument
+# classes. indexOf(Str) is an exact descriptor match, so the first call fills
+# the cache and the second reads it; indexOf(Str, Int) has no exact candidate
+# (Int marshals to a Long) and must still reach indexOf(String, int) through
+# the casting pass. A java.lang.String result comes back as a Raku Str, so
+# StringBuilder is the class to hold an instance in.
+{
+    use java::lang::StringBuilder:from<JavaRuntime>;
+    my $sb = StringBuilder.new().append("abc");
+    is $sb.indexOf("b"),    1, "exact descriptor match selects indexOf(Ljava/lang/String;)I";
+    is $sb.indexOf("b"),    1, "the second call is answered from the argument-class cache";
+    is $sb.indexOf("b", 0), 1, "a cast-selected candidate is not shadowed by the cache";
 }
 
 # vim: expandtab shiftwidth=4
