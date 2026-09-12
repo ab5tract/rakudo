@@ -3443,3 +3443,45 @@ Carried concerns, two of which outlive the task:
 - Methodological note worth keeping: `grep -c '^not ok'` gives 60 for qregex, 39
   of them `# TODO`. Diff against the baseline's per-test numbers or invent
   regressions.
+
+**Ruling 58 — SUPERSEDES RULING 57. I mis-stated the user's proposal and repeated
+a subagent's claim without checking it. The proposal is well-aimed.** The user
+corrected me: their proposal was to REJECT ANY RUNTIME USE OF THE `native` TRAIT,
+and signatures are built at compile time by the Rakudo compiler. Checked in the
+code rather than argued:
+
+- `lib/NativeCall.rakumod`'s `!setup` reads **`$routine.signature`** and derives
+  `$arg_info` via `param_list_for($signature, ...)` and `$!rettype` via
+  `map_return_type($returns)`. The signature is fixed when the routine is
+  DECLARED.
+- `NativeCallOps.kt`'s `descriptorFor(ret, args)` maps `ArgType` values — a
+  **finite enum** — through `layoutFor` onto `ValueLayout`s, roughly seven
+  carriers plus `ADDRESS` for pointer types, dying on anything else.
+
+**So a descriptor shape is a pure function of a compile-time signature over a
+small fixed alphabet.** What `!setup` does lazily is HANDLE CONSTRUCTION, not
+shape determination. Ruling 57 said "signatures are built at run time"; that was
+the subagent's phrasing about WHEN the handle is built, and I repeated it as
+though it were about when the shape is decided. Wrong, and the second time this
+milestone I have relayed an agent's claim without verifying it.
+
+**What the proposal actually buys, stated properly:**
+- **An image of a specific Raku program: the proposal CLOSES the set completely.**
+  Every `is native` is in compiled source at image-build time, and the rule
+  guarantees nothing can invent a shape afterwards. Register every derived
+  descriptor at build time and NativeCall works.
+- **An image of the Rakudo DISTRIBUTION: still open, but for a different reason
+  than I gave — the image ships a COMPILER.** User source compiled inside the
+  running image introduces declarations the image never saw. That is a property of
+  distributing a compiler, not a flaw in the proposal, and the same is true of
+  `nqp::decode` with a named encoding.
+- **The proposal's real value is that it makes a covering-set or trampoline design
+  SOUND.** Because the alphabet is small and every shape is statically derivable
+  from a signature, a bounded pre-registered set (or a few universal descriptors
+  with marshalling) can be proven to cover everything. Without the rule, a shape
+  could in principle appear that no signature describes, and no covering argument
+  would hold.
+
+Task 13's job shrinks accordingly: confirm this against the trait-application
+sites (`lib/NativeCall.rakumod:680-712`), decide covering-set versus trampolines,
+and write the recommendation. It should NOT re-derive the question.
