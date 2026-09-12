@@ -3485,3 +3485,38 @@ milestone I have relayed an agent's claim without verifying it.
 Task 13's job shrinks accordingly: confirm this against the trait-application
 sites (`lib/NativeCall.rakumod:680-712`), decide covering-set versus trampolines,
 and write the recommendation. It should NOT re-derive the question.
+
+**Ruling 59 — EXTENDS 58 with the user's specification of the rule, and one
+consequence runs OPPOSITE to what ruling 58 said.** The user specified the two
+prohibitions: for any routine declared with the `native` trait, (i) **no adding
+arguments to a signature at run time** and (ii) **no replacing the routine of a
+signature at run time**.
+
+**Ruling 58 understated this.** I wrote that an image of a specific Raku program
+is closed because every `is native` is in compiled source at build time. **That is
+only true if the signature captured at declaration is the signature forever.** If
+a native routine's signature can gain an argument, or have its routine replaced,
+then a program can demand a descriptor shape appearing NOWHERE in its own source,
+and an image that registered shapes from source fails on it. **So the rule is not
+a tightening of case (a); it is what makes case (a) provable at all.**
+
+**Second consequence, which is a better mechanism than anything proposed so far:
+the rule enables PRECOMPUTATION.** If a descriptor is fixed at declaration and
+immutable thereafter, a module's descriptor set can be emitted when the module is
+PRECOMPILED, and an image registers the union of everything installed. That is
+staged and mechanical. It replaces registration-by-tracing, which Task 12b showed
+to be **structurally unsound for this codebase** — classlib ops resolve by NAME,
+so the tracing agent under-registers silently and dies at an arbitrary op,
+arbitrarily late.
+
+**A third vector the two prohibitions do NOT cover, needing its own decision:**
+`EVAL` of source containing `is native` is not mutation, it is COMPILATION at run
+time. It introduces a genuinely new declaration with a genuinely new shape inside
+an already-imaged program — **case (b) reappearing inside case (a)**. Either such
+declarations are refused under `EVAL`, or any image shipping the compiler needs a
+COVERING set rather than an exact one. Not resolved here; named so Task 13 does
+not miss it.
+
+Hedge recorded on both sides: whether signature mutation is currently REACHABLE in
+Rakudo is a separate question from whether the rule should forbid it. The rule is
+sound either way and reachability is cheap to check at implementation time.
