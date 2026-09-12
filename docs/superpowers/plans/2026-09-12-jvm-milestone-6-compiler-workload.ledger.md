@@ -2535,3 +2535,49 @@ decision on; its MECHANISM is not.** Both axes monotone increasing, every number
 reproducing from raw logs, the configuration proven in force by direct thread
 sampling, and +9 s is 13x the wall floor. Adopt the direction — fewer threads, the
 steep slope is near 3, measure 1 and 2 next — and not ruling 40's causal half.
+
+**Ruling 43 — what the extra compilations ARE, found by a user question: they are
+re-compiles, not coverage. The thread knob is a workaround for deoptimisation
+churn.** The user asked whether the extra compilations were failing to "lift back
+into use". Checked directly across the three logs rather than reasoned about:
+
+| threads | compiles | **unique roots** | compiles/root | deopt | inval |
+|---|---|---|---|---|---|
+| 3 | 2998 | **1479** | 2.03 | 3522 | 754 |
+| 6 | 3334 | **1515** | 2.20 | 3767 | 939 |
+| 16 | 3355 | **1515** | 2.21 | 3808 | 952 |
+
+**6 -> 16 threads bought 21 extra compilations and ZERO new unique roots.** Not
+one additional part of the compiler got compiled; every one of the 21 was a
+recompile of a root already compiled. Even 3 -> 6 added 336 compilations for only
+36 unique roots, so ~300 were repeats. Coverage saturates at 1515; three threads
+loses 36 of them, 2.4 %.
+
+So the compiled code DOES land and run. It is then invalidated and compiled
+again. More threads buy more ITERATIONS OF THAT CYCLE, not more of the compiler
+running compiled — and the deopt counts rise in step (3522 / 3767 / 3808).
+
+**The fit (labelled a fit, not a proof): the compile queue is a DEBOUNCER.** When
+a root deoptimises and re-requests compilation several times in quick succession,
+a slow queue lets those requests supersede one another and collapse into one —
+which is exactly what stale dequeues show (1137 discarded at 3 threads, 190 at 6,
+2 at 16). A fast queue faithfully services every redundant request. This fits
+every counter we have, and unlike ruling 40's withdrawn "contention dominates" it
+is supported by a positive observation (coverage saturation) rather than reached
+by subtraction. It still does not prove the WALL causation, which ruling 41 leaves
+open.
+
+**Consequence, and it reframes the knob: reducing compiler threads is not a
+scheduling optimisation, it is a crude workaround for deoptimisation churn** —
+the same churn the `encode_var[6418]` investigation named as milestone 7's third
+lever (13 compiles of one root, 6 of them from the Bytecode DSL's per-local
+type-tag assumption). This is that phenomenon at scale: 1515 roots averaging over
+two compilations each.
+
+**Testable prediction for milestone 7, recorded now so it can be checked later:
+fix the churn and this knob's benefit should shrink or vanish.** If it does not,
+the debounce fit is wrong.
+
+Caveat: unique roots are counted by `name[size]`, a label already known to merge
+distinct call-target ids (the `PERFORM-BEGIN` case). The 6-vs-16 comparison is
+unaffected — both 1515 — but the absolute counts are approximate.
