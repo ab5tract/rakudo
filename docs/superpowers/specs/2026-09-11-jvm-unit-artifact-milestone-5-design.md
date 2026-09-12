@@ -703,3 +703,22 @@ First the unsigned-native-attribute regression above (a runtime fix in
 task 2's territory, with `native-argument-snapshot.t` as its gate), then
 the perf measurement session (truffle-only plan item 4, the compiler's
 own workload), then the engine merge — one Truffle language.
+
+### Fix (2026-09-12)
+
+The unsigned-native-attribute regression is fixed in nqp `7e7aaca61`
+(rakudo: this commit): `TruffleEncoder`'s `encode_args` wrote each
+argument's wire RESULT type into the callsite argument flag, where
+`$T_UINT` (4) *is* the NAMED bit — so a call taking a `uint`/`uint32`
+attribute decoded as a named object argument and the reader took the
+next program word as a pool index (`ArrayIndexOutOfBoundsException`) or
+slipped onto `nqpp: unknown tag` further down; a uint ARGUMENT now
+travels in the int slot, as `classlib_t` already documents and as a uint
+lexical already did. `native-argument-snapshot.t` is **9/9**, the new
+`t/02-rakudo/native-uint-attribute.t` **7/7**,
+`nqp/t/jvm/17-object-layout.t` **50/50**, `t/01-sanity` **25/25**, the
+sensitive slice unchanged. It is not a `RakuObject` bug and neither of
+task 2's kept UINT rulings is implicated: the encoder is byte-identical
+between the milestone-4 head (nqp `739ce7517`) and this milestone's, so
+the failure predates milestone 5 and was mis-attributed in milestone 4's
+task 11 as a `$*EXECUTABLE`-spawn cold-only artifact.
