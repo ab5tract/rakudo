@@ -864,3 +864,81 @@ the markers file gives 460 s.
 
 Task 3: complete (commits `3db3362101`..`0c0521a538`, review clean after one fix
 round; plus controller commit `28f06cac14` reframing Task 4).
+
+Task 4: implementer dispatched (opus); BASE rakudo `f72f4be91e`. Threshold 2069
+(2070 - 1, exclusive). Dispatched WITH ruling 11's reframing in the brief, and
+instructed to judge on four quantities against Task 3's baseline rather than wall
+clock alone, and to treat a large fall in compiler work at a flat wall clock as a
+real result rather than a failed measurement.
+
+### Task 4 configuration row: `NQP_CODE_MAX_COMPILE=2069`
+
+Threshold arithmetic: Task 3 gave `min-too-large-size=2070`;
+`NqpRootNode.prepareForCompilation` answers `programSize <= MAX_COMPILE_SIZE`
+(inclusive, `NqpRootNode.java:119-123`), so 2070 would still admit
+`IMPL-FOLD-CONSTANT[2070]`. The exclusive threshold is **2070 - 1 = 2069**.
+
+Step 1's two checks, from re-summarizing the Task 3 baseline log: the `by size:`
+list is `IMPL-FOLD-CONSTANT[2070], IMPL-OPTIMIZE-EXPRESSION[4030]` — a factor of
+1.9 apart, same order of magnitude, so the minimum is plausible against its
+neighbour and does not refuse nearly everything. The `unclassified failure
+reasons` block holds exactly one reason, `PermanentBailoutException: Too deep
+inlining, probably caused by recursive inlining` — an inlining-depth bailout, not
+a size bailout, correctly excluded. No evidence of a third size spelling.
+
+Step 2 probe: `NqpCheck` under the knob printed `nqp-code check passed`.
+
+| quantity | baseline (Task 3) | knob=2069 | delta |
+|---|---|---|---|
+| wall clock | 434 s | **419 s** | **-15 s (-3.5 %)** |
+| `total-compiler-ms` | 2 143 944 | **1 898 458** | **-245 486 (-11.5 %)** |
+| `done` | 5 656 | **5 670** | **+14 (+0.2 %)** |
+| `failed` | 444 | **407** | **-37 (-8.3 %)** |
+| `nqp-root-ms` | 1 937 603 | 1 699 179 | -12.3 % |
+| Stage parse | 333.841 | **318.561** | -15.3 s |
+| `unparsed` | 0 | 0 | — |
+
+The two "too large" failures **vanished**: `min-too-large-size=none`, and the
+`code is too large` reason is absent from the run's `failures by reason` block
+entirely. The `-1` was load-bearing exactly as ruling 11's brief predicted.
+
+**The gate is airtight but `done` did not fall, and that is the finding.**
+Counting `opt done` lines by root size directly off the trace: baseline compiled
+**178** roots above 2069 successfully, the knob run **0**. But it compiled **198
+more** roots at or below 2069 (5 175 -> 5 373), so the total rose. The compiler
+did not go idle; it spent the freed capacity on the roots queued behind the large
+ones. Arithmetic checks out: baseline spent 308 797 ms on those 178 compiles plus
+~6.9 s on the two too-large failures, ~316 s removed against a 245 s net fall, the
+~70 s difference re-spent on the extra small roots.
+
+The whole wall-clock gain sits in Stage parse (-15.3 s); every other stage is flat
+to within a second. This is therefore **not** the "large compiler-work fall at a
+flat wall clock" case the brief anticipated: work fell 11.5 % and the wall
+followed at 3.5 %, a real but heavily damped transfer. Task 7's thread-count knob
+is **not** demoted — there is genuine compiler-thread contention here — but its
+ceiling looks low: an eighth of the compiler work bought a twenty-ninth of the
+wall.
+
+Ruling 11's reframing is confirmed on its own terms. The knob is no longer a
+free-reclamation lever (the too-large cluster it was written for is worth 6.9 s,
+not 733 s); what it now buys is contention relief, and it buys it by refusing 178
+compilations that would otherwise have succeeded.
+
+**Verdict: KEEP**, on the wall clock (419 s vs 434 s), per Step 4's rule. Later
+sweep configurations carry `NQP_CODE_MAX_COMPILE=2069`.
+
+**Both clocks — build-side adoption only.** A root that is never compiled never
+speeds up at run time either, and runtime performance outranks compile time.
+Nothing measured here argues for this knob in Rakudo's own runtime; Task 11
+decides the runtime side separately, and ruling 11 already took runtime adoption
+off the table.
+
+Task 4 concerns (implementer, for review): (1) one sample per configuration, and
+3.5 % is small — the mechanism evidence (whole delta in Stage parse, 178->0 compile
+count) is what carries it, not the wall clock alone; `total-compiler-ms` is far
+outside any plausible noise band and is wall-clock-independent. (2) the knob
+reallocates compiler capacity rather than subtracting it — a later task reasoning
+about it as pure subtraction will be wrong. (3) 2069 is tuned to this run's
+failure minimum and has no principled meaning; an encoder change that shifts wire
+sizes moves it. Artifacts under `$CLAUDE_JOB_DIR/tmp/m6-corec-maxcompile.{log,markers,jar}`;
+`blib` untouched. Full report: `.superpowers/sdd/2026-09-12-jvm-milestone-6-compiler-workload/task-4-report.md`.
