@@ -515,18 +515,35 @@ each, 733 s wasted on them.
 
 - [ ] **Step 4: Confirm the failure-line format**
 
-The fixture's `opt failed` line was written to Truffle's documented
-layout, not captured. Check a real one:
+**The real format is now known, not assumed.** Task 2's review
+decompiled `TraceCompilationListener` from this tree's own
+`nqp/build/jvm/share/truffle/truffle-runtime-25.2.4.jar`. Its
+`FAILED_FORMAT` is verbatim:
+
+```
+opt failed engine=%-2d id=%-5d %-50s |Tier %d|Time %18s|Reason: %s|UTC %s|Src %s
+```
+
+Note `|Reason: %s|` **with a colon**, where `DEOPT_FORMAT`, `INV_FORMAT`
+and `UNQUEUED_FORMAT` use `|Reason %s` without one. The colon falls on
+exactly the verb this milestone depends on. Task 2's parser was
+corrected to accept both, and its fixture now carries a real-format
+line.
+
+This step is therefore a confirmation, not a repair:
 
 ```bash
 grep -m2 'opt failed' $CLAUDE_JOB_DIR/tmp/m6-corec-baseline.log
 ```
 
-If the real line carries its reason in a field that does not begin with
-`Reason `, fix the parser in `truffle-trace-summary.raku`, update the
-fixture to the real line, re-run the tests, and amend Task 2's commit.
-Record the correction in the ledger. If it matches, say so in the ledger
-and move on.
+Confirm the reason text parses — the summarizer must report a non-empty
+reason group, not an empty one. **If `min-too-large-size` prints `none`
+while the failed count is above zero, STOP.** That combination is the
+signature of a parse miss, not of a compile without oversized roots, and
+the tool now prints `(failed=N, reasons-parsed=0)` beside it to say so.
+Do not proceed to Task 4 behind it; a `none` read as "nothing was too
+large" would silently skip the milestone's largest lever. Record the
+outcome either way.
 
 - [ ] **Step 5: Confirm named Sources reach the statistics**
 
