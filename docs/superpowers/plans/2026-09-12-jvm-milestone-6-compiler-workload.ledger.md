@@ -1249,3 +1249,118 @@ Also: the summarizer undercount took a THIRD distinct value (done -2, failed 0,
 against 2/0 and 1/1), and `TraceCompilation` destroyed the numbers on four of
 eight `Stage` lines, so per-stage attribution after `parse` is marker-derived
 only. Report: `.superpowers/sdd/2026-09-12-jvm-milestone-6-compiler-workload/task-5-report.md`.
+
+Task 5: implementer DONE_WITH_CONCERNS, verdict DROP — rakudo `a59bc7a70a`
+(ledger only). Wall 433 s, total-compiler-ms 2129872, nqp-root-ms 1921970,
+Success 5617, Permanent Bailouts 448, min-too-large-size unchanged at 2070.
+It OVERRODE the brief's BLOCKED-on-missing-marker instruction and said so in the
+report header, the ledger and section 1.
+Task 5: review (opus) — Spec ✅ with a declared override, quality Approved, DROP
+stands, **1 Critical (a new finding, not a defect)**.
+
+**Ruling 22 — the override was correct and the probe was the thing at fault.**
+`NqpCheck.java:31` builds `Context.newBuilder(NqpLanguage.ID).build()` with no
+`allowExperimentalOptions(true)`, while `NqpPolyglot.kt:49-51` — the context the
+compiler actually uses — enables them. Verified by the controller directly. So
+the probe false-rejects any experimental option, and `engine.Mode`,
+`engine.MultiTier`, both tier thresholds and `engine.CompilerThreads` are all
+experimental: Tasks 6 and 7 would each have reported BLOCKED on a working
+option. The implementer verified acceptance on the real engine path in ~20 s and
+disclosed the override in three places rather than burying it, which is exactly
+the discipline this loop wants. All four probe sites in the plan now say a
+missing marker means the probe cannot judge, not that the option is bad, and
+carry the 20-second real-path verification plus a warning that ACCEPTED is not
+the same as IN FORCE. Costs if wrong: none — the real-path check is strictly
+better evidence than the probe it replaces.
+
+**Ruling 23 — the one-line `NqpCheck` fix is NOT made during the sweep.** Adding
+`allowExperimentalOptions(true)` to `NqpCheck.java:31` is obviously right and
+obviously cheap, and I am deliberately not doing it. `NqpCheck` lives in
+`nqp-truffle/src`, so the fix rebuilds `nqp-truffle.jar` and changes the runtime
+under Tasks 6 and 7. Comparability across the sweep outranks a harness
+convenience. Recorded as a post-sweep item. Costs if wrong: the probe stays
+useless for two more tasks, which the plan already routes around.
+
+**Ruling 24 — Task 5 was a REPLICATE, not an experiment, and that is the most
+valuable thing it produced.** The reviewer read `OptimizedRuntimeOptions.<clinit>`
+out of `truffle-runtime-25.2.4.jar`: it pushes `iconst_1` into the
+`PartialBlockCompilation` `OptionKey`, and the descriptor reads "Enable partial
+compilation for BlockNode (default: true)". That flag was the ONLY difference
+between the Task 3 and Task 5 command lines, so **Task 5 is byte-equivalent to
+Task 3**. Three consequences. (a) The milestone now has a measured NOISE FLOOR at
+n=2, which forward-only had otherwise denied us entirely: wall 0.2 %,
+`total-compiler-ms` 0.7 %, `Success` 0.7 % (41 compiles), `Permanent Bailouts`
+0.9 % (4). (b) Task 5's fall in `Success` is noise, fully explained, with nothing
+to attribute. (c) It retroactively strengthens Task 4: its -11.4 % on
+`total-compiler-ms` is an order of magnitude outside the floor, so what ruling 15
+recorded as "unproven at n=1" now stands clear of measured variance. The plan's
+"there is no noise floor" caveat was FALSE and has been replaced with the
+measured figures. Costs if wrong: it is one pair, so it is an order-of-magnitude
+guide rather than a confidence interval, and the plan says so.
+
+**Ruling 25 — DROP is right, but the reason had to change.** The implementer
+justified DROP on +12.2 % `total-compiler-ms` against Task 4. That is
+arithmetically correct and says nothing about the knob: since Task 5 IS Task 3,
+it is Task 3-versus-Task 4 restated. The load-bearing reasons are that the option
+defaults to true, hence was already in force in every earlier run, and that the
+mechanism it controls does not exist on our path — `OptimizedBlockNode` only,
+zero `BlockNode` hits across `nqp/nqp-truffle/src` and
+`nqp/src/vm/jvm/runtime` (word-boundary grep, to rule out `RootNode` masking),
+and `NqpRootNode.java:47-53` being a `@GenerateBytecode` `BytecodeRootNode`.
+Costs if wrong: a later reader would otherwise believe partial-block compilation
+was tried and cost 12 %.
+
+Task 5: screening rules added to the plan for Tasks 6 and 7 — (1) does the
+mechanism exist in this language, and (2) is the value already the DEFAULT. The
+second is one `javap` on `OptimizedRuntimeOptions` and would have killed this
+knob on its own, without spending 433 s.
+Task 5: minor (deferred): the report's failure counts come from the summarizer
+(446 + 2) while raw trace greps give 452 + 3 (retry lines) and the statistics
+block gives 448 permanent. Three channels now disagree slightly; a future brief
+must say which channel a count comes from.
+Task 5: minor (deferred): `TraceCompilation` destroys four of eight `Stage` lines
+in every run including Task 3's baseline, so it is a standing harness property
+rather than a Task 5 regression. `Stage parse` survives in all runs and is the
+only cross-run stage comparison anyone should make.
+Task 5: Task 11's "if both help, combine" step now has nothing to combine; it
+must be re-aimed or dropped when Task 11 runs.
+
+Task 5 fix round 1: **the run was not a new configuration at all.**
+`engine.PartialBlockCompilation` **DEFAULTS TO TRUE** -- verified independently
+by the implementer out of the same jar the compile loaded: `OptimizedRuntimeOptions.<clinit>`
+does `494: iconst_1 -> Boolean.valueOf -> 501: putstatic PartialBlockCompilation`,
+and the generated descriptor reads "Enable partial compilation for BlockNode
+(default: true)."; both logs' own `Picked up JDK_JAVA_OPTIONS` lines confirm the
+flag was the ONLY difference between the T3 and T5 command lines. **Task 5 is
+therefore a byte-equivalent REPLICATE of Task 3**, and its real product is the
+milestone's **FIRST MEASURED NOISE FLOOR, at n=2: wall 0.2 %, total-compiler-ms
+0.7 %, Success 0.7 % (41 compiles), Permanent Bailouts 0.9 % (4)** (exactly
+0.230 / 0.656 / 0.725 / 0.901 %; nqp-root-ms 0.807 %, Compilations 0.6 %).
+**Working rule for every later task and the findings doc: under ~1 % on these
+counters is not a result at n=1** -- one replicate is a weak variance estimate,
+but it is the only empirical one the milestone has.
+Three consequences. (1) The Success fall of 41 is NOISE; the hedged mechanism
+guess was deleted, there is nothing to explain. (2) **Task 4 is retroactively
+strengthened**: its -11.45 % on total-compiler-ms is **17.4x the 0.66 % floor**
+(nqp-root-ms -12.3 %, failed -8.1 % comparable; wall -3.5 % is ~15x the wall
+floor), so what it booked as "unproven at n=1" now stands well outside measured
+variance. (3) The DROP verdict is unchanged but **re-argued**: "+12.2 % vs Task 4"
+is demoted from evidence to restatement (Task 5 IS Task 3, so it is T3-vs-T4 said
+again); the load-bearing reasons are that the option was already in force
+everywhere, and that its mechanism (OptimizedBlockNode / zero BlockNode hits /
+NqpRootNode being a @GenerateBytecode BytecodeRootNode) does not exist on our path.
+**TWO pre-compile screens now required on every remaining knob, cheapest first:
+Screen A -- is the value already the DEFAULT? (one `javap -p -c` on
+OptimizedRuntimeOptions.class, ~30 s; would have saved this entire 433 s compile).
+Screen B -- does the mechanism EXIST on our path? (~2 min).**
+Channel correction for failure counts: summarizer 446+2, raw `grep -c` 452+3,
+engine statistics block 448 permanent bailouts. The gap is **NOT retry lines** --
+it is the statistics block's per-reason breakdown subsections repeating each
+reason string (6 for deep-inlining, 1 for too-large; the T3 log shows the same
+6 and 1). 446+6=452, 2+1=3, 446+2=448: all three channels reconcile exactly.
+Rule: anchor greps to `opt failed` or quote the statistics block, never a bare
+`grep -c`. No re-run was made; all figures come from the existing logs.
+Recorded as deliberately NOT fixed: `allowExperimentalOptions(true)` on
+NqpCheck.java lives in nqp-truffle/src, so it would rebuild nqp-truffle.jar and
+change the runtime under the remaining sweep compiles -- comparability outranks
+harness convenience; it waits until after the sweep, Tasks 6-7 route around the probe.
