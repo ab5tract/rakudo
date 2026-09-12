@@ -2661,3 +2661,86 @@ breaks comparability across every measurement in this milestone, in exchange for
 diagnostics improvement. It joins the other runtime work. Costs if wrong: one more
 milestone of name-keyed views merging ~10 % of targets, with `id=` available in
 the trace as the correct identity in the meantime.
+
+Task 7-curve (1 / 2 / 4 threads, one batch): implementer DONE — rakudo
+`f766603dce` at run time (HEAD moved to `ab0ecd81d4` mid-batch as this ledger was
+being committed concurrently; the diff is this file only, +194 lines, so all
+three compiles ran against an identical source tree), nqp `41c294b029`. All three
+values ACCEPTED on the real engine path, and IN FORCE by direct `/proc` sampling
+with **no deviation in 78 samples**: 24/24 at exactly 1, 26/26 at exactly 2, 28/28
+at exactly 4. Corroborated by `Compilation Utilization` 0.958300 / 1.603661 /
+2.256520 and by average queue wait 11 261 151.57 / 5 180 716.12 / 843 631.41 ns —
+the 1-thread run's 11.3 ms average wait is the largest recorded in this milestone.
+`NQP_CODE_MAX_COMPILE` unset throughout, `blib` untouched, three distinct output
+jars, one compile per point, no re-runs, summarizer not edited.
+
+**THE SIX-POINT CURVE, tier policy throughout:**
+
+| threads | wall | Stage parse | total-compiler-ms | Success | stale dequeues |
+|---|---|---|---|---|---|
+| **1** | **297 s** | **225.941** | **277 722** | **1 578** | **972** |
+| **2** | **323 s** | **249.839** | **503 022** | **2 653** | **2 103** |
+| 3 | 327 s | 248.832 | 619 075 | 3 000 | 1 137 |
+| **4** | **341 s** | **260.621** | **728 428** | **3 156** | **622** |
+| 6 (default) | 337 s | 253.998 | 783 440 | 3 334 | 190 |
+| 16 | 346 s | 262.367 | 893 381 | 3 355 | 2 |
+
+**Ruling-grade finding: 3 WAS NOT A MINIMUM. It was a point on a slope that keeps
+falling to the hard floor.** `total-compiler-ms` is **strictly monotone increasing
+across all six points**, smallest step +14.0 % (6→16), largest **+81.1 % (1→2 —
+the second thread nearly doubles compiler CPU)**. Wall is monotone increasing
+across 1 / 2 / 3 / 4, with a 4 s inversion at 6 and a rise at 16. **The minimum is
+at 1, the `Math.max(1, threads)` floor, and the knob's answer on this workload is
+"as few as possible".** Not a plateau, by the dispatch's own test: 1-4 span 44 s
+and a factor of 2.6 in compiler CPU; 1→2 alone is 26 s, ~44x the 0.2 % wall floor.
+
+**The per-thread slope is the real shape and it flattens ~29x:** +26.0 s for the
+second thread, +4.0 (2→3), +14.0 (3→4), -2.0 (4→6), **+0.9 s** for each of the
+last ten. Ruling 42 measured a 3.7x flattening over 3→16; the low end extends it
+to ~29x over the full range. The cost of threads is concentrated in the first few.
+
+**Ruling 43's debounce fit SURVIVES and gains a boundary, found by extending the
+`id=` count (ruling 44's identity, validated by reproducing the 16-thread row
+3 355 / 1 672 / 1 515 / 2.01 exactly).** Unique targets by `id=` across the curve:
+**1 033 / 1 552 / 1 626 / 1 649 / 1 672 / 1 672**. Saturation at 1 672 holds from 4
+upward (4 threads is within 23 targets, 1.4 %). **Below 3 it breaks: 2 threads is
+120 targets short (7.2 %) and 1 thread is 639 short — 38.2 % of the compiler's
+call targets never compiled at all.** So the knob debounces above 3 and genuinely
+STARVES coverage below it. `compiles/target` falls monotonically 2.01 → 1.53 and
+`opt deopt` falls 3 808 → 2 355 in step, confirming the churn picture from the
+other end.
+
+**So the starvation knee EXISTS, sits between 2 and 1, and is on COMPILATION, not
+on wall.** Three counters place it there and nowhere else: coverage falls off a
+cliff, `Remaining Compilation Queue` goes **non-zero (7) for the first and only
+time in this milestone**, and queue wait reaches 11.3 ms. Wall does not rise at
+that knee. On a run-once compile, 38 % of the coverage and 1 777 of 3 355
+compilations are not worth what they cost to produce.
+
+**Ruling 41 is NOT revived and the low end makes its puzzle SHARPER.** Core-
+equivalent occupancy (`total-compiler-ms` / wall) across the six points is **0.94
+/ 1.56 / 1.89 / 2.14 / 2.32 / 2.58 cores of 16** — the fastest run kept the box
+~6 % busy, the slowest ~16 %, and 49 s separates them with fourteen cores idle in
+every run. One compiler thread on a 16-core box cannot be starving the parse
+thread. Labelled a fit to counters; settling it still needs process-CPU accounting
+or a box-idle record, which this batch did not take either.
+
+`Queues` is non-monotone across the low end too and more violently than above —
+2 921 / 5 329 / 4 726 / 4 349 / 4 098 / 3 920, **peaking at 2** — and `Queue
+Accuracy` bottoms at 0.564083 at 2 rather than at an endpoint. Ruling 7 stands.
+Tier-2 compiles 0 in all three, `Splits` 0, summarizer hygiene clean
+(`unparsed=0`). Failure channels kept apart per ruling 4: statistics-block
+`Permanent Bailouts` 235 / 351 / 373, summarizer `failed=` 235 / 351 / 372, raw
+grep 240 / 355 / 376.
+
+Caveats carried forward, not smoothed: one sample per point; the 2→3 step (4 s)
+and the 4→6 inversion (-4 s) are each ~1.2 % and cannot be separated from the wall
+resolution, so the shape rests on 1→2 and 1→16 and not on those; the 4→6 inversion
+breaks strict monotonicity on wall and one sample cannot say whether it is noise
+or a real shallow dip at 6; **1 thread wins this build while leaving 38.2 % of
+targets uncompiled, which is the opposite of what a long-lived Rakudo process
+wants, and nothing in this milestone measures that case**; the 1-thread counters
+are marginally truncated (queue did not drain); `Success` and the statistics
+block's `maxTarget` groupings remain name-keyed and merge ~10 % of targets;
+CORE.c only, one machine, and the box was not idle (a concurrent ledger-committing
+session).
