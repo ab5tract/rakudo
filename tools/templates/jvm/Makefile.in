@@ -26,7 +26,45 @@ J_NQP_MAXHEAP = 14G
 # runner enters through UnitMain with the unit path as its first argument --
 # the same entry nqp's own runners took in nqp 15c20930c, and one that reads
 # a class-road nqp.jar just as happily.
-@bpv(NQP_RR)@    = $(JAVA) -Xmx$(J_NQP_MAXHEAP) @j_truffle_args@ -cp @q(@nfp(./blib)@@cpsep@@nop($(BLD_NQP_JARS))@@cpsep@rakudo-runtime.jar@cpsep@@nop($(SYSROOT))@@abs2rel(@nqp_classpath@)@@j_truffle_jar@)@ org.raku.nqp.runtime.unit.UnitMain @q(@nop($(SYSROOT))@@nfp(@abs2rel(@nqp_classpath@)@/nqp.jar)@)@
+# The same Truffle tier policy the setting compiles run under, for the same
+# reason. Every target this drives -- the frontend modules, rakudo.jar and
+# the three BOOTSTRAP compiles -- is a process that compiles one file and
+# exits, so second-tier compilation has no run left in which to repay
+# itself and splitting has no steady state to reach. Milestone 6 measured
+# the policy on CORE.c only (434s -> 337s for the tier policy, -> 297s with
+# one compiler thread) because rakudo-j-build was the only driver it
+# touched; the clean-make breakdown of 2026-09-12 then showed BOOTSTRAP
+# v6c at 412s of a 985s build -- the largest single compile in it, and
+# running at stock Truffle settings the whole time. The knobs are spelled
+# out here rather than folded into j_truffle_args so that the runtime
+# runners, where latency mode would be actively wrong, cannot inherit them.
+#
+# -Xss512m is not optional here, and was missing entirely until now. The
+# first run of the policy died with a StackOverflowError 330s into v6c, deep
+# in NQP's recursive-descent grammar (quote_atom / EXPR / arglist / fatarrow,
+# repeating). The grammar recurses one Java frame chain per rule, so the host
+# stack it needs depends on how much of the guest call tree partial evaluation
+# has folded away -- and that is precisely what this policy changes. v6c had
+# been parsing on the JVM's default stack all along, passing only on headroom
+# that second-tier compilation happened to give it. The two other compiler
+# drivers already knew this: nqp-j-gradle carries -Xss64m with that very
+# comment, rakudo-j-build -Xss512m. This one was the outlier.
+#
+# With the stack set, the four-point matrix on v6c (standalone, one sample
+# each, run-to-run spread under 1%) reads: stock 401s, tier policy 379s,
+# tier policy + one compiler thread 381s, one compiler thread alone 398s.
+# So on this target the tiering half is the whole effect (-5.5%) and the
+# thread cap is inert -- the opposite of CORE.c, where the cap was worth a
+# further 40s. The cap is kept regardless: it costs nothing measurable, it
+# keeps one policy across both drivers, and it bounds compiler CPU should
+# the build ever run in parallel.
+#
+# The small size of the win is itself the finding. 22s out of 401 says guest
+# compilation is a far smaller share of v6c than of CORE.c, and the reason is
+# that v6c does not only parse -- it executes a 55k-line BEGIN block, and
+# execution is not the workload these knobs make cheaper. Whatever else is in
+# v6c's 379s has not been profiled yet.
+@bpv(NQP_RR)@    = $(JAVA) -Xss512m -Xmx$(J_NQP_MAXHEAP) -Dpolyglot.engine.Mode=latency -Dpolyglot.engine.FirstTierCompilationThreshold=1600 -Dpolyglot.engine.CompilerThreads=1 @j_truffle_args@ -cp @q(@nfp(./blib)@@cpsep@@nop($(BLD_NQP_JARS))@@cpsep@rakudo-runtime.jar@cpsep@@nop($(SYSROOT))@@abs2rel(@nqp_classpath@)@@j_truffle_jar@)@ org.raku.nqp.runtime.unit.UnitMain @q(@nop($(SYSROOT))@@nfp(@abs2rel(@nqp_classpath@)@/nqp.jar)@)@
 @bpv(RUN_RAKUDO_SCRIPT)@ = rakudo-j-build
 @bpv(RUN_RAKUDO)@ = @shquot(@perl@)@ @bpm(RUN_RAKUDO_SCRIPT)@
 
