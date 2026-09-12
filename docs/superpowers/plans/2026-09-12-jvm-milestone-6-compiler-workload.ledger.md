@@ -1790,3 +1790,58 @@ reconciles the ms totals to the millisecond: Task 6's dropped `opt failed` is
 31 ms (raw 644 345 - 31 = 644 314) and Task 4's are an `opt failed` at 28 ms
 plus a `Stage start`-prefixed `opt done` at 59 ms (raw 1 898 545 - 87 =
 1 898 458). No residual in either channel.
+
+Task 6 (combination): re-review round 1 (opus) — APPROVED, all four items
+ADDRESSED, no Critical, no new findings, ledger hunk 169/0. Rates confirmed
+(3475.8/s vs 6311.2/s; count 1.4257x, rate 1.8158x). Attribution reproduced
+independently by the reviewer's own awk: T4 tier-2 done 1019837 (1394) + tier-2
+failed 226 (5) + tier-1 done 857951 (4276) + tier-1 failed 20444 (402) = 1898458;
+T6 tier-1 done 626710 (3203) + tier-1 failed 17604 (330) = 644314; drops sum to
+exactly 1254144, and both totals equal `total-compiler-ms`. The 1019837-vs-1020063
+difference is NOT a discrepancy: the first review quoted tier-2 DONE only, the fix
+adds tier-2 FAILED (226 ms, 0.018 % of the drop, no effect on 81.3/18.7).
+Channels reconcile with named line numbers, and the millisecond channels too
+(T6 644345-31, T4 1898545-87).
+Reviewer's residual, recorded not fixed: the congestion model is DIRECTIONAL
+ONLY — real work fell 2.95x while the refusal rate rose only 1.82x, so a strictly
+proportional congestion model over-predicts; "a fit to two observed rates" is
+compatible with that, a quantitative claim would not be. Weak corroboration it
+noticed: `Compilation cancelled` 77 -> 71 and assumption-invalidated 15 -> 11 stay
+flat while the storm grows 43 %, which is what congestion-bound predicts and
+threshold-gating does not explain.
+
+Task 6 (combination): complete (commits `64860c451a`..`b0ad6ef40c`, review clean
+after one fix round).
+
+**Ruling 33 — USER DECISION 2026-09-12: the size knob is NOT adopted in milestone
+6, and its comparisons are postponed to milestone 7.** The user observed that the
+size knob is itself the sole cause of the reject-but-retry storm, and therefore
+that "does the size knob still add anything" cannot be answered while it remains
+broken. That is right, and sharper than the plan I was about to execute: a clean
+tier-policy run compared against the combination would have measured the knob's
+marginal value IN ITS BROKEN FORM — informative only in one direction, since a
+positive result would be a lower bound on the fixed version while a null or
+negative result would say nothing about it at all.
+
+Decision: keep the numbers clean. The clean Task 6 measures tier policy against
+Task 3's clean baseline, full stop. No marginal-value comparison is drawn.
+**Task 11 adopts tier policy (build-side only, ruling 30) and does NOT adopt
+`NQP_CODE_MAX_COMPILE`**; the knob is recorded as measured-but-not-adopted with
+its reasons. Milestone 7 makes the refusal permanent and re-evaluates it properly,
+at which point the question becomes answerable.
+
+Three reasons this is the right call beyond the measurement argument. (a) The
+knob's own case has weakened: its -11.5 % came from suppressing large roots, and
+large roots are overwhelmingly where tier-2 compilation happened — which tier
+policy now abolishes entirely, so the work it reclaimed is already reclaimed. (b)
+Its threshold of 2069 was derived from a cost profile (6.4 s mean, tier-2
+inclusive) that no longer exists. (c) Adopting it would ship a build default that
+fires ~2 M wasted submissions per compile. Tier policy alone is 81 % of the total
+saving and carries no such defect.
+
+Nothing measured so far is wasted: the permanent-refusal fix is
+behaviour-preserving whenever the knob is UNSET (`MAX_COMPILE_SIZE` stays
+`Integer.MAX_VALUE` and `prepareForCompilation` always returns true), so a future
+fixed measurement remains comparable to today's clean baseline. Costs if wrong:
+milestone 6 ships without a knob worth up to 11.5 % on compiler time — recoverable
+in milestone 7, and preferable to shipping it in a form nobody can evaluate.
