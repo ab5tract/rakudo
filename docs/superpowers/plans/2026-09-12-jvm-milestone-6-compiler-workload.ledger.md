@@ -942,3 +942,108 @@ about it as pure subtraction will be wrong. (3) 2069 is tuned to this run's
 failure minimum and has no principled meaning; an encoder change that shifts wire
 sizes moves it. Artifacts under `$CLAUDE_JOB_DIR/tmp/m6-corec-maxcompile.{log,markers,jar}`;
 `blib` untouched. Full report: `.superpowers/sdd/2026-09-12-jvm-milestone-6-compiler-workload/task-4-report.md`.
+
+Task 4: implementer DONE — rakudo `bf4f76ab18` (ledger only). Threshold 2069.
+Wall 419 s (baseline 434), total-compiler-ms 1898458 (2143944, -11.5 %), done 5670
+(5656), failed 407 (444), too-large failures gone. Verdict KEEP, build-side only.
+Task 4: review (opus) — Spec ✅, quality Approved, 0 Critical, 2 Important,
+3 Minor. Verdict CONFIRMED as KEEP, with the justification restated: the
+-11.5 % compiler work carries it, not the 3.5 % clock. The reviewer reproduced
+178 -> 0 and 5175 -> 5373 independently, confirmed the gate catches OSR roots
+(6 -> 0), and ruled out all three alternatives I asked about: sizes cannot have
+shifted (source and encoder byte-identical), unbracketed roots moved -7 not +198,
+tier-up is not inflating either side (Tier1 4286->4277, Tier2 1372->1394). The
+arithmetic reconciles exactly: 306833 ms + 1964 ms OSR = the report's 308797.
+It also confirmed `min-too-large-size=none` is REAL and not a parse miss —
+`reasons-parsed=4784`, the guard did not fire, `code is too large` is absent from
+the log, and the unclassified size list tops out at 2042, below the threshold.
+
+**Ruling 15 — the wall-clock gain is unproven at n=1, and the milestone must say
+so rather than bank 3.5 %.** Forward-only gives one sample per configuration and
+no repeats, so 15 s on 434 is inside plausible drift for a 16-core JIT-heavy
+workload, and Tasks 1 and 3 supply no variance estimate because they are
+different configurations. The verdict stands on the wall-clock-INDEPENDENT
+quantities: `total-compiler-ms` -11.5 %, `nqp-root-ms` -12.3 %, and a
+deterministic 178-to-0 on the gated population. The report's "the whole delta
+sits in Stage parse" was demoted from evidence to observation: parse is 77 % of
+the wall and where essentially all compilation happens, so any wall change lands
+there a priori — near-tautological, and it was being presented as a second
+independent line. Plan Task 11's findings doc now carries a standing caveats
+block so every row inherits it. Costs if wrong: the milestone under-claims a real
+gain, which is the safe direction for a measurement whose purpose is to rank
+levers rather than to win an argument.
+
+**Ruling 16 — the mechanism is NOT established, and the tidier story is the less
+supported one.** The implementer explained the +198 extra small compiles as the
+compiler spending freed capacity on a queue behind the large roots. The trace
+cannot show that: there are no `opt queued` lines in it. And the evidence favours
+a different mechanism — the extra compiles are almost all REPEATS (unique small
+roots rose only 1756 -> 1768, twelve), per-root deltas are churn, and total
+`Inlined Y` rose 2279 -> 2468, which is what you would see if callees previously
+inlined INTO the 178 suppressed compiles now accumulate their own call counts and
+compile separately. Both readings are now required in the report, with the
+evidence that separates them and an explicit statement that this trace cannot
+decide. The cleanest datum was missing entirely and is now required at the front
+of the argument: `done` + `failed` is flat, 6100 -> 6078, so the knob
+redistributed compile requests rather than removing them. Costs if wrong: a later
+task reasoning from the queue story would over-predict what a capacity knob buys
+— which is precisely Task 7.
+
+**Ruling 17 — milestone 7's lever estimate stays at ~442, not 407.** The
+deep-inlining cluster did not shrink. Among roots at or below 2069 it went
+400 -> 405; the entire -37 is the above-2069 population, SUPPRESSED by the knob
+rather than fixed, and it returns if the knob is dropped. Costs if wrong: an
+estimate built on 407 would understate milestone 7's lead lever by 8 %.
+
+Task 4: observation for later tasks, recorded not acted on — the knob run reports
+deopt=3106 and inval=1271, and the gated population is only 29 unique roots with
+`PERFORM-BEGIN[2085]` compiling 26 times and `encode_var[6418]` 18 times for 70 s.
+A root compiling 26 times is deoptimisation churn; three thousand deoptimisations
+during one compile is worth naming even though nothing in this milestone acts on
+it.
+
+Task 4 fix round 1: verdict unchanged (KEEP); no measurement re-run (forward-only),
+six characterisations corrected from the logs already on disk. (1) The mechanism
+claim "freed capacity on the queue behind the large roots" is withdrawn as
+asserted: the log contains **zero `opt queued` lines**, so this trace cannot
+measure enqueue at all. Both readings now stand side by side — freed capacity vs
+inlining redistribution — and the evidence favours **redistribution**: the +198
+extra small compiles are almost all repeats (unique roots compiled rose only
+1753 -> 1765, +12; per-root deltas are churn) while summed `Inlined Y` rose
+2279 -> 2468 (+189). (2) "The whole wall delta sits in Stage parse" is demoted from
+evidence to observation — parse is 77 % of the wall and holds essentially all
+compilation, so any wall change lands there a priori. The verdict now rests
+explicitly on `total-compiler-ms` -11.5 %, `nqp-root-ms` -12.3 % and the
+deterministic 178->0, all wall-clock-independent; the **3.5 % wall gain is stated
+as unproven at n = 1** (Tasks 1 and 3 are different configurations and supply no
+variance estimate). (3) Added the cleanest evidence, now leading the mechanism
+argument: **`done` + `failed` is flat, 6100 -> 6077 (-23, -0.4 %)** — 184 compiles
+refused, attempts barely moved, so the knob redistributed requests rather than
+removing them.
+
+**Correction that milestone 7 must carry: the deep-inlining cluster did NOT
+shrink.** Among roots at or below 2069 it went 403 -> 408; the entire -37 is the
+above-2069 population, which was *suppressed, not repaired*. Drop the knob and the
+37 return. Milestone 7's lever estimate stays at **~442 latent bailouts, not 407**;
+an estimate built on 407 understates it.
+
+**Threshold sensitivity, for Task 11 to record.** 2069 is not merely unprincipled:
+it sits **directly beneath `PERFORM-BEGIN[2085]`**, 26 compiles / 41 841 ms, the
+second-largest single contributor to the saving. A threshold of 2100 hands that
+root back and roughly a sixth of the saving with it. The suppressed population is
+small and lumpy — 184 compiles across only **29 unique roots**, led by
+`encode_var[6418]` 18x / 69 968 ms and `PERFORM-BEGIN[2085]` 26x / 41 841 ms — i.e.
+recompilation churn sitting just above the cut, not a broad tail. The knob's value
+is a function of where the cut falls relative to a handful of churning roots, so
+an encoder change shifting wire sizes a few percent can move roots across it.
+
+Observation for milestone 7, not acted on here: this run reports **deopt = 3106**
+and **inval. = 1271**. A root compiling 26 times is invalidation-driven
+recompilation; three thousand deoptimisations inside one CORE.c compile is worth
+naming. Not investigated.
+
+Small corrections: `Stage unit` **rose 1.46 s** (27.539 -> 28.999), so "every other
+stage flat to within a second" was wrong and is withdrawn (optimize -0.54 s, qast
+-0.31 s are flat). The "178" label excludes **6 OSR compiles** of
+`encode_block[4626]<OSR@...>` while the 308 797 ms figure includes them:
+306 833 + 1 964 = 308 797 exactly.
