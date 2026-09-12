@@ -2799,3 +2799,28 @@ controller session was committing concurrently).
 
 **Correctness note: build OUTPUT is unaffected.** How much of the compiler runs
 compiled changes only speed, not what it emits.
+
+**Subagent failure logged (model policy, 2026-09-11 rule).** The zero-point
+implementer (opus) returned MALFORMED OUTPUT: instead of its report contract it
+emitted a fragment of a Monitor progress event, which the harness flagged as
+instruction-shaped and neutralised. It terminated after ~140 s having written no
+report file and made no commit.
+
+**The work itself is intact and was NOT re-dispatched.** Inspection shows it had
+correctly started the compile before failing: `watched-run.raku` pid 1284762 and
+the compile JVM pid 1284769 are alive with the right command line
+(`--stall=1560 --max=1560`, output to `m6-corec-nocomp.jar`, tier policy set,
+`Compilation=false`, no `NQP_CODE_MAX_COMPILE`). So the failure was in REPORTING,
+not in setup or execution.
+
+Verified in force while it runs, which is the evidence the lost report owed:
+**0 `[engine] opt done` lines** in the log and **0 `trufflecompiler` threads** in
+the live JVM's `/proc/1284769/task/*/comm`. Compilation is genuinely off.
+
+Ruling: collect the result directly rather than re-dispatch. The remaining work is
+reading a log for wall clock and stage times, which needs no agent, and
+re-dispatching would either duplicate a running compile or waste the one in
+flight. The user rule permits escalating an erroneous subagent to Fable; not
+invoked, because the error was output handling rather than reasoning and there is
+nothing left for a subagent to reason about. Costs if wrong: the controller reads
+one log.
