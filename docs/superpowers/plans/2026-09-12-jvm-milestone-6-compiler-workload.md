@@ -1447,9 +1447,23 @@ a regeneration, not a rebuild; it does not invalidate any measurement.
      of the wall and is where essentially all compilation happens, so any
      wall change lands there a priori.
    - **A knob may redistribute rather than remove work.** Task 4
-     suppressed 178 compiles and the total compile count barely moved
-     (`done`+`failed` 6100 to 6078), so treating a later knob as pure
-     subtraction would be wrong.
+     suppressed 184 compiles (178 plus 6 on-stack-replacement) and the
+     total compile count barely moved (`done`+`failed` 6102 to 6079), so
+     treating a later knob as pure subtraction would be wrong.
+   - **Two engine statistics fields are poisoned from Task 4 onward.**
+     `Compilations` and `Compilation Accuracy` are dominated by
+     resubmissions in every run carrying `NQP_CODE_MAX_COMPILE`; compare
+     `Success`, `Permanent Bailouts` and `total-compiler-ms` instead.
+     This is the caveat most likely to bite, because those two fields
+     look authoritative.
+   - **The summarizer undercounts by one to four lines per run**, where
+     Truffle wrote a trace line into a stage line and the parser's
+     `starts-with` check bins it as non-trace. It is NOT a constant bias
+     (3 lines in one run, 4 in another), so never correct it by a fixed
+     offset; read the engine's own statistics block for exact counts. The
+     error is 0.03 % against deltas of +13 and -36, so it threatens no
+     comparison, and the tool was deliberately left unedited mid-sweep to
+     preserve comparability with Tasks 1 and 3.
    - **Task 4's threshold is sensitive, not merely arbitrary.** 2069 sits
      directly beneath `PERFORM-BEGIN[2085]`, the second-largest
      contributor at 43 s over 26 compiles; a threshold of 2100 brings it
