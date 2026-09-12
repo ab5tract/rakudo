@@ -1364,3 +1364,60 @@ Recorded as deliberately NOT fixed: `allowExperimentalOptions(true)` on
 NqpCheck.java lives in nqp-truffle/src, so it would rebuild nqp-truffle.jar and
 change the runtime under the remaining sweep compiles -- comparability outranks
 harness convenience; it waits until after the sweep, Tasks 6-7 route around the probe.
+
+Task 5: fix round 1/5 (4 items addressed, 0 open — the replicate finding is the
+report's headline, the noise floor has its own section, the Success fall is
+retired as noise, Task 4 is retroactively strengthened, DROP now leads with the
+load-bearing reasons and demotes +12.2 % to "restatement, not evidence", the
+default-value screen is added, and every count is sourced to its channel. Commit
+rakudo `3561039d55`.) The implementer verified default-true ITSELF by `javap` on
+`OptimizedRuntimeOptions` rather than taking it from the controller.
+Task 5: re-review round 1 (opus) — all four ADDRESSED. Noise floor independently
+recomputed by an awk pass over the `[engine] opt` lines rather than from the
+summarizer: wall 0.230 %, total-compiler-ms 0.656 %, Success 0.725 %, Permanent
+Bailouts 0.901 %, plus nqp-root-ms 0.807 % and Compilations 0.598 % — the
+reported 0.2/0.7/0.7/0.9 confirmed exactly. Default-true independently confirmed
+in the same jar the compile loaded (`<clinit>` offsets 490-501, `iconst_1` into
+the `OptionKey`; the generated descriptors carrying "(default: true)"). Ledger
+append-only, 115 insertions / 0 deletions.
+
+**Ruling 26 — I was wrong about the channel discrepancy and the implementer was
+right.** I told it the raw-grep excess over the summarizer's failure counts was
+retry lines. It is not: the excess is the statistics block's own per-reason
+breakdown repeating each reason string. The re-reviewer located every line —
+six deep-inlining at 473383, 474437, 475457, 476478, 477533, 478555 and one
+too-large at 476477, all AFTER the statistics block opens at 473375, one of them
+reading literally `code is too large: 2` — and confirmed the identical structure
+in the Task 3 log. So 446+6 = 452, 2+1 = 3, and 446+2 = 448 = Permanent Bailouts:
+all three channels reconcile exactly rather than approximately. Costs if wrong:
+none; this replaced a guess with a located, verified structure.
+
+**Ruling 27 — the floor establishes the compiler-work gain and does NOT establish
+the wall-clock gain; the findings doc will under-claim accordingly.** Arithmetic
+confirmed from Task 4's own log: total-compiler-ms -11.45 % = **17.45x** the
+0.656 % floor, nqp-root-ms -12.31 % = 15.3x, wall -3.46 % = 15.0x. But a single
+pair yields one difference and ZERO degrees of freedom: it bounds nothing, and
+two draws are on average closer together than the true spread, so it likely
+UNDERSTATES noise. 17x survives a several-fold underestimate, so "Task 4's
+compiler-work gain is not drift" is safe to state flatly. The wall figure is
+weaker than its 15x suggests, for two reasons the reviewer named: the wall floor
+is a single one-second difference at the measurement's own whole-second quantum,
+making 0.2 % a RESOLUTION LIMIT rather than a variance estimate; and Task 4's
+configuration churns the compile queue with its own retry storm, so the baseline
+pair's spread is not guaranteed transferable to it. Task 11 will therefore state
+the compiler-work gains as established and the -3.5 % wall as consistent and
+directionally supported but not independently established, with the floor's
+limitations in one sentence. This supersedes the unqualified half of ruling 24(c).
+Costs if wrong: the milestone under-claims a real wall-clock win, which is the
+direction I chose deliberately.
+
+Task 5: controller slip, recorded — the re-review range I scoped ended at
+`3561039d55` while HEAD was already `0117bdbc34`, because I committed the plan
+edit after generating the package. The reviewer read the extra commit anyway and
+found it legitimate (plan-only, 37/5, the five deletions being exactly the
+now-false "there is no noise floor" caveat). Generate the package AFTER all
+commits for the round, not before.
+Task 5: the reviewer's second note is FIXED, not deferred — Tasks 6 and 7 carried
+`-Dpolyglot.engine.PartialBlockCompilation=true` literally in their example
+command lines, which is the precise habit the new default-value screen warns
+against. Removed from both, with a note saying why it is absent.

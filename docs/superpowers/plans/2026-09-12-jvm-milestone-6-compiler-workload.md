@@ -941,7 +941,7 @@ Written out with a kept `NQP_CODE_MAX_COMPILE`; drop that prefix if Task
 
 ```bash
 NQP_CODE_MAX_COMPILE=<N-1> \
-JDK_JAVA_OPTIONS='-Dpolyglot.engine.TraceCompilation=true -Dpolyglot.engine.CompilationStatistics=true -Dpolyglot.engine.PartialBlockCompilation=true -Dpolyglot.engine.Mode=latency -Dpolyglot.engine.MultiTier=true -Dpolyglot.engine.FirstTierCompilationThreshold=<value> -Dpolyglot.engine.LastTierCompilationThreshold=<value>' \
+JDK_JAVA_OPTIONS='-Dpolyglot.engine.TraceCompilation=true -Dpolyglot.engine.CompilationStatistics=true -Dpolyglot.engine.Mode=latency -Dpolyglot.engine.MultiTier=true -Dpolyglot.engine.FirstTierCompilationThreshold=<value> -Dpolyglot.engine.LastTierCompilationThreshold=<value>' \
 NQP_CODE_CLOSE_AT_EXIT=1 RAKUDO_RAKUAST=1 \
 raku tools/build/watched-run.raku \
   --log=$CLAUDE_JOB_DIR/tmp/m6-corec-tier.log \
@@ -951,6 +951,11 @@ raku tools/build/watched-run.raku \
        --target=jar --stagestats \
        --output=$CLAUDE_JOB_DIR/tmp/m6-corec.jar gen/jvm/CORE.c.setting
 ```
+
+**`PartialBlockCompilation` is deliberately absent from this command.**
+Task 5 established it defaults to true, so writing it out sets nothing
+and would be the exact habit the screening rule warns against. Task 5
+was DROPped, so nothing is carried from it.
 
 Write the exact command you ran into the ledger, since the carried set
 is what makes this configuration reproducible.
@@ -1011,7 +1016,7 @@ with all of them kept; drop whichever their tasks dropped:
 
 ```bash
 NQP_CODE_MAX_COMPILE=<N-1> \
-JDK_JAVA_OPTIONS='-Dpolyglot.engine.TraceCompilation=true -Dpolyglot.engine.CompilationStatistics=true -Dpolyglot.engine.PartialBlockCompilation=true -Dpolyglot.engine.Mode=latency -Dpolyglot.engine.MultiTier=true -Dpolyglot.engine.FirstTierCompilationThreshold=<value> -Dpolyglot.engine.LastTierCompilationThreshold=<value> -Dpolyglot.engine.CompilerThreads=<cores/2>' \
+JDK_JAVA_OPTIONS='-Dpolyglot.engine.TraceCompilation=true -Dpolyglot.engine.CompilationStatistics=true -Dpolyglot.engine.Mode=latency -Dpolyglot.engine.MultiTier=true -Dpolyglot.engine.FirstTierCompilationThreshold=<value> -Dpolyglot.engine.LastTierCompilationThreshold=<value> -Dpolyglot.engine.CompilerThreads=<cores/2>' \
 NQP_CODE_CLOSE_AT_EXIT=1 RAKUDO_RAKUAST=1 \
 raku tools/build/watched-run.raku \
   --log=$CLAUDE_JOB_DIR/tmp/m6-corec-threads.log \
@@ -1519,10 +1524,22 @@ a regeneration, not a rebuild; it does not invalidate any measurement.
      genuine replicate — the only one forward-only permits. Spread at
      n=2: wall **0.2 %**, `total-compiler-ms` **0.7 %**, `Success`
      **0.7 %** (41 compiles), `Permanent Bailouts` **0.9 %** (4). Quote
-     this beside the table and judge every verdict against it. A
-     wall-clock move under roughly 1 % must not be claimed. It is a
-     single pair, so treat it as an order of magnitude rather than a
-     confidence interval.
+     this beside the table and judge every verdict against it.
+   - **How far the floor may be leaned on, per Task 5's review.** State
+     Task 4's `total-compiler-ms` and `nqp-root-ms` gains as
+     **established**: at 17.4x and 15.3x the measured spread, they
+     survive a several-fold underestimate of it. State its **-3.5 % wall
+     clock as consistent and directionally supported but NOT
+     independently established**, for two reasons. The wall floor is a
+     single one-second difference at the measurement's own whole-second
+     quantum, so 0.2 % is a resolution limit rather than an estimate of
+     variance. And Task 4's configuration churns the compile queue with
+     its retry storm, so the baseline pair's spread is not guaranteed
+     transferable to it. Attach one sentence saying the floor is a single
+     pair with zero degrees of freedom, that two draws are on average
+     closer together than the true spread so it likely UNDERSTATES noise,
+     and that it is an order-of-magnitude guide rather than a confidence
+     interval.
    - **`total-compiler-ms` and `nqp-root-ms` are the trustworthy
      quantities.** They are wall-clock-independent and, in Task 4, moved
      an order of magnitude further than the wall did.
