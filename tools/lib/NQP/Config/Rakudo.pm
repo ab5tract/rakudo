@@ -779,17 +779,22 @@ sub gen_nqp {
         }
     }
 
-    return unless %need;
-
-    return unless defined($gen_nqp) || defined($gen_moar);
-
     # java-to-kotlin prototype: the jvm backend builds from the nested nqp
     # checkout via Gradle (stage0 -> stage1 -> stage2, runtime, runner),
     # never through the legacy clone + Configure.pl + make path below --
     # an upstream nqp has no Truffle grammar engine and this branch cannot
     # run on it. The checkout is a working tree on its own branch, so it
     # must also never be moved to $nqp_want by git_checkout below.
-    if ( $need{jvm} ) {
+    #
+    # This runs ahead of the %need / gen-nqp gates that follow, and keys off
+    # --gen-nqp alone rather than %need{jvm}. The nested checkout is always
+    # discoverable (the nqp-j-gradle fallback above) and its version is
+    # always far past NQP_REVISION, so %need{jvm} is empty even when the
+    # checkout's sources have changed -- there is no staleness signal to
+    # gate on. --gen-nqp is the explicit "build the nested nqp" request and
+    # is honoured as one; without it nothing is built, as before. (--gen-moar
+    # implies a defined gen-nqp, see Configure.pl, so that path is unchanged.)
+    if ( $self->active_backend('jvm') && defined($gen_nqp) ) {
         my $nqp_dir = File::Spec->catdir( $startdir, 'nqp' );
         my $gradlew = File::Spec->catfile( $nqp_dir, 'gradlew' );
         $self->sorry( "The jvm backend needs the nested nqp checkout at"
@@ -816,8 +821,11 @@ sub gen_nqp {
         $self->backend_config( jvm => \%c );
         $impls->{jvm}{ok} = 1;
         delete $need{jvm};
-        return unless %need;
     }
+
+    return unless %need;
+
+    return unless defined($gen_nqp) || defined($gen_moar);
 
     {
         my $user = $options->{'github-user'} // 'Raku';
