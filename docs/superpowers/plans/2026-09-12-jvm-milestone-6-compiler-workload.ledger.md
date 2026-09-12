@@ -490,3 +490,92 @@ The new `trace-unknown-bailout.log` prints an honest `min-too-large-size=none`
 with `count=1  sizes: 555  graph too chunky for the backend` underneath it.
 The plan file is no longer modified in the working tree; this commit carries
 the controller's round-2 ledger additions, appended-to and otherwise untouched.
+
+Task 2: fix round 2/5 (2 addressed, 0 open — `@SIZE-BAILOUT-SPELLINGS` alternation
+plus an `unclassified failure reasons` block printing count, sizes and reason
+text; tail pieces that do not look like a field start rejoined with their pipe,
+tested by SHAPE rather than by a name list, so the worst misfire is an over-long
+value and never a truncated one. Suite 16 -> 21. Commit rakudo `d9a77d1fb5`.)
+Both symptoms were reproduced against the round-1 tool first: `min-too-large-size`
+48213 with the 900- and 1500-word roots absent, and the reason truncated at the
+pipe; six assertions failed.
+Task 2: re-review round 2 (opus) — both ADDRESSED, verified on the reviewer's own
+five-event mixed trace (`min-too-large-size=900`, all four roots listed), no
+regression on the lone real-format line (31337), suite OBSERVED 21/21, ledger
+hunk 78 insertions / 0 deletions so controller content is provably unaltered.
+The field-start shape rule was probed against all eight formats decompiled from
+`TraceCompilationListener`: exactly one legitimate field fails it, `Count/Thres`
+(`\w*` stops at the slash), and that is harmless because the tier match is
+anchored and nothing reads Count/Thres. A reason containing `|Foo ` still
+truncates, but then matches no spelling and surfaces in the unclassified block
+with its size, so it is visible rather than absent.
+
+**Ruling 8 — `exceeds` was my guess and it is worse than no guess at all.** I
+supplied three spellings in the round-2 brief; only two were ever verified to
+exist in this tree. The re-reviewer observed a small root failing with
+`inlining of foo exceeds the inlining budget` being classified as a size bailout,
+giving `min-too-large-size=40` with `by size: tiny[40], big[48213]`. A threshold
+of 40 wire words would refuse essentially every compilation on the 460 s run,
+which does not bias Task 4's measurement but destroys it. Worse, the misfire is
+invisible to the tool's own alarm BY CONSTRUCTION: a reason that matched a
+spelling is by definition not unclassified. Round 3 removes `exceeds`, keeping
+only `code is too large` (the trace) and `too big to safely compile`
+(libjvmcicompiler.so). The general lesson is recorded beside the list in the
+code: the unclassified block IS the mechanism for unknown spellings, and it
+works; a guessed-at loose substring does not extend the tool's reach, it
+bypasses that mechanism and turns a loud unknown into a silent wrong answer.
+Plan Task 4 Step 1 now requires reading the failures-by-reason, `by size:` and
+unclassified blocks beside the number, with two named plausibility checks.
+Costs if wrong: a genuine size bailout under a third spelling now lands in the
+unclassified block instead of the population, so the minimum reads high — but
+loudly, with the reason and its size printed for a human to act on.
+
+Task 2: PARKED residual — a partial reason-parse leaves a silent too-high
+minimum. With one failure whose reason parses and one whose does not, the
+`(failed=N, reasons-parsed=0)` note does not fire (it requires zero parsed) and
+`@unclassified` skips empty reasons, so the unparsed group appears in
+failures-by-reason with a count but without its sizes. Ruling: park. It needs two
+different shapes among `opt failed` lines, and `FAILED_FORMAT` is a single
+constant in `TraceCompilationListener`, so every such line shares one shape.
+Costs if wrong: a too-high threshold on a trace whose failure lines are somehow
+heterogeneous — which Task 4 Step 1's new plausibility checks would surface.
+
+Task 2: fix round 3/5 (1 addressed, 0 open — commit stamped 19:40, the fifth;
+nothing squashed). `exceeds` is deleted from `@SIZE-BAILOUT-SPELLINGS`, which
+now holds only the two spellings verified to exist in this tree: `code is too
+large` from the compilation trace and `too big to safely compile` from
+libjvmcicompiler.so. The reasoning is in a comment beside the list, in the
+controller's own terms: a guessed spelling does not extend the tool's reach, it
+BYPASSES the mechanism that already covers the unknown. The unclassified block
+prints an unmatched reason with its count and sizes, loudly, for a human. A
+loose entry converts that loud unknown into a silent wrong answer — and the
+wrong answer is invisible to the tool's own alarm by construction, since a
+reason that matched a spelling is by definition not unclassified. The comment
+ends with the rule for next time: when a real trace shows a bailout this list
+does not know, it lands in that block; add it here THEN, with the trace that
+proves it.
+
+Task 2: fix round 3/5 red run. A `tiny[40]` line was added to the fixture in the
+`FAILED_FORMAT`, reason `inlining of foo exceeds the inlining budget`. Against
+the round-2 tool, four assertions failed and the misfire printed exactly as the
+re-reviewer described it: `min-too-large-size=40` over
+`by size: tiny[40], graph_bail[900], inline_pipe[1500], parse_stmt[48213],
+parse_expr[91002]`. After the deletion, 22/22 and
+**min-too-large-size=900**, with `count=1  sizes: 40  inlining of foo exceeds
+the inlining budget` in the unclassified block where a human will read it. Only
+one assertion was added, as directed; the "must NOT enter the population" half
+is carried by the three assertions that already existed (min=900, the by-size
+membership line, and `too-large roots: 4`), all three of which failed in the red
+run and pass now.
+
+Task 2: NEW OBSERVATION from round 3, NOT fixed, controller's call. Round 3's
+fixture created the first tie in a `.classify(...).sort(-*.value.elems)` group,
+and tied groups reorder between runs: five consecutive runs of the same trace
+printed the two count=1 unclassified reasons in a different order twice.
+`classify` returns a Hash and the sort is stable, so ties inherit MoarVM's hash
+iteration order. It affects the `failures by reason` block equally. No assertion
+is at risk (all use `contains`) and no number is wrong, but two runs of one
+trace produce textually different reports, which will be a nuisance the moment
+Task 3 diffs them. The fix is a tiebreak key on the sorts, roughly
+`.sort({ (-.value.elems, .key) })`. Left alone because this round was scoped to
+one line plus a test, and scope is the controller's to set.

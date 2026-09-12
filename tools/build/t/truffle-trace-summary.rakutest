@@ -3,12 +3,12 @@ use Test;
 my $tool = $*PROGRAM.parent(2).add('truffle-trace-summary.raku');
 my $fix  = $*PROGRAM.parent.add('fixtures/trace-sample.log');
 
-plan 21;
+plan 22;
 
 my $out = run($*EXECUTABLE, $tool, $fix, :out).out.slurp(:close);
 
 ok  $out.contains('done=2'),   'counts the two successful compilations';
-ok  $out.contains('failed=5'), 'counts the failed compilations';
+ok  $out.contains('failed=6'), 'counts the failed compilations';
 nok $out.contains('ok - warm add'),
     'ignores lines that are not engine trace lines';
 ok  $out.contains('code installation failed: code is too large'),
@@ -23,14 +23,14 @@ ok  $out ~~ / 'mean=6500' /,
 # Pins the accepted-line count. Without this nothing noticed that a whole
 # class of lines had stopped parsing -- which is how the "Reason:" colon in
 # TraceCompilationListener.FAILED_FORMAT got through as a silent zero.
-ok  $out.contains('events=8'), 'accepts every trace line in the fixture';
+ok  $out.contains('events=9'), 'accepts every trace line in the fixture';
 ok  $out.contains('unparsed=0'),
     'no [engine] opt line is dropped without a tally';
 
 # FAILED_FORMAT writes "|Reason: %s|" with a colon; DEOPT/INV/UNQUEUED write
-# "|Reason %s|" without one. Six of the eight events carry a reason, and all
-# six must parse -- five with the colon, one without.
-ok  $out.contains('reasons-parsed=6'),
+# "|Reason %s|" without one. Seven of the nine events carry a reason, and all
+# seven must parse -- six with the colon, one without.
+ok  $out.contains('reasons-parsed=7'),
     'parses Reason with and without the colon';
 
 # infix:<|> and infix:<+|> are real Rakudo operators, so a root name can
@@ -58,9 +58,19 @@ ok  $out.contains('too-large roots: 4 (4 sized, 0 unsized)'),
 ok  $out.contains('sizes: 700  inlining budget exhausted'),
     'prints unclassified failure reasons with the sizes behind them';
 
-ok  $out.contains('total-compiler-ms=23709'),
+# A loose substring is worse than no spelling at all. "inlining of foo exceeds
+# the inlining budget" is a 40-word root reporting an inlining decision, not a
+# size bailout; classifying it would set min-too-large-size=40 and a threshold
+# of 40 wire words refuses essentially every compilation. It must land in the
+# unclassified block instead -- where a human reads it -- and the three
+# assertions above (min=900, the by-size line, and the population count) are
+# what hold it out of the population.
+ok  $out.contains('sizes: 40  inlining of foo exceeds the inlining budget'),
+    'an inlining-budget message is unclassified, never a size bailout';
+
+ok  $out.contains('total-compiler-ms=23829'),
     'totals every root';
-ok  $out.contains('nqp-root-ms=23637'),
+ok  $out.contains('nqp-root-ms=23757'),
     'totals the bracketed (NQP) roots separately';
 
 # A trace where EVERY failure is an unrecognised spelling: the minimum is
