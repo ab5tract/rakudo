@@ -297,7 +297,7 @@ Task 2: implementer dispatched (opus); BASE rakudo `32f3800ee0`. Test-first:
 fixture, failing test, tool, passing test, then a real short-workload smoke whose
 required positive marker is a `done=` count above zero.
 
-Task 2: complete (commit rakudo `4d9012b443`). Test-first order honoured:
+Task 2: complete (commit rakudo `d92d405b80`). Test-first order honoured:
 fixture (6 lines, verbatim from the brief) → test (8 assertions, verbatim) → RUN
 AND SEE IT FAIL (7 of 8 failed; only the `nok` "ignores non-trace lines"
 assertion passed, vacuously, against the empty output of a missing tool) → tool
@@ -330,3 +330,8 @@ whether it means all roots or only the bracketed (NQP program) ones. (c) `Time`
 is read as the total, not the `(a+b)` split. (d) `getName()` is at
 `nqp/nqp-truffle/src/main/java/org/raku/nqp/truffle/NqpRootNode.java:90-94`; the
 brief cites 91-93, off by one line at each end and immaterial.
+
+Task 2: the entry above was first written against the pre-amend hash
+`4d9012b443`; `d92d405b80` is the same tree after one amend that only filled in
+that hash, and this follow-up commit corrects the citation. The tool commit to
+quote is `d92d405b80`.
