@@ -92,9 +92,19 @@ build from the top, and that build's numbers are the milestone
 baseline.
 
 Baselines to beat, for reference only (milestone 5's build, nqp
-`df564ddbb` / rakudo `e0e4bbc35d`): nqp `clean buildJvm` 256 s; `make`
-from the top 1054 s; CORE.c 464 s, of which parse 352.4 s and optimize
-36.6 s.
+`df564ddbb` / rakudo `e0e4bbc35d`): nqp `clean buildJvm` 256 s; CORE.c
+464 s, of which parse 352.4 s and optimize 36.6 s.
+
+**`make` has TWO milestone 5 figures, and using the wrong one invents a
+regression.** Milestone 5 measured `make` after a clean nqp build
+(incremental) at **1054 s**, and `make clean && make` at **1133 s**,
+twice, with an identical CORE.c parse of 352 s. Its own record says the
+perf session baselines against BOTH. A clean-build measurement therefore
+compares against 1133 s, never against 1054 s. This correction was made
+2026-09-12 after the milestone 6 baseline (a clean build at 1122 s) was
+briefly read as a 6.5 % regression against 1054 s; against the right
+comparator it is 11 s faster, which is what every component clock
+already said. Always pin the method to the number.
 
 ## Phase A: baseline and knob sweep
 
