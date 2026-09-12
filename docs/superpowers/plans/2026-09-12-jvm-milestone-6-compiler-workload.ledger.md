@@ -1459,3 +1459,165 @@ the old design. It is recorded as confounded and NOT used to judge tier policy.
 A clean Task 6, without `NQP_CODE_MAX_COMPILE`, is dispatched after it. Costs if
 wrong: one extra ~7-minute compile, against a data point that cannot be
 recovered later without another.
+
+### Task 6 configuration row: tier policy (CONFOUNDED — carries `NQP_CODE_MAX_COMPILE=2069`)
+
+Per ruling 28 this run is the record of *tier policy ON TOP OF the size knob*,
+not the milestone's tier-policy verdict. Its baseline is Task 4, which carries
+the same knob. Full report:
+`.superpowers/sdd/2026-09-12-jvm-milestone-6-compiler-workload/task-6-report.md`.
+
+**SCREEN A (defaults, ~2 min, no compile spent).** Read out of
+`nqp/build/jvm/share/truffle/truffle-runtime-25.2.4.jar` in both places a
+default is written: the `OptionKey` constructions in
+`OptimizedRuntimeOptions.<clinit>` and the generated
+`OptimizedRuntimeOptionsOptionDescriptors` prose.
+
+| option | default | evidence | changed? |
+|---|---|---|---|
+| `engine.Mode` | `default` (`EngineModeEnum.DEFAULT`) | `getstatic EngineModeEnum.DEFAULT` -> `putstatic Mode` | YES -> `latency` |
+| `engine.MultiTier` | **`true`** | `iconst_1` -> `putstatic MultiTier` | **NO — screened out, omitted from the command** |
+| `engine.FirstTierCompilationThreshold` | `400` | `sipush 400` | YES -> `1600` (4x) |
+| `engine.LastTierCompilationThreshold` | `10000` | `sipush 10000` | YES -> `40000` (4x) |
+
+`engine.MultiTier=true` was dropped for the same reason ruling 27 dropped
+`PartialBlockCompilation` from the briefs: setting a value the option already
+holds sets nothing. It is inert twice over — `EngineData.<init>` computes
+`multiTier = !compileImmediately && MultiTier`, and `compileImmediately` is
+false. **The measured configuration is therefore THREE options, not four**, and
+the row does not reproduce as written if `MultiTier` is added back.
+
+**SCREEN B (structural): PASSES.** Unlike Task 5's option, tier policy is not
+node-class-specific. All three options are read in
+`com.oracle.truffle.runtime.EngineData.<init>` into fields consumed by
+`com.oracle.truffle.runtime.OptimizedCallTarget` — the one call-target class
+every guest root gets on the optimizing runtime, Bytecode DSL or AST.
+`EngineData` computes `firstTierOnly = (Mode == LATENCY)` and
+`callAndLoopThresholdInInterpreter = FirstTierCompilationThreshold`;
+`OptimizedCallTarget` reads both. `NqpRootNode` is a `@GenerateBytecode`
+`BytecodeRootNode` and gets an `OptimizedCallTarget` like anything else.
+
+Screen B also found a **side effect not in the knob's name**: `EngineData`
+computes `splitting = Splitting && (Mode != LATENCY)`, so `Mode=latency` **also
+switches Truffle splitting off**. The measurement cannot separate that from the
+tier effect.
+
+**Probe: false-rejected as ruling 26 predicted. NOT BLOCKED.** `NqpCheck` never
+printed `nqp-code check passed`; it threw `Option
+'engine.FirstTierCompilationThreshold' is experimental and must be enabled with
+allowExperimentalOptions(boolean)` at `NqpCheck.java:31`, while
+`NqpPolyglot.kt:49-51` — the real compiler context — sets
+`allowExperimentalOptions(true)`.
+
+**Real-path verification: accepted AND in force**, three ways.
+`./nqp/nqp-j-gradle -e 'say("engine-ok")'` with the three options printed
+`engine-ok`. Negative controls prove the values are parsed rather than ignored:
+`Mode=bogus` -> `Mode can be: 'default', 'latency' or 'throughput'.`;
+`FirstTierCompilationThreshold=notanint` -> `For input string: "notanint"`. And
+`Mode=latency` is visible in the run's own trace: `opt done ... Tier 2` lines go
+**1394 -> 0** (the one `Tier 2` string left in the log is the statistics block's
+histogram label), while tier-1 successes fall 4277 -> 3203, which is the raised
+first-tier bar showing as the residual.
+
+`LastTierCompilationThreshold=40000` is accepted and parsed but **structurally
+inert under `latency`**: with `firstTierOnly` the target never promotes, so
+`callAndLoopThresholdInFirstTier` is never the gate; its one surviving use is
+`traversingFirstTierBonus = TraversingQueueFirstTierBonus * LastTier / FirstTier`,
+and multiplying both thresholds by 4 leaves that ratio at its default. Task 11
+and the clean Task 6 should drop it rather than carry cargo.
+
+Exact command run (driver script kept at `$CLAUDE_JOB_DIR/tmp/run-task6.sh`):
+
+```bash
+NQP_CODE_MAX_COMPILE=2069 \
+JDK_JAVA_OPTIONS='-Dpolyglot.engine.TraceCompilation=true -Dpolyglot.engine.CompilationStatistics=true -Dpolyglot.engine.Mode=latency -Dpolyglot.engine.FirstTierCompilationThreshold=1600 -Dpolyglot.engine.LastTierCompilationThreshold=40000' \
+NQP_CODE_CLOSE_AT_EXIT=1 RAKUDO_RAKUAST=1 \
+raku tools/build/watched-run.raku \
+  --log=$CLAUDE_JOB_DIR/tmp/m6-corec-tier.log \
+  --show-file=$CLAUDE_JOB_DIR/tmp/m6-corec-tier.markers \
+  --show='Stage' \
+  -- perl rakudo-j-build --setting=NULL.c --ll-exception --optimize=3 \
+       --target=jar --stagestats \
+       --output=$CLAUDE_JOB_DIR/tmp/m6-corec.jar gen/jvm/CORE.c.setting
+```
+
+| quantity | T3 (clean) | T4 (incumbent) | **T6 combination** | vs T4 | vs T3 | floor |
+|---|---|---|---|---|---|---|
+| wall clock | 434 s | 419 s | **329 s** | **-90 s (-21.5 %)** | -105 s (-24.2 %) | 0.2 % |
+| `total-compiler-ms` | 2 143 944 | 1 898 458 | **644 314** | **-66.1 %** | -69.9 % | 0.7 % |
+| `nqp-root-ms` | 1 937 603 | 1 699 179 | **590 650** | **-65.2 %** | -69.5 % | — |
+| `Success` (stats block) | 5 658 | 5 671 | **3 203** | **-2 468 (-43.5 %)** | -43.4 % | 0.7 % |
+| `Permanent Bailouts` (stats block) | 444 | 408 | **331** | **-77 (-18.9 %)** | -25.5 % | 0.9 % |
+
+`unparsed=0`; `min-too-large-size=none` (the carried gate still holds). Count
+channels, kept apart per ruling 25: statistics block `Permanent Bailouts` 331,
+summarizer `failed=` 330, raw grep 336.
+
+**Mechanism — a reduction in compilations, which is what the knob was supposed
+to do.** Where Task 4 refused big roots and the compiler re-spent the freed
+capacity on the queue behind them (`done` went UP), tier policy removes
+compilations outright: 5671 -> 3203. Summing the `Time` field of Task 4's
+tier-2 `opt done` lines gives **1 019 837 ms over 1394 compilations — 54 % of
+its entire compiler work**, and this run spends zero there. The remaining
+~234 000 ms is 1074 fewer tier-1 successes plus 72 fewer tier-1 failures.
+Second-tier recompilation of roots a one-shot build runs a handful of times was
+more than half of all compiler work.
+
+**Not the Stage-parse tautology (lesson 2).** Every stage fell, by
+marker-to-marker deltas: parse 320 -> 246 s (-74), optimize+qast 36 -> 31 (-5),
+qast->unit 34 -> 25 (-9), unit->jar 29 -> 27 (-2).
+
+**The deep-inlining cluster MOVED: 442-447 across Tasks 3/4/5 -> 330-331 here.**
+Not fixed — there are simply 43 % fewer compilations in which to hit it.
+`failures by reason` holds exactly one reason (deep inlining), no new reason
+appeared, and the summarizer's unclassified block holds that same single reason
+with sizes 43..2042 plus three `no-size` host roots. Milestone 7's inlining
+lever should be re-stated as ~330 under tier policy.
+
+**Ruling 28's premise, tested against this run — it runs the OTHER WAY.** Ruling
+28 expected tier policy to shrink the retry storm and thereby inflate a result
+measured on top of the size knob. It grew: `Compilations` 1 462 534 -> 2 080 000
+(+42.2 %), `Compilable not ready for compilation` 1 456 361 -> 2 076 384
+(+42.6 %), useful compilations per submission 1-in-258 -> 1-in-649. (Ruling 25
+forbids comparing `Compilations` across runs *as a measure of compiler work*;
+here it is not a proxy for anything, it IS the quantity ruling 28 is about.)
+Mechanism: higher thresholds keep a root ineligible longer, and a size-refused
+root resubmits for the whole of that longer window. Two consequences — the
+confound's sign is against tier policy, so -90 s is a floor rather than an
+inflated figure; and the clean Task 6, having no size refusals to resubmit,
+should show a SMALLER `Compilations` figure than this run, not a larger one. If
+it does not, something else drives resubmissions and ruling 28's model needs
+revisiting. None of this reopens ruling 28: removing a confound whose sign you
+cannot predict in advance is right either way, and a clean baseline is worth
+having on its own.
+
+**Verdict: KEEP for the combination.** It decides that tier policy is worth
+-90 s and -66 % compiler work ON TOP OF the size knob — the configuration Task
+11 would have shipped under the old design, now measured once and not needing a
+re-run. It does NOT decide tier policy; the clean Task 6 does. Recorded
+expectation, before that run exists so it can be wrong: the clean run should
+show a LARGER absolute tier-policy gain than -90 s, because Task 4's knob has
+already removed 178 of the largest compilations that tier policy would also have
+removed — the two knobs overlap in what they suppress. Against Task 3's 434 s, a
+clean tier policy landing near or below 329 s would confirm that.
+
+**Build-side adoption only, and more sharply than Task 4.** `Mode=latency` pins
+every root to tier 1 for the life of the process and switches splitting off.
+That is right for a compiler that runs once and exits and is the opposite of
+what Rakudo's runtime wants, where runtime performance outranks compile time by
+standing user priority.
+
+Task 6 concerns (implementer, for review): (1) three options moved at once — the
+trace decomposes the effect (tier-2 abolition 1 019 837 ms, raised first-tier
+bar ~234 000 ms) but isolating `Mode=latency` alone would be another compile;
+(2) `Mode=latency` smuggles in splitting=off, so it is not purely tier policy
+and a reviewer modelling it as such will be wrong; (3) `Success` falling 43 % is
+eligibility, not suppression-by-size — nothing was refused
+(`min-too-large-size=none`, one reason, no new reason); (4) `NQP_CODE_MAX_COMPILE=2069`
+was tuned on a run whose largest compiles included tier-2 work that no
+longer exists, so if it is ever recombined with tier policy the threshold should
+be re-derived rather than assumed; (5) one sample, and the floor is still n=2
+with a whole-second wall quantum — a formality at 100x, but stated; (6) the
+commit stamp is 20:40:00 as briefed, which is four minutes BEFORE its parent
+`64860c451a` (20:44:00) — the briefed value was fixed before ruling 28 landed,
+and I kept it rather than silently substituting my own.
