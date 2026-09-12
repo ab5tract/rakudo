@@ -2956,3 +2956,56 @@ all seven prior runs, so byte-identity is unavailable as a check and size band
 plus `EXIT=0` is what can be claimed; `blib` untouched;
 `NQP_CODE_MAX_COMPILE` unset before and after; `CompilerThreads` correctly not
 set, since its floor of 1 cannot express zero.
+
+**CORRECTION — the zero-point subagent did NOT fail.** It was still running. The
+"completed" notification carrying a malformed monitor fragment was PREMATURE, and
+I treated it as a failure, logged it as one, and collected the log myself. The
+agent then finished properly with a full report (rakudo `4d9594b3fe`, ledger
+append only) and handled the collision correctly, adding only what my collection
+lacked and amending nothing. My earlier entry is wrong on the diagnosis and right
+only on "the work survives". Cost: one duplicated log read and a false failure
+record, now corrected here rather than by rewriting it.
+
+Its screen adds a fact I did not have: **`engine.Compilation` defaults to `true`
+and is EXPERIMENTAL stability** (unlike `CompilerThreads`, which is STABLE).
+In force beyond what I checked: 0 `opt done`, 0 queued, 0 failed, 0 `id=` in an
+86-line log; **0 TruffleCompiler threads in 30 of 30 `/proc` samples** — the pool
+was never created; statistics printed with every counter 0, Utilization 0.000000,
+both accuracy figures NaN.
+
+**Ruling 49 — ruling 47's headline needs a QUALIFIER that changes what it means.**
+I wrote that Truffle's entire JIT contribution is at most 17.5 %, and inferred
+that my "interpretation is an order of magnitude worse" reasoning was simply
+wrong about magnitude. The implementer found the actual reason, and it is not a
+magnitude error but a **category error**:
+
+**The host JIT was never off.** HotSpot kept compiling the interpreter's own
+bytecode throughout — 1-5 JVMCI threads in every sample. So `Compilation=false`
+does not mean "everything interpreted". It means **guest code runs in a Truffle
+interpreter that is ITSELF JIT-compiled by HotSpot**. My order-of-magnitude
+reasoning invoked a mechanism that never applied, because the interpreter is not
+interpreted.
+
+The corrected claim: **guest-level Truffle compilation, given a HotSpot-compiled
+interpreter, is worth at most 63 s of 360 (17.5 %) on this workload** — barely
+more than the 49 s that a 1-vs-16-thread misconfiguration throws away. The ceiling
+stands; what it is a ceiling ON is narrower than I said.
+
+**This strengthens the Native Image spike (Task 12) again.** If HotSpot's
+compilation of the interpreter is doing this much of the work, an image that
+precompiles that interpreter delivers the same benefit without warm-up. Recorded
+there as a third reason, beside the two already in its brief.
+
+Two observations from the report that nothing in this milestone explains, carried
+to the findings doc and milestone 7:
+- **`Stage optimize` is proportionally the worst-hit stage (+41 % with
+  compilation off) and rises MONOTONICALLY across the entire thread curve.**
+  Unexplained. It is also the second-largest stage.
+- **`Stage qast` and `Stage unit` are untouched by guest compilation** — they were
+  FASTER here than in the 4- and 16-thread runs. They gain nothing from it and pay
+  for it at high thread counts, which is a clean small-scale instance of the
+  whole curve's shape.
+
+Operational note recorded: `--stall`/`--max` were raised to 1560 s because
+watched-run's watchdog keys on output SILENCE, and this run is silent through all
+of parse. It finished in 360 s and approached neither.
