@@ -1845,3 +1845,80 @@ behaviour-preserving whenever the knob is UNSET (`MAX_COMPILE_SIZE` stays
 fixed measurement remains comparable to today's clean baseline. Costs if wrong:
 milestone 6 ships without a knob worth up to 11.5 % on compiler time — recoverable
 in milestone 7, and preferable to shipping it in a form nobody can evaluate.
+
+---
+
+## Task 6 (CLEAN) — tier policy measured by itself. KEEP.
+
+The configuration ruling 33 asks for, and the one milestone 6 adopts: three
+polyglot options, **no `NQP_CODE_MAX_COMPILE`**, against Task 3's clean traced
+baseline. Per ruling 33 no comparison is drawn against the combination run.
+
+```
+-Dpolyglot.engine.Mode=latency
+-Dpolyglot.engine.FirstTierCompilationThreshold=1600
+-Dpolyglot.engine.LastTierCompilationThreshold=40000
+```
+
+plus `TraceCompilation` and `CompilationStatistics`. `engine.MultiTier` omitted
+(default-true, screened earlier). rakudo HEAD `b01f00ce02`; nqp `41c294b02`,
+clean. No source changed in either tree. One compile, exit 0, 337 s.
+
+**The knob was unset**, three ways: `env | grep -i nqp_code` empty before the
+run; an explicit `unset NQP_CODE_MAX_COMPILE` in the driver script; and the
+statistics block shows `RetryableBailoutException: Compilable not ready for
+compilation.` = **44**, against 144 in Task 3. No storm. `Compilations` 3853 and
+`Compilation Accuracy` 0.755775 are therefore comparable figures here, unlike in
+any run carrying the knob.
+
+**Real path accepted** (`nqp-j-gradle -e 'say("engine-ok")'` → `engine-ok`); the
+`NqpCheck` probe false-rejected as predicted (experimental options, no
+`allowExperimentalOptions` at `NqpCheck.java:31`) — not BLOCKED.
+
+**IN FORCE**, against the clean T3 control rather than T4: `opt done ... |Tier 2|`
+**1372 → 0**; tier-1 done 4286 → 3334 (-952), which is the raised first-tier bar
+as residual. All 20 top roots by compile time are tier 1.
+
+| quantity | T3 clean | **T6 clean** | delta | floor |
+|---|---|---|---|---|
+| wall | 434 s | **337 s** | **-97 s (-22.4 %)** | 0.2 % |
+| `Stage start` | 0.001 | 0.001 | 0.000 | |
+| `Stage parse` | 333.841 | **253.998** | -79.843 (-23.9 %) | |
+| `Stage syntaxcheck` | 0.000 | 0.000 | 0.000 | |
+| `Stage ast` | 0.001 | 0.000 | -0.001 | |
+| `Stage optimize` | 36.584 | **32.017** | -4.567 (-12.5 %) | |
+| `Stage qast` | 34.266 | **25.389** | -8.877 (-25.9 %) | |
+| `Stage unit` | 27.539 | **23.476** | -4.063 (-14.8 %) | |
+| `Stage jar` | 0.000 | 0.000 | 0.000 | |
+| stage sum | 432.2 | **334.881** | -97.3 (-22.5 %) | |
+| `total-compiler-ms` | 2 143 944 | **783 440** | **-1 360 504 (-63.5 %)** | 0.7 % |
+| `nqp-root-ms` | 1 937 603 | **727 228** | -1 210 375 (-62.5 %) | |
+| `Success` | 5 658 | **3 334** | -2 324 (-41.1 %) | 0.7 % |
+| `Permanent Bailouts` | 444 | **372** | -72 (-16.2 %) | 0.9 % |
+| `Compilation Utilization` | 5.224919 | 2.501061 | -52.1 % | |
+
+`unparsed=0`, `reasons-parsed=5077`, `min-too-large-size=2070` with the same two
+roots as T3 — evidence the two compiles are the same work. Three stage times
+collided with trace lines on their output line (the known T3 `--stagestats`
+artifact) and were read from the following log line; the baseline loses the same
+lines identically.
+
+Failure channels kept apart: statistics block `Permanent Bailouts` **372**;
+summarizer `failed=` **371**; raw `grep -c PermanentBailoutException` **376**
+(T3: 444 / 444 / 448). Same spread shape in both runs; moves nothing.
+
+**KEEP**, on the wall clock: -97 s is ~112x the floor's wall component and
+-63.5 % compiler time is ~91x its `total-compiler-ms` component. Every non-zero
+stage moved in the same direction, which is what separates a real fall in
+background compiler pressure from a parse-only artifact. Build-side only
+(ruling 30): `Mode=latency` also disables splitting, a second mechanism riding
+the same option; this run cannot separate the two, and neither belongs in a
+long-lived Rakudo process.
+
+Concerns: `LastTierCompilationThreshold` contributed nothing measurable and is
+inert under latency (Task 11 already drops it); the splitting side effect is
+unseparated; one compile per configuration; CORE.c only, so magnitude may differ
+on BOOTSTRAP though the mechanism fixes the sign.
+
+Task 6 (clean): complete. This supersedes the combination run as the milestone's
+tier-policy verdict and confirms Task 11's adoption decision on clean numbers.
