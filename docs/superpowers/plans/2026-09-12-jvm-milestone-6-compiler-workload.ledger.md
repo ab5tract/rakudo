@@ -2824,3 +2824,59 @@ flight. The user rule permits escalating an erroneous subagent to Fable; not
 invoked, because the error was output handling rather than reasoning and there is
 nothing left for a subagent to reason about. Costs if wrong: the controller reads
 one log.
+
+**ZERO POINT: wall 360 s, Stage parse 278.213, ZERO `opt done` lines, zero
+Truffle compiler threads.** Collected by the controller from the log the failed
+subagent had correctly started (`EXIT=0 verdict=ok elapsed=360s`).
+
+**THE COMPLETE SEVEN-POINT CURVE, tier policy throughout:**
+
+| threads | wall | Stage parse | total-compiler-ms | unique targets |
+|---|---|---|---|---|
+| **none** | **360 s** | 278.213 | 0 | 0 |
+| **1** | **297 s** | 225.941 | 277722 | 1033 |
+| 2 | 323 s | 249.839 | 503022 | 1552 |
+| 3 | 327 s | 248.832 | 619075 | 1626 |
+| 4 | 341 s | 260.621 | 728428 | 1649 |
+| 6 (default) | 337 s | 253.998 | 783440 | 1672 |
+| 16 | 346 s | 262.367 | 893381 | 1672 |
+
+**Ruling 47 — the registered prediction is CONFIRMED in direction and REFUTED in
+magnitude, and the refutation is the more valuable half.** Before the run I
+predicted compilation-off would be "sharply slower", reasoning that interpreted
+execution is typically an order of magnitude worse. Direction: right — 360 s is
+the SLOWEST of all seven points, 63 s worse than 1 thread and 14 s worse even than
+16. The curve is a genuine U with its minimum at the hard floor of 1, so ruling
+46's "minimum at the floor" stands and is not an endpoint artefact. The
+hotness-filter account (ruling 46) is validated: compilation ordered by call count
+means 1 thread gets the targets that repay it and skips the tail that does not.
+
+But the magnitude refutes my reasoning. Had "an order of magnitude worse
+interpretation" been the operative effect, removing compilation would have cost
+far more than 21 %. Inverting it gives the milestone's real headline:
+
+**Truffle's ENTIRE JIT contribution to a CORE.c compile is at most 63 s of 360,
+i.e. 17.5 % — and the default configuration captures only ~37 % of it** (337 s
+against the 297 available; 16 threads captures 22 %). Tier policy and thread count
+are not tuning a large effect. They are recovering most of a SMALL one that the
+default was mostly throwing away. Every adoption in this milestone should be read
+against that ceiling.
+
+Where the loss sits: `Stage parse` 225.941 -> 278.213 is +52.3 s, **83 % of the
+63 s total**, which is where the hot loops (grapheme scanning, regex matching,
+bytecode dispatch) live — consistent with the prediction's reasoning even though
+its magnitude was wrong.
+
+**Ruling 48 — the adoption simplifies radically: `CompilerThreads=1`, literal, no
+formula.** The minimum is the engine's HARD FLOOR (`Math.max(1, threads)`), and 1
+is 1 on every machine. All of rulings 38/39's agonising over a hardware-dependent
+computed halving is moot — there is nothing to scale. Still build-path only
+(ruling 30's gate), and still not into `create-jvm-runner.pl`'s `$jopts` for the
+shipped runtime, where 38.2 % of targets left uncompiled is exactly wrong for a
+long-lived process.
+
+Caveats carried: one sample per point; 1 thread leaves 38.2 % of call targets
+never compiled and was the only run whose queue did not drain (`Remaining
+Compilation Queue` 7); CORE.c on one machine; and the 2->3 step and 4->6 inversion
+remain inside the wall resolution, so the SHAPE rests on none->1 (63 s), 1->2
+(26 s) and 1->16 (49 s), all far outside it.
