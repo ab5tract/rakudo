@@ -2744,3 +2744,58 @@ are marginally truncated (queue did not drain); `Success` and the statistics
 block's `maxTarget` groupings remain name-keyed and merge ~10 % of targets;
 CORE.c only, one machine, and the box was not idle (a concurrent ledger-committing
 session).
+
+Task 7-curve (batched 1 / 2 / 4): implementer DONE — rakudo `a71c11a6b7`, three
+compiles, `EXIT=0` each, one commit. In force by **78 `/proc` samples with zero
+deviation**: 24/24 at exactly 1, 26/26 at 2, 28/28 at 4. Corroborated by
+Utilization 0.958 / 1.604 / 2.257 and queue wait 11261152 / 5180716 / 843631 ns.
+
+**THE SIX-POINT CURVE, tier policy throughout, unique targets by `id=` (ruling
+44's correct identity):**
+
+| threads | wall | Stage parse | total-compiler-ms | unique targets | coverage |
+|---|---|---|---|---|---|
+| **1** | **297 s** | 225.941 | **277722** | **1033** | 61.8 % |
+| 2 | 323 s | 249.839 | 503022 | 1552 | 92.8 % |
+| 3 | 327 s | 248.832 | 619075 | 1626 | 97.2 % |
+| 4 | 341 s | 260.621 | 728428 | 1649 | 98.6 % |
+| 6 (default) | 337 s | 253.998 | 783440 | 1672 | 100 % |
+| 16 | 346 s | 262.367 | 893381 | 1672 | 100 % |
+
+Compiler time is **strictly monotone increasing, no exception**; the second thread
+alone costs **+81 %**.
+
+**Ruling 46 — 3 was never a minimum; the minimum is at the hard floor of 1, and
+compilation is NET-NEGATIVE at every level measurable on this workload.** Wall
+falls monotonically as compilation falls, 346 -> 297 s, and the per-thread slope
+flattens ~29x (+26 s for the second thread, +0.9 s for each of the last ten). The
+redirect below 3 was right and Task 7's "3 is better than 6" was a point on a
+slope, not an optimum.
+
+**How that is possible without being absurd: the queue is a HOTNESS FILTER.**
+Compilation is ordered by call count, so one thread still compiles the 1033
+hottest targets and never reaches the tail; the 639 it skips were not paying for
+themselves inside a run-once compile. This is ruling 43's debounce fit generalised
+— and it now has a measured boundary: **coverage saturates from 4 threads up, and
+1 thread leaves 38.2 % of call targets never compiled** while still being the
+fastest.
+
+**Ruling 41's puzzle SHARPENS rather than resolving.** Occupancy across the curve
+is 0.94-2.58 cores of 16. The FASTEST run used under one core and left ~14 idle.
+No contention account fits that. A candidate nobody has tested, recorded as a
+candidate only: installation and invalidation are not free to the mutator even
+when the compilation itself is off-thread — each costs a handshake or safepoint
+against the single-threaded compile driver, and deopts (3522 / 3767 / 3808) each
+return control to the interpreter. That would make the cost proportional to
+compilation COUNT rather than to CPU, which is what the curve shows. Untested.
+
+Caveats recorded: at 1 thread `Remaining Compilation Queue` is **7**, non-zero for
+the only time in this milestone, so its counters are marginally truncated; the
+2->3 step (4 s) and the 4->6 inversion (-4 s) are ~1.2 % each and inside the wall
+resolution, so the SHAPE rests on 1->2 (26 s, ~44x the floor) and 1->16; `Queues`
+is non-monotone and peaks at 2 (2921/5329/4726/4349/4098/3920), so any queue story
+stays a fit to counters; CORE.c only, one machine, and the box was not idle (this
+controller session was committing concurrently).
+
+**Correctness note: build OUTPUT is unaffected.** How much of the compiler runs
+compiled changes only speed, not what it emits.
