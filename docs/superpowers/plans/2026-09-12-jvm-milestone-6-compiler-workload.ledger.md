@@ -3643,3 +3643,46 @@ deoptimisation-churn finding (1515+ targets averaging >2 compiles each,
 `encode_var` at 13, six of its eleven deopts being the Bytecode DSL's per-local
 type-tag assumption). If plusquick shows that signature, `slowEvals` may be
 recompilation churn rather than a layout-site bug.
+
+**Task 10 — the loop baseline, and the slowEvals question. DONE, with the
+question answered in the negative.** Stock `./rakudo-j`, no eval server, no
+engine option; both traps in the brief avoided. Baseline `ns/op=85.825`,
+`hits=90247946 misses=11623 slowEvals=976 invokes=13867 directs=13848
+noTarget=19`, `byKind=[0, 95765, 45117640, 13467, 45021074]` — milestone 5's
+post-layout state reproduced, `slowEvals` on the nose. `resume-smoke.raku`
+unchanged.
+
+**The +3.5 % is not established as a real effect.** Four identical stock runs
+at this one build: 85.825, 89.375, 87.400, 89.175 ns/op — a 4.1 % spread,
+wider than the regression, with a byte-identical dispatch-stats line every
+time. Milestone 5 took one run per side. Mechanism for the noise found and
+quantified: plusquick's mainline has **two OSR call targets, one per `while`
+loop**, so the 5 M warm-up warms a *different* target from the one that is
+timed; the timed target's two compilations land 200 ms and 470 ms into a
+3.010 s window (15.6 % of it). The milestone's `validRootAssumption local
+tags updated` signature is present (14 of 24 invalidations) and sits on those
+two OSR roots, but it is what ends each loop, not what slows it. The loop is
+not a churn workload: 86 done / 33 deopt / 24 inval over ~70 roots by `id=`.
+
+**`slowEvals` narrowed, not pinned, and both milestone 5 leads ruled out.**
+All 976 are `NqpDispatch.AttrSrc.slow` — the stats stream prints three
+distinct keys and no `slow unbox` or `slow source` — on `$!dispatchees`
+(`RakuObject8L`), `@!dispatchees` and `$!do` (`RakuObject16L`), all during
+start-up, identical in every run. It cannot be 116 ms of loop time. The two
+leads are ruled out **by code**: `DecontSite` and `BigIntSite` are
+`NqpTypeOps.Site`s with a per-site `misses: Int` and touch neither
+`slowEvals` nor the stats line's `misses`. Lead 1's defect is nonetheless
+real and confirmed — `NqpTypeOps.decont` calls `miss(site)` only on
+`ost !== st`, so a matching-STable / mismatching-layout site re-crosses the
+boundary forever without pinning or showing anywhere. Lead 2 is stale:
+`bigintArith` does re-verify both operands' layouts. The documented variant-
+layout cause is ruled out **by measurement**: `NQP_LAYOUT_STATS=1` answers
+`layouts=2122 variants=0 reblesses=2`. Best remaining fit, labelled a fit:
+`AttrSrc.eval`'s null-slot branch counts an unvivified attribute as a slow
+eval although the layout matched. Closing it needs `AttrSrc.slow`'s counter
+split in two — a source change, so recorded as a finding, not made.
+
+Two defects recorded, no source touched, `blib` untouched (last written 12:29
+by Task 1). Full report:
+`.superpowers/sdd/2026-09-12-jvm-milestone-6-compiler-workload/task-10-report.md`;
+findings written into `docs/jvm-perf-findings-2026-09.md`.
