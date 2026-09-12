@@ -579,3 +579,52 @@ trace produce textually different reports, which will be a nuisance the moment
 Task 3 diffs them. The fix is a tiebreak key on the sorts, roughly
 `.sort({ (-.value.elems, .key) })`. Left alone because this round was scoped to
 one line plus a test, and scope is the controller's to set.
+
+Task 2: fix round 3/5 (1 addressed, 0 open — `exceeds` removed; the list holds
+only `code is too large` and `too big to safely compile`, the two spellings
+verified in this tree; a 16-line comment beside it carries the mechanism argument
+and the rule for adding a third later, with the trace that proves it. Suite
+21 -> 22. Commit rakudo `0b8424bd1c`.) Seen red first: the same fixture gave
+`min-too-large-size=40` before the edit, with the unclassified block silent.
+Task 2: re-review round 3 (opus) — ADDRESSED, verified on the reviewer's own
+trace: `min-too-large-size=2100` with `tinyroot[37]` out of the population and
+named and sized in the unclassified block; no regression (`too big to safely
+compile. Node count: 41234` still classified; a sprintf'd real-format line still
+gives 31337). Suite OBSERVED 22/22. New breakage: none. Ledger hunk 89
+insertions / 0 deletions.
+
+**Ruling 9 — the tie-ordering nondeterminism is COSMETIC; deferred, not fixed.**
+The implementer volunteered that tied groups reorder between runs because
+`classify` returns a Hash, and correctly declined to fix it unasked. Verified
+rather than accepted: ten runs over one trace produced ten distinct texts but a
+byte-identical sorted multiset of every integer in the output (one distinct md5),
+`min-too-large-size=900` in all ten, each count travelling with its own reason
+text, and the top-roots table deterministic because it sorts a stable list in
+file order. Tasks 3-7 record NUMBERS into a configuration table; none of them
+diffs report text. So this cannot move a result. The one-line cure is a tiebreak
+key on the two `classify` sorts if it ever becomes a nuisance. Costs if wrong:
+a reader diffing two reports sees transposed lines and no wrong number.
+
+**Ruling 10 — the off-by-one advisory was already right in the plan, and is now
+explained there.** `NqpRootNode.prepareForCompilation` answers `programSize <=
+MAX_COMPILE_SIZE`, INCLUSIVE (`NqpRootNode.java:119-123`), so setting the knob to
+`N` still admits the root the number came from and the compile spends its 6.4 s
+failing to install exactly as before. Task 4 Step 1 already said `N - 1`; it now
+says WHY, because the failure mode is a plausible non-result — the knob appears
+to do nothing — rather than an error. Costs if wrong: none; the arithmetic was
+already correct.
+
+Task 2: minor (deferred): `tier 0` / `ms 0` defaults make deopt and invalidation
+lines indistinguishable from a parse miss (carried from the first review).
+Task 2: minor (deferred): the test writes `fixtures/empty.log` into the repo
+rather than `$*TMPDIR`; a mid-test failure leaves it behind.
+Task 2: minor (deferred): `NqpRootNode.java:91-93` cited where the method is
+91-94.
+
+Task 2: complete (commits `d92d405b80`..`0b8424bd1c`, review clean after three
+fix rounds; plus controller commits `975324309f` and `bd0326e223` correcting the
+plan at source). Three rounds were spent because each found a defect that would
+have corrupted the sweep SILENTLY rather than stopping it: the `Reason:` colon,
+the second bailout spelling, and the loose `exceeds` guess. The instrument is the
+one Task 4's threshold comes from, so the rounds bought the milestone's central
+number.

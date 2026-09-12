@@ -595,6 +595,15 @@ root at or above the smallest size that actually failed to install will
 also fail, so refusing it up front costs nothing. Record the arithmetic
 in the ledger.
 
+**The minus one is load-bearing, not caution.**
+`NqpRootNode.prepareForCompilation` answers `programSize <=
+MAX_COMPILE_SIZE`, which is INCLUSIVE
+(`nqp/nqp-truffle/src/main/java/org/raku/nqp/truffle/NqpRootNode.java:119-123`).
+Setting the knob to `N` therefore still admits the very root the number
+came from, and the compile would spend its 6.4 s failing to install
+exactly as before. The result would look like a plausible non-result:
+the knob apparently did nothing. `N - 1` is the exclusive threshold.
+
 **Do not read the number alone.** Read the `--- failures by reason ---`
 block, the `by size:` list and the `unclassified failure reasons` block
 beside it, and record in the ledger what you saw there. Two checks, both
