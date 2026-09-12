@@ -703,3 +703,101 @@ counted as non-trace lines. This is why the summarizer reports `done=5656` while
 the statistics block reports `Success: 5658`; the stage times themselves survive
 on the following line and were read from there. Every later task in the sweep
 will see the same four-line loss identically, so it cannot move a comparison.
+
+Task 3: review (opus) — Spec ✅, quality Approved, 0 Critical, 1 Important,
+3 Minor. blib verified untouched (`CORE.c.setting.jar` still 12:28 / 5865093 B;
+the run's 5865125 B jar is in scratch). Every figure reproduced independently.
+
+**The headline is VERIFIED, two ways.** The reviewer counted the too-large roots
+itself: a grep of the trace gives 2 (`IMPL-OPTIMIZE-EXPRESSION[4030]` 3086 ms at
+log line 153365, `IMPL-FOLD-CONSTANT[2070]` 3861 ms at line 439164, sum 6947 ms),
+and Graal's own `CompilationStatistics` tally at line 472380 independently reads
+`BailoutException: Code installation failed: code is too large: 2` — a count the
+summarizer never touches. Only three occurrences of "too large" exist in the whole
+30 MB log. `reasons-parsed=4960` decomposes exactly as 444+1267+3249.
+**114 roots / 733 s -> 2 roots / 6.9 s is real, not a parse artefact.**
+
+**Ruling 11 — Task 4's premise is gone; the task is REFRAMED, not skipped.**
+`NQP_CODE_MAX_COMPILE` was placed first in the sweep to reclaim the 733 s that
+114 roots spent failing to install. That waste no longer exists. And the knob's
+own rationale — `NqpRootNode`'s comment that "such a root runs interpreted
+afterwards regardless, so refusing up front costs it nothing" — held ONLY for
+roots destined to fail; `prepareForCompilation` gates every root, so a threshold
+of 2069 refuses compilation of every root above 2069 wire words, almost all of
+which compile successfully today. It is therefore no longer a free-reclamation
+experiment but a crude probe of the milestone's real thesis, that the compiler's
+run-once code is over-compiled — and Task 3 measured 2144 s of compiler-thread
+work across a 434 s wall compile, ~5 cores, 90 % of it on NQP roots. One compile
+is cheap and the effect will be large in one direction or the other, so it runs,
+judged on four quantities rather than wall clock alone (wall, total-compiler-ms,
+done, failed), with a large fall in compiler work at a flat wall clock recorded as
+a real result that would demote Task 7's thread knob before it runs. Runtime-side
+adoption is off the table regardless: refusing to compile large roots at run time
+costs Rakudo's runtime performance, which outranks compile time by standing user
+priority. Costs if wrong: one 8-minute compile spent confirming a null.
+
+**Ruling 12 — the 442-root bailout is milestone 7's lead lever, and it is OURS,
+not the JDK's. It is NOT implemented in milestone 6.** The reviewer took the
+implementer's diagnosis apart and improved it. There are two recursion shapes,
+not one: `ClassRepository.parse(String) [33]` tops 237 of the 448 dumps, and
+`java.lang.Class.getSimpleName() [495]` tops the other 203. Both are entered
+through `java.lang.invoke.Invokers.newWrongMethodTypeException` (416 occurrences)
+called from `NqpOps.bindattr(NqpOps.java:1517)` and `NqpOps.getattr` at 334
+frames — the sited MethodHandle road added in MILESTONE 5. Graal is inlining the
+exception-CONSTRUCTION branch of our own `invokeExact` sites, whose message
+formatting drags `MethodType.toString` into `Class.getSimpleName` into the
+generics `SignatureParser`. It is speculation, not throwing: `non-trace-lines`
+464803 is ~448 dumps x ~1000 lines with no room for 442 printed traces, and all
+480 `dieInternal` occurrences are dump entries rather than output. 442 roots bail
+and stay interpreted for the whole compile. Candidate fixes named: an `asType` or
+explicit guard so the exception branch leaves the graph, or a `@TruffleBoundary`
+on the die path. NOT done here: Phase A is configuration-only by the approved
+spec, and a runtime change mid-sweep would invalidate every later comparison
+under the forward-only rule. Costs if wrong: milestone 6 ships without what may be
+its most valuable finding implemented — but it ships it fully diagnosed, which is
+what a measurement milestone is for.
+
+Task 3 fix round 1: the bailout diagnosis corrected and promoted, plus two wrong
+numbers. Re-derived from the same log; no re-run. (1) There are TWO recursions,
+not one. Over the 442 in-trace dumps (448 in the file, 6 of them reprints inside
+the statistics block): chain A 238 dumps, chain B 204, 238+204=442 with no
+remainder. (2) The entry point is OURS in both, which is what my first account
+got wrong. Chain A, in 238 of 238 dumps: `NqpRootNodeGen.execute` ->
+`handleCreateOp_` -> `NqpRootNode$CreateOp.doCreate` -> `NqpTypeOps.create` ->
+`VMArray.allocate` -> `ExceptionHandling.dieInternal(ExceptionHandling.kt:47)` ->
+`Throwable.printStackTrace()` -> `ClassRepository.parse` x33; kt:47 is
+`if (tc.gc.noisyExceptions) (t ?: Throwable(msg)).printStackTrace()`, a debug
+branch behind a mutable flag Graal cannot fold. Chain B: `handleBindAttrOp_` ->
+`doBind` -> `NqpOps.bindattr(NqpOps.java:1517)` (39) / `NqpOps.getattr(:1482)`
+(165), 39+165=204 exactly -> `Invokers.newWrongMethodTypeException` (408 = 204x2)
+-> `MethodType.toString` -> `Class.getSimpleName` [495] (201 at exactly 495) —
+milestone 5's sited MethodHandle road, with Graal inlining the
+exception-CONSTRUCTION branch of `invokeExact`. (3) Nothing is throwing: zero
+`Unhandled exception` / `at org.raku` lines in 30 MB, all 476 `dieInternal`
+occurrences are dump entries, and non-trace-lines=464803 ~ 442 x 1000 leaves no
+room for printed traces. Speculation, not failure — said explicitly in the doc so
+no reader goes hunting a crash.
+
+**Task 3 fix round 1 — this is a milestone 7 LEVER, not a candidate.** The clock
+is not the 23.7 s of compiler time; it is 442 roots that bail and therefore stay
+INTERPRETED for the whole compile, on a workload that is 90 % interpretation
+(Stage parse 333.8 of 434 s). Two one-sided fixes, both code and neither a knob,
+so neither belongs to this sweep: `@TruffleBoundary` on `dieInternal` or on the
+`noisyExceptions` branch (238 roots), and an `asType`/guard at the `invokeExact`
+sites so the WrongMethodTypeException construction branch is provably dead
+(204 roots). Written into the findings doc with both chains, their counts, our
+entry points with file and line, the speculation evidence, and the two fixes.
+
+Task 3 fix round 1 — numbers: findings doc said the surviving cluster is "0.3 %
+of the compiler time that cluster once cost"; 6.9/733 = **0.9 %**, and the doc now
+carries both ratios with their arithmetic (6.9/733 = 0.9 %, 6.9/2144 = 0.3 %).
+Report section (b) had the two roots' times swapped: `IMPL-OPTIMIZE-EXPRESSION[4030]`
+is 3086 ms (id 2765) and `IMPL-FOLD-CONSTANT[2070]` is 3861 ms (id 12556); fixed
+in place with a note, totals unaffected. Also added: the two size bailouts are
+confirmed independently of the summarizer by Graal's own statistics tally
+(`Code installation failed: code is too large: 2`) and by `too large` occurring
+three times in the whole log. The refusal to teach the selector the
+`Too deep inlining` spelling is now argued IN THE DOC (sizes 27..17545, so it
+would set the threshold to 27 and destroy every later measurement) rather than
+only in the report. Deferred as instructed: the Task 1 wall-clock citation of
+457 s against the markers file's 460 s.
