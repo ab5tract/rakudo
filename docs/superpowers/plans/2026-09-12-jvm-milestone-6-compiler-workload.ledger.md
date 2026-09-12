@@ -2425,3 +2425,45 @@ story stays a fit to counters, never an established mechanism; >16 is accepted
 but unmeasured, and on-demand growth means a bigger request may not manifest more
 threads anyway. The batched 2 / 8 / 12 dispatch still stands, and this point
 tells it where to look: the interesting half of the curve is BELOW 3.
+
+Task 7-max (16 threads): implementer DONE — rakudo `c219ab648e`. SCREEN A found an
+explicit value MAY exceed 16 (the `bipush 16`/`Math.min` cap sits inside the
+`threads<0` branch; an explicit positive meets only `Math.max(1,threads)`, and the
+key is built with the single-arg `OptionKey(Object)` so there is no validator).
+A 24-thread probe was accepted. It chose **16** — one per core, the engine's own
+default ceiling — on the grounds that beyond it is pure oversubscription that
+would confound the measurement with scheduler thrash. IN FORCE: 20 `/proc` samples,
+19 at exactly 16. Utilization 2.501 -> 2.730; queue wait 54184.82 -> **732.25 ns**,
+a 74x FALL inverting the 3-thread run's 35x rise.
+
+**THE CURVE, 3 / 6 / 16 threads, tier policy throughout:**
+
+| threads | wall | Stage parse | total-compiler-ms | Success | stale dequeues |
+|---|---|---|---|---|---|
+| 3 | **327 s** | 248.832 | **619075** | 3000 | 1137 |
+| 6 (default) | 337 s | 253.998 | 783440 | 3334 | 190 |
+| 16 | 346 s | 262.367 | 893381 | 3355 | 2 |
+
+**Both axes monotone INCREASING. No interior minimum. ~1 s of wall per added
+thread. The optimum is at or below 3.**
+
+**Ruling 40 — the contradiction is resolved: both stories were true, on different
+axes, and contention dominates.** Task 7 found fewer threads faster (mechanism:
+fewer stale compilations); the naive expectation said more threads should mean
+more throughput. The 16-thread run shows the throughput expectation is CORRECT ON
+THROUGHPUT — stale dequeues collapse 1137 -> 190 -> 2 as the queue stops
+constraining — and REFUTED ON WALL, because that extra compilation is off the
+critical path while its CPU cost is not. The decisive comparison: 3 -> 6 bought
+**+334** Success; 6 -> 16 bought **+21**, which is +0.63 % and **below the 0.7 %
+Success floor**, for 110 s of extra compiler CPU. So Task 7's -10 s was contention
+relief, as it claimed, and the high end buys nothing measurable. Costs if wrong:
+none; this is three points agreeing on two axes.
+
+**Batch redirected (controller, on the implementer's own closing note that "the
+interesting half of the curve is below 3").** The agreed batch was 2 / 8 / 12.
+8 and 12 now sit inside a region measured monotone increasing and would only
+confirm a line. Replaced with **1 / 2 / 4**: 1 and 2 explore the unmeasured
+territory where the optimum lies, including the starvation knee Task 7 flagged,
+and 4 brackets 3 so we learn whether 3 is a genuine local minimum or a point on a
+slope. Final curve: 1 / 2 / 3 / 4 / 6 / 16. Costs if wrong: two points of the
+upward slope go unmeasured, recoverable in one batched run.
