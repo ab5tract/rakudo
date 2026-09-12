@@ -1922,3 +1922,113 @@ on BOOTSTRAP though the mechanism fixes the sign.
 
 Task 6 (clean): complete. This supersedes the combination run as the milestone's
 tier-policy verdict and confirms Task 11's adoption decision on clean numbers.
+
+Task 6 (CLEAN — tier policy alone, the configuration that ships): implementer
+DONE, verdict KEEP — rakudo `0c620fde62` (ledger only). `NQP_CODE_MAX_COMPILE`
+unset, verified four ways. In force: tier-2 compiles **1372 -> 0** against Task 3's
+own control (the implementer correctly used 1372, Task 3's figure, not the
+combination run's 1394).
+
+| quantity | T3 clean | **T6 clean (tier policy alone)** |
+|---|---|---|
+| wall | 434 s | **337 s (-22.4 %)** |
+| Stage parse | 333.841 | 253.998 (-23.9 %) |
+| Stage optimize | 36.584 | 32.017 (-12.5 %) |
+| Stage qast | 34.266 | 25.389 (-25.9 %) |
+| Stage unit | 27.539 | 23.476 (-14.8 %) |
+| total-compiler-ms | 2143944 | **783440 (-63.5 %)** |
+| nqp-root-ms | 1937603 | 727228 (-62.5 %) |
+| Success | 5658 | 3334 |
+| Permanent Bailouts | 444 | 372 |
+| tier-2 compiles | 1372 | **0** |
+| retryable "not ready" | 144 | 44 |
+
+-97 s is ~112x the floor's wall component and -63.5 % is ~91x its
+total-compiler-ms component. EVERY non-zero stage moved the same way, so this is
+not the parse-only artifact.
+
+Task 6 (clean): review (opus) — **KEEP stands, ship it.** Every number verified
+independently, with an EXACT reconciliation rather than an approximation: summing
+the trace's own time fields gives 783461 against the reported 783440, the 21 ms
+gap being precisely the one `Stage unit`-prefixed `opt failed` line the
+summarizer's anchor drops; the baseline reconciles identically (2144056 vs
+2143944). Wall confirmed twice, from epoch stamps and the marker footer.
+
+**Ruling 34 — the controller's pre-registered prediction was CONFIRMED at the
+mechanism level, and the magnitude correction is recorded.** Before the run I
+predicted that without the size knob the previously suppressed large roots would
+compile at first tier, so Success and compiler time would both rise against the
+combination run, and said that if they did not my account of the knob was wrong.
+The reviewer checked the mechanism rather than the totals: diffing per-compile
+root multisets, **149 compiles occur in the clean run that do not occur in the
+combination run, 131 of them with root size >= 2069** — exactly the Success delta
+(3334 - 3203 = 131) and exactly the population the knob refused.
+`encode_var[6418]` is compiled **13 times here and 0 times in the combination
+run**, taking 13 of the top-20 slots by compile time. The 139126 ms rise over 131
+compiles is ~1062 ms each, coherent for roots of that size. My "roughly 184"
+OVERSHOT: 131 were restored, same order and on the low side, because some refused
+roots never re-reach the raised threshold. Costs if wrong: none; this is a
+prediction that was registered before the measurement and then checked against
+it, which is the strongest form of evidence this milestone has produced.
+
+**Ruling 35 — the splitting confound is closed for the clean run too, by its own
+data.** The implementer carried it as unresolved, saying this run cannot separate
+`Mode=latency`'s tier effect from its splitting side effect. It can: `Splits : 0`
+at line 398325 of its own log, at 475496 of the baseline, and in both earlier
+combination logs. Splitting produced nothing on this workload even when ENABLED,
+so disabling it cannot contribute to a 97-second fall. Ruling 32 already settled
+this on the combination run. The -22.4 % is attributable to tier policy. Costs if
+wrong: carrying it would have understated a result the log itself settles.
+
+Task 6 (clean): the retry count FALLING (144 -> 44) is a fourth proof the knob was
+absent, not an anomaly. "Not ready" fires when a submission races an
+invalidation, and tier-2 PROMOTION submissions are its classic source; submissions
+fell 39 % (6358 -> 3853) and tier-2 promotions fell to zero, which over-explains a
+69 % drop.
+Task 6 (clean): conditions travelling to Tasks 7 and 11 — (1) Task 11 MUST DROP
+`LastTierCompilationThreshold=40000`, structurally inert under latency and present
+here only for option-set parity; shipping it would be the exact
+"writes a default and sets nothing" habit the screening rule forbids. (2)
+Build-side only (ruling 30); Task 7 must not let it leak into a runtime default.
+(3) Measured on CORE.c alone — the mechanism fixes the sign on BOOTSTRAP but not
+the magnitude. (4) One compile per configuration, but at 112x and 91x the floor
+with four independent corroborations, the floor's weakness is not load-bearing
+here.
+
+Task 6 (clean) fix round 1: verdict unchanged (KEEP, -22.4 % wall); no re-run.
+Review reconciled `total-compiler-ms` independently — trace time fields sum to
+783461 against 783440, the 21 ms gap being the single `Stage unit`-prefixed
+`opt failed` line (`<anon>[27]`, log 382860) the summarizer's anchor drops; the
+baseline reconciles identically. Using T3's own 1372 tier-2 count rather than the
+combination run's 1394 was ruled correct.
+**Concern 2 (the splitting confound) is STRUCK, not softened.** `Splits : 0` in
+this run's statistics block (line 398325) AND in the T3 baseline's (line 475496),
+verified directly: splitting produced nothing on this workload even when ENABLED,
+so disabling it cannot contribute to a 97 s fall. Ruling 32 had already closed
+this on the combination run. Attribution is now plain: **the -22.4 % wall and
+-63.5 % compiler time are tier policy.**
+Retry drop 144 -> 44 now explained rather than merely reported: "not ready" fires
+when a submission races an invalidation, and tier-2 PROMOTION submissions are its
+classic source; submissions fell 39 % (6358 -> 3853) and tier-2 promotions fell to
+zero, which together over-explain a 69 % fall (volume alone predicts ~87). It is a
+fourth proof the knob was absent, beside the empty `env`, the explicit `unset`,
+and the absent storm.
+Phrasing corrected twice: the three collided stage times are flushed ~9k-17k lines
+after their label, just before the NEXT `Stage` marker (optimize 355977->365919,
+qast 365920->382859, unit 382860->392103), not "on the following line"; and the
+channel decomposition is exact — 372 `opt failed` lines = statistics-block
+Permanent Bailouts 372, of which 370 name `PermanentBailoutException`, +6
+statistics-block repetitions = raw grep 376, and 372 minus the 1 `Stage`-prefixed
+line = summarizer 371.
+**Ruling 33 held, and one review item was declined on it.** The review asked me to
+record a cross-run root-multiset check (149 compiles unique to this run, 131 of
+size >= 2069 equal to the Success delta, `encode_var[6418]` 13x here vs 0x there,
+139126 ms over 131 compiles ~ 1062 ms each, with "roughly 184" honestly noted as
+having overshot). That is a decomposition of what the size knob suppressed,
+measured against the run where the knob is broken — the comparison ruling 33
+forbids, on the run ruling 18 called meaningless for cross-configuration use. It
+is recorded in the report as reviewer-supplied, NOT adopted, and filed for
+milestone 7; the objection is jurisdictional, not technical. This run's verdict
+rests on Task 3 alone. Relaxing ruling 33 is a user decision.
+Also noted: the report never had a "prediction section" to strengthen — ruling 33
+had directed the clean run be measured against Task 3 alone, so none was written.
