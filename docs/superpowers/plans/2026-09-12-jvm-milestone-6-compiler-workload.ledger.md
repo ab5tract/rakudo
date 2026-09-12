@@ -2364,3 +2364,64 @@ Stated up front so it cannot be forgotten at interpretation time: one workload,
 one machine, one sample per point. The curve can honestly deliver the SHAPE —
 flat middle, U with a real optimum, or monotone — not a minimum located to within
 a thread or two. A plateau means pick anything inside it and stop measuring.
+
+## Task 7 MAX — the high end measured: 16 threads, wall 346 s
+
+Third curve point landed. rakudo `37f3a76be6`, nqp `41c294b029`, one compile,
+`EXIT=0 verdict=ok elapsed=346s`, `NQP_CODE_MAX_COMPILE` not set, blib untouched.
+Full report: `.superpowers/sdd/2026-09-12-jvm-milestone-6-compiler-workload/task-7-max-report.md`.
+
+**Screen A.** An EXPLICIT `engine.CompilerThreads` may exceed 16 and nothing
+validates it. In `BackgroundCompileQueue.getExecutorService` the `bipush 16 /
+Math.min` sits inside the `threads < 0` branch; an explicit positive value hits
+`ifge 163` first and meets only `Math.max(1, threads)`, a floor. The key is built
+with the single-argument `OptionKey.<init>(Object)` — the default Integer
+OptionType, no range check — so the descriptor's `[1, inf)` is literally what is
+implemented. The option is STABLE, not experimental (its neighbour
+`CompilerThreadStackSize` is EXPERIMENTAL in the same method). A 24-thread engine
+probe was accepted and grew the pool to 8 (above the default 6); it did not reach
+24 because core threads are created on demand — no `prestartAllCoreThreads`
+anywhere in the class. **16 chosen**: one per core is the hardware ceiling and the
+engine's own ceiling for its default computation, and anything past it is pure
+oversubscription that would confound the point with scheduler thrash.
+
+**In force**: 20 `/proc/<pid>/task/*/comm` samples, 19 at exactly
+`trufflecompiler=16` (the 20th, 12, during wind-down). Corroborated by
+`Compilation Utilization` 2.501061 -> 2.730003 and `Time waiting in queue`
+average 54 184.82 -> 732.25 ns (a 74x FALL, inverting the 3-thread run's 35x rise).
+
+**Result vs the 6-thread control**: wall **337 -> 346 s (+9, +2.67 %)**,
+`Stage parse` **253.998 -> 262.367 (+8.369, +3.29 %)`, optimize 32.017 -> 31.926,
+qast 25.389 -> 25.988, unit 23.476 -> 24.370, stage sum 334.881 -> 344.657
+(+9.776). `total-compiler-ms` 783 440 -> **893 381 (+14.0 %)**, `nqp-root-ms`
+727 228 -> **832 026**. `Success` 3 334 -> 3 355, `Permanent Bailouts` 372 -> 372,
+`Splits` 0, `Queues` 4 098 -> 3 920, `Dequeues` 343 -> 127, stale dequeues
+190 -> **2**, `Remaining Compilation Queue` 0 (nothing truncated at exit).
+Tier-2 compiles 0, as on both other points.
+
+**THE THREE-POINT CURVE (3 / 6 / 16 threads):**
+wall **327 / 337 / 346 s**; `total-compiler-ms` **619 075 / 783 440 / 893 381`;
+stale dequeues **1 137 / 190 / 2**; `Success` **3 000 / 3 334 / 3 355**.
+Both wall and compiler time are **monotone increasing**. There is no interior
+minimum: the optimum lies at or below 3 threads, roughly 1 s of wall per thread
+across the whole measured range.
+
+**Ruling 40: the tension in ruling 39's note is resolved, and both stories were
+describing different axes.** More threads DO do more compilation — stale dequeues
+fall to 2, the queue stops constraining anything — so the naive throughput
+expectation is confirmed on throughput. It is refuted on wall, because that
+compilation is not on the critical path while the CPU it burns is. Decisive
+detail: 3 -> 6 threads gained +334 `Success`; 6 -> 16 gained **+21 (+0.63 %),
+below the 0.7 % `Success` noise floor** — unbuyable at any price, for 110 s of
+extra compiler CPU, 101 cancellations and 54 retryables. Contention dominates;
+Task 7's -10 s was contention relief.
+
+Caveats carried forward, not smoothed: one sample per point; +9 s is nine
+one-second quanta corroborated only by the stage sum (same run, finer
+resolution); 16 threads on 16 cores starves the main parse thread, GC and JVMCI,
+so the ratio may not travel; `Queues` is NON-monotone across the curve
+(4 726 / 4 098 / 3 920), so arrivals are shaped by service rate and any queue
+story stays a fit to counters, never an established mechanism; >16 is accepted
+but unmeasured, and on-demand growth means a bigger request may not manifest more
+threads anyway. The batched 2 / 8 / 12 dispatch still stands, and this point
+tells it where to look: the interesting half of the curve is BELOW 3.
