@@ -2624,3 +2624,40 @@ and had the conclusion moved, that is precisely when you want to know before
 spending more compiles. What deserves attention is the pattern rather than the
 instance: rulings in this ledger are not being consulted by the controller that
 wrote them.
+
+**Ruling 45 — the name ambiguity is a DISPLAY-LABEL defect, not a compiler
+identity defect. Not stop-the-world; the user's rule is right and its condition is
+not met.** The user asked the sharper version of the question I had answered: if
+the compiler itself cannot distinguish two compilation targets, that is
+stop-the-world; if it is only log analysis, different story. Checked rather than
+reasoned:
+
+- `NqpRootNode.getName()` (`:91-94`) is OURS and its own comment says it is
+  "What TraceCompilation prints for the call target" — a display string.
+- `blockName` is touched in exactly two places in that file, `getName()` and
+  `toString()`. Nowhere semantic, in that file or in the Kotlin engine sources.
+- `OptimizedCallTarget`'s compilation path does not reference `getName` at all
+  (javap over the class: no hits).
+- No name-based compilation filtering (`CompileOnly` or equivalent) exists
+  anywhere in `com/oracle/truffle/runtime` in this jar.
+- Positive evidence: the trace prints `id=` as its own field and those ids ARE
+  distinct — **1672 against 1515 labels**. The engine tracked every target
+  separately and reported it in a column I failed to read.
+
+**So compilation identity is the call target object and is unaffected.** The
+engine never merges two targets; only name-keyed VIEWS do.
+
+**It is still a real defect worth fixing, and broader than my greps.** ~150
+targets per run, about 10 %, are indistinguishable in any name-keyed view — and
+that includes **the engine's own `CompilationStatistics` grouping**, which reports
+`maxTarget=<name>` counts. A target reported as compiled 13 times could in
+principle be two targets at 7 and 6. Flame graphs and external profilers merge
+them identically. I had not considered the statistics-grouping consequence until
+the user pushed on it.
+
+**Deferred to milestone 7, NOT fixed now:** adding a discriminator to `getName()`
+lives in `nqp-truffle` sources, so doing it mid-sweep rebuilds the runtime jar and
+breaks comparability across every measurement in this milestone, in exchange for a
+diagnostics improvement. It joins the other runtime work. Costs if wrong: one more
+milestone of name-keyed views merging ~10 % of targets, with `id=` available in
+the trace as the correct identity in the meantime.
