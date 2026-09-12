@@ -1047,3 +1047,111 @@ stage flat to within a second" was wrong and is withdrawn (optimize -0.54 s, qas
 -0.31 s are flat). The "178" label excludes **6 OSR compiles** of
 `encode_block[4626]<OSR@...>` while the 308 797 ms figure includes them:
 306 833 + 1 964 = 308 797 exactly.
+
+Task 4: fix round 1/5 (2 Important + 5 additions addressed, 1 partial — the
+mechanism section now carries both readings with the discriminating evidence and
+an explicit statement that the trace cannot decide; Stage parse demoted;
+`done`+`failed` leads the argument; the ~442 correction, the threshold
+sensitivity, the deopt observation and two small corrections all landed. Commit
+rakudo `0ab21c6f36`.)
+Task 4: re-review round 1 (opus) — IMPORTANT 1 ADDRESSED, IMPORTANT 2 PARTIAL
+(the retracted Stage-parse argument survives as load-bearing in Concern 1), all
+five additions ADDRESSED, ledger hunk +105/-0. On the three disputed counts the
+re-reviewer took ground truth itself, treating the LAST bracket pair as the size
+(three `done` lines per log carry an earlier literal bracket, e.g.
+`postcircumfix:sym<[; ]>[249]`, which a first-bracket parse miscounts as >2069):
+**the implementer was right on the bailouts (403 -> 408) and the FIRST review was
+low by three; the implementer's parenthetical raw count 6102 -> 6079 is exact and
+the first review's 6100 -> 6078 was wrong in both absolute and delta.** Deltas
+agreed throughout, so no conclusion moved.
+
+**Ruling 18 — the knob does not refuse 184 compiles, it converts them into
+1.46 MILLION refused submissions, and that is an adoption caveat, not a
+footnote.** The knob run's statistics block (log line 433549) reports
+`Compilations : 1462534`, of which `RetryableBailoutException: Compilable not
+ready for compilation` = **1456361**, against **144** in the baseline. That is
+`prepareForCompilation` answering false and the compilation being re-submitted,
+indefinitely. Three consequences, all now required in the report. (a) It argues
+against the freed-capacity reading harder than anything the implementer had:
+capacity is not freed, it is churned, because a refused root never leaves the
+system. (b) The measured -11.5 % compiler work and -3.5 % wall are achieved
+DESPITE 1.46 M wasted submissions, which is striking but fragile — that overhead
+is workload-shaped and need not behave the same on BOOTSTRAP or another setting.
+(c) It renders this run's `Compilations` and `Compilation Accuracy` fields
+meaningless for comparison with any other configuration, so a later task diffing
+those fields would be comparing nothing. The proper fix is named but NOT
+implemented here: a size refusal should mark the root permanently non-compilable
+rather than answering false on every submission. That is a runtime change, hence
+milestone 7's. Costs if wrong: Task 11 adopts a knob whose win is real but whose
+mechanism is uglier than the number suggests — which is exactly why the caveat is
+recorded beside the adoption.
+
+**Ruling 19 — the `Inlined Y` evidence was misattributed; the conclusion survives
+on different grounds.** The totals (2279 -> 2468, +189) are right, but the split
+is not: the suppressed roots contributed only 47 of 2279 inlined callees (their
+184 compiles show 47 Y against 4423 N), while small-root inlining rose
+2232 -> 2468, +236. So the rise is inlining GROWTH inside small roots, not
+callees redistributing out of the suppressed ones — a population of 47 cannot
+account for 198 extra compiles. Reading B still beats Reading A, now on the
+unique-roots split (+12 roots against +198 compiles) and on the retry storm.
+Costs if wrong: none; this replaces a wrong reason for a right conclusion.
+
+Task 4 fix round 2: verdict unchanged (KEEP); no re-run. **A false statement in
+round 1 is retracted, and what it hid changes what this knob is.** I wrote that
+nothing in the trace measures queue behaviour. The engine's own statistics block
+does. Knob run (log line 433549): `Compilations : 1462534`, of which
+`RetryableBailoutException: Compilable not ready for compilation.` =
+**1 456 361**. Baseline (line 469277): `Compilations : 6358`, the same bailout
+**144**. **The knob does not refuse 184 compiles; it converts them into ~1.46
+million refused submissions**, ~10 100x the baseline, because
+`prepareForCompilation` answering `false` re-submits the root rather than
+retiring it. Three consequences now in the report: (a) it argues against the
+freed-capacity reading harder than any other evidence -- capacity is *churned*,
+not freed; (b) it is a **Task 11 adoption caveat**, not a footnote: the
+-11.5 % compiler work / -3.5 % wall is achieved *despite* 1.46 M wasted
+submissions, which is fragile because that overhead is workload-shaped and need
+not behave the same on BOOTSTRAP or another setting; (c) **the knob run's
+`Compilations` and `Compilation Accuracy` statistics are meaningless for
+cross-configuration comparison** (~230x baseline for reasons unrelated to
+compiler work) -- a later task tabulating those fields per configuration would be
+comparing nothing; use `Success`, `Permanent Bailouts` and `total-compiler-ms`.
+Named but NOT implemented, and **belonging to milestone 7**: a size refusal ought
+to mark the root permanently non-compilable instead of answering `false` on every
+submission; that is a runtime compilation-policy change, and it would turn this
+knob's measured win into a floor rather than a coincidence.
+
+Task 4 fix round 2, second correction: the `Inlined Y` evidence was misattributed.
+The totals were right (2279 -> 2468, +189) but the split is: the suppressed roots
+contributed only **47** inlined callees across their 184 compiles (against **4423**
+refused, `N`), while small-root inlining rose **2232 -> 2468 = +236**. So the rise
+is inlining *growth inside small roots*, not callees redistributing out of the
+suppressed ones -- and a donor population of 47 cannot account for ~197 extra
+compiles. The conclusion (redistribution over freed capacity) survives and is now
+carried by the retry storm and the distinct-root count instead.
+
+Task 4 fix round 2, arithmetic corrections (none change a conclusion): baseline
+failures above 2069 are **41 = 2 too-large + 39 deep-inline** (not 39 = 2 + 37),
+so the failure delta reconciles exactly as -41 suppressed + 5 growth = **-36**;
+`failed` is **444 -> 408** (-36, not -37) and reads 408 throughout; **milestone 7's
+deep-inlining lever is 442 baseline / 447 forward**, not 408; `done` + `failed` is
+**6102 -> 6079** and `done` is **5658 -> 5671**, taken from the engine's `Success`
+and `Permanent Bailouts` counters which the raw line counts match exactly (the
+summarizer reads two low on `done`, one low on `failed`, two low on `inval.`;
+noted as a concern since the summarizer is closed to edits); `inval.` is
+**1273**; the ≤2069 compile counts are **5474 -> 5671 (+197)**, the earlier
+5175 -> 5373 having come from a parse that dropped ~300 unlabelled lines, and
+-184 + 197 = +13 matches `Success` exactly. Two counts are convention-dependent
+and are now reported as conventions rather than as single numbers: distinct roots
+≤2069 is 1965 -> 1977 (+12) by `name[size]`, 2206 -> 2221 (+15) by `id=`, 1759 ->
+1771 (+12) by the reviewer's parse -- all agreeing on +12-15, which is what the
+argument uses; and the gated population is **29 distinct `id=` call targets / 28
+distinct `name[size]` labels**, one of them (`encode_block[4626]`) appearing *only*
+as OSR compiles, so the gate blocks OSR entry to large roots too. I could not
+reproduce the reviewer's count of 30 under either convention and record that
+rather than adopting a number I cannot derive.
+
+Task 4 fix round 2, third correction: Concern 1 still rested on the Stage-parse
+argument this report had already withdrawn as near-tautological. It now rests on
+the same quantities the verdict does -- `total-compiler-ms` -11.5 %, `nqp-root-ms`
+-12.3 %, and the 184 -> 0 predicate outcome -- with the 3.5 % wall gain restated as
+unproven at n = 1.
