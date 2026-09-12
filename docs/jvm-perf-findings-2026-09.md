@@ -51,8 +51,14 @@ Stages sum to 432.2 s against a 434 s wall clock.
 | `PermanentBailoutException: Too deep inlining, probably caused by recursive inlining.` | 442 | 54 ms | 23.7 s |
 | `BailoutException: Code installation failed: code is too large` | 2 | 3474 ms | 6.9 s |
 
-`min-too-large-size=2070` (`IMPL-FOLD-CONSTANT[2070]`, then
-`IMPL-OPTIMIZE-EXPRESSION[4030]`). `total-compiler-ms=2143944`,
+`min-too-large-size=2070` — the two roots are
+`IMPL-FOLD-CONSTANT[2070]` (3861 ms) and `IMPL-OPTIMIZE-EXPRESSION[4030]`
+(3086 ms). That there are exactly two is confirmed independently of the
+summarizer by Graal's own `CompilationStatistics` bailout tally, which
+reads `jdk.vm.ci.code.BailoutException: Code installation failed: code
+is too large: 2`, and by the fact that the string `too large` occurs
+three times in the entire 30 MB log (two trace lines plus that tally).
+`total-compiler-ms=2143944`,
 `nqp-root-ms=1937603` (90 % of compiler time is spent on roots that
 carry a wire-word count, i.e. on nqp/Raku roots rather than on the
 runtime's own Java).
@@ -61,37 +67,106 @@ runtime's own Java).
 
 The 2026-09-07 trace recorded **114** roots failing `code is too large`
 at a mean 6.4 s, 733 s of compiler time. This trace records **2**, 6.9 s
-in total — 0.3 % of the compiler time that cluster once cost, and 0.3 %
-of this run's 2144 s. Whatever closed it (milestone 5's RakuObject
+in total — **0.9 %** of the compiler time that cluster once cost, and
+0.3 % of this run's 2144 s. (Two different ratios: 6.9/733 = 0.9 %,
+6.9/2144 = 0.3 %.) Whatever closed it (milestone 5's RakuObject
 layout and the engine merge are the two candidates, neither measured
 against it), the size-bailout lever that Task 4 exists to pull now has
 essentially nothing left to gain on CORE.c.
 
-### The dominant bailout is now recursive inlining, and it is not about size
+### The dominant bailout is recursive inlining, it enters through OUR code, and it is a milestone 7 lever
 
 442 of the 444 permanent bailouts are `Too deep inlining, probably
-caused by recursive inlining.` The bailout message carries its own
-inlined-method dump, and the recursion it names is entirely on the Java
-side:
+caused by recursive inlining.` Each carries its own inlined-method dump,
+and the 442 dumps in the trace split cleanly into **two** recursions —
+238 + 204 = 442, with no remainder. Both are recursions inside the JDK,
+and **both are entered from our own Truffle operation nodes**: the graph
+starts in generated code, walks into a Java error-reporting branch that
+nothing proves dead, and drowns there.
+
+**Chain A — the `noisyExceptions` debug branch (238 of 442).** Read
+bottom-up, the way the graph is built:
 
 ```
-java.lang.Throwable.printStackTrace()
-org.raku.nqp.runtime.ExceptionHandling.dieInternal(ThreadContext, String, Throwable)
-  -> sun.reflect.generics.repository.ClassRepository.parse(String)  [33 frames]
+NqpRootNodeGen.execute -> …CachedBytecodeNode.handleCreateOp_
+  -> NqpRootNode$CreateOp.doCreate
+  -> NqpTypeOps.create(NqpTypeOps$CreateSite, Object, ThreadContext)     <-- ours
+  -> VMArray.allocate(ThreadContext, STable)                             <-- ours
+  -> ExceptionHandling.dieInternal(ExceptionHandling.kt:47)              <-- ours
+  -> java.lang.Throwable.printStackTrace()
+  -> sun.reflect.generics.repository.ClassRepository.parse(String)  [33]
   -> sun.reflect.generics.parser.SignatureParser.parseClassSignature()
 ```
 
-i.e. the generics-signature parser reached through the exception
-reporting path, inlined 33 deep. It is independent of the nqp root's
-size: the sizes behind these 442 failures run from **27** wire words to
-17545. That is why the summarizer leaves them in the unclassified block
-rather than treating them as a size bailout — classifying them would
-set `min-too-large-size=27` and produce a threshold at which nothing
-compiles.
+`ExceptionHandling.kt:47` is
+`if (tc.gc.noisyExceptions) (t ?: Throwable(msg)).printStackTrace()` —
+a debug-only branch behind a mutable runtime flag. Graal cannot fold the
+flag, so it inlines `printStackTrace`, which reaches the generics
+signature parser through reflection and recurses 33 deep. Counts:
+238 dumps top-led by `ClassRepository.parse(String)` or
+`AbstractRepository.<init>`, and exactly 476 = 238 x 2 occurrences of
+`ExceptionHandling.dieInternal` (one in each dump's frequency list, one
+in each stack trace).
 
-At 23.7 s of 2144 s this is not itself a large clock, but it is 442
-compilations thrown away, and the cause is one Java call chain rather
-than anything in the generated code. Named here for milestone 7.
+**Chain B — the sited `invokeExact` attribute road (204 of 442).**
+
+```
+NqpRootNodeGen.execute -> …CachedBytecodeNode.handleBindAttrOp_
+  -> NqpRootNode$BindAttrOp.doBind
+  -> NqpOps.bindattr(NqpOps.java:1517)  /  NqpOps.getattr(NqpOps.java:1482)   <-- ours
+  -> java.lang.invoke.Invokers.newWrongMethodTypeException(Invokers.java:522)
+  -> java.lang.String.valueOf -> java.lang.invoke.MethodType.toString(MethodType.java:936)
+  -> java.lang.Class.getSimpleName()  [495]
+```
+
+This is the sited MethodHandle road added in milestone 5: the
+`getter.invokeExact((SixModelObject) o)` / `setter.invokeExact(…)` calls
+in `NqpOps.getattr`/`bindattr`. Graal inlines the **exception-construction
+branch** of `invokeExact`, and building that exception's message drags
+`MethodType.toString` into a `Class.getSimpleName` recursion 495 frames
+deep. Counts: 204 dumps top-led by `Class.getSimpleName()` (201 of them
+at exactly `[495]`), 408 = 204 x 2 occurrences of
+`newWrongMethodTypeException`, and entry points
+`NqpOps.getattr(NqpOps.java:1482)` 165 + `NqpOps.bindattr(NqpOps.java:1517)`
+39 = 204, exactly. (The built jar's line numbering runs a few lines
+behind this worktree's source, where the two `invokeExact` calls are at
+`NqpOps.java:1500` and `:1536`.)
+
+**Nothing is actually throwing.** This is speculation, not failure, and
+a reader should not go looking for a crash. The evidence: all 476
+occurrences of `ExceptionHandling.dieInternal` are *dump entries*, never
+printed output; there are zero `Unhandled exception` or `at org.raku…`
+lines in the whole 30 MB log; and `non-trace-lines=464803` is
+approximately 442 dumps x ~1000 lines, which leaves no room for 442
+printed stack traces. Graal inlines these branches because nothing in
+the graph proves them dead, not because they run.
+
+**Why this is not a size bailout, and must not be taught to the
+selector.** The sizes behind these 442 failures run from **27** wire
+words to **17545**, with 5 carrying no size at all. A limit that refuses
+a 27-word root while a 989-word root compiles successfully in 11 s is
+not a limit on size. Adding this spelling to
+`@SIZE-BAILOUT-SPELLINGS` would set `min-too-large-size=27`, and
+`NQP_CODE_MAX_COMPILE=26` would refuse essentially every compilation in
+every later measurement — not biasing the sweep but destroying it. The
+unclassified block exists precisely so this reason is read by a human
+instead of being absorbed; leave it there.
+
+**The lever.** 23.7 s of compiler time is not the point. The point is
+**442 roots that bail and therefore stay interpreted for the whole
+compile**, on a workload whose wall clock is 90 % interpretation
+(`Stage parse` 333.8 s of 434 s). Two candidate fixes, both small and
+both one-sided:
+
+1. `@TruffleBoundary` on `ExceptionHandling.dieInternal` (or on the
+   `noisyExceptions` branch alone), which removes chain A from every
+   compilation graph. 238 roots.
+2. An `asType`/explicit-cast or guard at the `invokeExact` sites so the
+   `WrongMethodTypeException` construction branch is provably dead, or a
+   boundary on it. 204 roots.
+
+Neither changes semantics, and neither is a knob — they are code, which
+is why they belong to milestone 7 rather than to this sweep.
 
 ## 2. The three clocks
 
