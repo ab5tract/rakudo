@@ -1205,3 +1205,47 @@ sitting directly beneath `PERFORM-BEGIN[2085]` at 26 compiles and 41.8 s, so an
 encoder change moves roots across it and no later task may read the knob as pure
 subtraction; (3) milestone 7's deep-inlining lever is 442 baseline / 447 forward,
 not 408 — the cluster was hidden, not fixed.
+
+Task 5: implementer dispatched (opus); BASE rakudo `369eca5481`.
+`engine.PartialBlockCompilation=true` with `NQP_CODE_MAX_COMPILE` NOT set -- it is
+the ALTERNATIVE to Task 4's knob, not a companion. Judged against BOTH baselines
+(Task 3 no-knob, Task 4 incumbent); it replaces Task 4 only if it beats it.
+Briefed with all four lessons from Tasks 3-4: poisoned statistics fields, no noise
+floor, the summarizer undercount, and no queue stories.
+
+Task 5: complete. Verdict **DROP** -- `engine.PartialBlockCompilation=true` is
+**inert for this workload**, not merely unhelpful. Wall 433 s (T3 434, T4 419),
+`total-compiler-ms` 2129872 (T3 2143944, T4 1898458), `nqp-root-ms` 1921970
+(T3 1937603, T4 1699179), `Success` 5617 (T3 5658, T4 5671), `Permanent
+Bailouts` 448 (T3 444, T4 408). Against the incumbent it does +231414 ms
+(+12.2 %) more compiler work with 54 fewer successes and 40 more bailouts, so
+Task 4's `NQP_CODE_MAX_COMPILE=2069` carries forward alone. `min-too-large-size`
+is still **2070**, the SAME two roots (`IMPL-FOLD-CONSTANT[2070]`,
+`IMPL-OPTIMIZE-EXPRESSION[4030]`) failing at the same cost -- the knob's one
+advertised effect did not occur. Failures by reason: 446 deep-inlining + 2
+too-large; no new reason, and the deep-inlining cluster is 442 -> 446, so
+milestone 7's lever is unchanged at ~442-447.
+**Mechanism (structural, checked in-tree, not a queue story):** partial block
+compilation is implemented solely in `com.oracle.truffle.runtime.OptimizedBlockNode`,
+which exists only where a language builds `com.oracle.truffle.api.nodes.BlockNode`;
+`grep -rn BlockNode nqp/nqp-truffle/src/ nqp/src/vm/jvm/runtime/` returns ZERO
+hits, and `NqpRootNode` is a `@GenerateBytecode ... BytecodeRootNode` whose body
+is an interpreted bytecode loop with no statement-node sequence to wrap. **Screen
+every remaining knob for this before spending a compile: anything gated on
+BlockNode, AST node counts or tree shape cannot apply to a Bytecode DSL language.**
+**Two process findings for the controller.** (1) The Step 1 `NqpCheck` probe is
+structurally unable to gate EXPERIMENTAL options: `NqpCheck.java:31` builds a
+context WITHOUT `allowExperimentalOptions(true)` while `NqpPolyglot.kt:49-51` --
+the context the compiler actually runs in -- has it, so the probe rejected the
+option as experimental and would false-BLOCK every future experimental knob.
+The implementer overrode the stop instruction after verifying acceptance on the
+real engine path in ~20 s (`nqp-j-gradle -e` printed `engine-ok` plus a full
+statistics block); the controller should confirm that call rather than let it
+become precedent, and the durable fix is one line in `NqpCheck.java`, not made
+here (measurement-only task). (2) Task 11 has nothing to combine -- only one knob
+beat the baseline, and the combination it was reserved for is the configuration
+ruled out here; re-aim it or drop it.
+Also: the summarizer undercount took a THIRD distinct value (done -2, failed 0,
+against 2/0 and 1/1), and `TraceCompilation` destroyed the numbers on four of
+eight `Stage` lines, so per-stage attribution after `parse` is marker-derived
+only. Report: `.superpowers/sdd/2026-09-12-jvm-milestone-6-compiler-workload/task-5-report.md`.
