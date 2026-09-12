@@ -1426,6 +1426,43 @@ a regeneration, not a rebuild; it does not invalidate any measurement.
    target lists an nqp artifact as a prerequisite, so a rebuilt nqp is
    invisible to `make`. Any future measurement that changes nqp must run
    `Configure.pl` and `make clean` first, or it measures the old nqp.
+7. **Milestone 7's lead lever, framed correctly.** Task 3 found 442 of
+   444 compilation bailouts are one phenomenon: Graal inlining slow paths
+   that never execute, until it gives up on inlining depth, leaving those
+   roots interpreted for the whole compile. Chain A (238 roots) enters at
+   `NqpTypeOps.create` -> `VMArray.allocate` ->
+   `ExceptionHandling.dieInternal`, whose `printStackTrace` sits behind an
+   environment flag. Chain B (204 roots) enters at `NqpOps.getattr:1482`
+   and `bindattr:1517`, where the JDK constructs a wrong-method-type
+   exception message. Nothing throws; this is speculation.
+
+   Three corrections that must travel with it, all established by Task
+   3's review and all easy to get wrong:
+
+   - **Frame it as "slow paths visible to the inliner", NOT as "env-gated
+     debug prints".** Chain B, the larger per-root cost, has no env gate
+     at all. The env-gating rule is not the culprit and must not be
+     softened: a survey of all 35 `System.getenv` sites in the runtime
+     found every one except `GlobalContext.kt:287` is already a `val` or
+     `static final`, hence foldable. That one mutable instance flag is an
+     outlier, not a pattern.
+   - **The fix is `@TruffleBoundary`, not a constant.** Folding the flag
+     removes only the print branch; the rest of `dieInternal`, its
+     40-frame `StringBuilder` walk and its `VMExceptionInstance`
+     construction, stays inlinable. A boundary removes the whole slow
+     path regardless of receiver constancy. Hoisting the flag to
+     `static final` is a cheap complement, not an alternative — and note
+     that `@CompilationFinal` on the instance field would be a no-op,
+     because `tc` comes off the frame so `tc.gc` is never a
+     partial-evaluation constant.
+   - **The survey worth running:** `nqp/src/vm/jvm/runtime` contains
+     **zero** `@TruffleBoundary` annotations, against 113 in
+     `nqp/nqp-truffle/src`. That entire older tree is called from Truffle
+     nodes with every slow path fully visible to the inliner. Chain A is
+     simply the first one anyone measured. Six inline `System.getenv()`
+     calls on runtime paths are worse in kind, since a `getenv` in a
+     compiled graph cannot fold at all: `Ops.kt:6834`, `Ops.kt:9026`,
+     `UnitWriter.kt:33`, `NqpPolyglot.kt:54`, `NqpCodeEngine.java:93`.
 
 - [ ] **Step 7: Commit**
 
