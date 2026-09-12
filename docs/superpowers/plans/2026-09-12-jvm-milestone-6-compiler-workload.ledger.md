@@ -2581,3 +2581,46 @@ the debounce fit is wrong.
 Caveat: unique roots are counted by `name[size]`, a label already known to merge
 distinct call-target ids (the `PERFORM-BEGIN` case). The 6-vs-16 comparison is
 unaffected — both 1515 — but the absolute counts are approximate.
+
+**Ruling 44 — ruling 43's counts were taken with the WRONG identity, recounted by
+`id`, conclusion survives.** The user pointed out that `name[size]` was already
+established as inferior — **ruling 20** settled that the engine's `id=`
+call-target identity is primary, because that is what the queue and the size
+predicate act on, and that `name[size]` merges distinct targets. I then ran
+ruling 43's analysis on the label I had myself recorded as wrong. That is the
+SECOND time in this milestone I have used a convention already ruled against, and
+both times someone else caught it.
+
+Recounted by `id=`:
+
+| threads | compiles | unique by **id** | unique by name[size] | compiles/target |
+|---|---|---|---|---|
+| 3 | 2998 | **1626** | 1479 | 1.84 |
+| 6 | 3334 | **1672** | 1515 | 1.99 |
+| 16 | 3355 | **1672** | 1515 | 2.01 |
+
+The label under-counted by ~147-157 targets per run, about 10 %. **Every claim in
+ruling 43 survives**, with corrected figures: 6 -> 16 still buys 21 compilations
+and **ZERO** new targets; coverage still saturates, at **1672** not 1515; three
+threads loses **46 targets, 2.8 %** (not 36, 2.4 %); compiles per target is
+1.84 / 1.99 / 2.01 (not 2.03 / 2.20 / 2.21). The debounce fit is unaffected and
+so is the reframing of the knob as a churn workaround.
+
+**Sweep-back required, recorded as a milestone-7 hand-off item:** any other
+analysis in this milestone that used `name[size]` where `id` was available must
+be redone before it is relied on. Known candidate: the per-compile root multiset
+diff behind rulings 34/37 (the "131 roots at or above 2069" claim) — already
+downgraded by ruling 37 to "consistent, pending milestone 7" for a different
+reason, and now also owing an identity recount. The `encode_var[6418]` analysis is
+SAFE: it was explicitly checked to carry a single `id=3067`, so no merging was
+possible there.
+
+**Process note, and the more useful half of this.** The user asked whether
+insisting "we cannot go further while this is the case" was an overreaction. On
+the principle, no — the identity was already settled and I ignored it. On the
+blanket rule, the recount was one command answering in seconds, so the right
+response to a known-bad identity surfacing is to REDO the analysis, not to halt;
+and had the conclusion moved, that is precisely when you want to know before
+spending more compiles. What deserves attention is the pattern rather than the
+instance: rulings in this ledger are not being consulted by the controller that
+wrote them.
