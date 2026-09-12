@@ -1409,6 +1409,28 @@ a regeneration, not a rebuild; it does not invalidate any measurement.
 1. The configuration table: one row per compile (baseline, Tasks 4-7)
    with wall clock, `Stage parse`, `Stage optimize`, `done`, `failed`,
    `total-compiler-ms`, and the verdict.
+1a. **The measurement caveats, stated once and prominently**, because
+   every row inherits them:
+   - **There is no noise floor.** Forward-only means one sample per
+     configuration and no repeats, so a small wall-clock delta cannot be
+     distinguished from run-to-run drift. Task 1's and Task 3's figures
+     do not supply one either, being different configurations. Where a
+     verdict rests on something other than the clock, say what.
+   - **`total-compiler-ms` and `nqp-root-ms` are the trustworthy
+     quantities.** They are wall-clock-independent and, in Task 4, moved
+     an order of magnitude further than the wall did.
+   - **"The delta lives in Stage parse" is not evidence.** Parse is 77 %
+     of the wall and is where essentially all compilation happens, so any
+     wall change lands there a priori.
+   - **A knob may redistribute rather than remove work.** Task 4
+     suppressed 178 compiles and the total compile count barely moved
+     (`done`+`failed` 6100 to 6078), so treating a later knob as pure
+     subtraction would be wrong.
+   - **Task 4's threshold is sensitive, not merely arbitrary.** 2069 sits
+     directly beneath `PERFORM-BEGIN[2085]`, the second-largest
+     contributor at 43 s over 26 compiles; a threshold of 2100 brings it
+     back. The gated population is only 29 unique roots, dominated by
+     recompilation churn.
 2. The three clocks: CORE.c, cold start with its stage table, the green
    subset warm and cold with the start-up split, and the loop bench.
 3. The ranked lever list milestone 7 inherits. For each lever: which
