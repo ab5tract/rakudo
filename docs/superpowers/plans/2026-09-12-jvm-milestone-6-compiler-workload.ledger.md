@@ -2880,3 +2880,79 @@ never compiled and was the only run whose queue did not drain (`Remaining
 Compilation Queue` 7); CORE.c on one machine; and the 2->3 step and 4->6 inversion
 remain inside the wall resolution, so the SHAPE rests on none->1 (63 s), 1->2
 (26 s) and 1->16 (49 s), all far outside it.
+
+**ZERO-POINT IMPLEMENTER'S EVIDENCE, appended after the fact.** The implementer's
+report did reach disk: `.superpowers/sdd/2026-09-12-jvm-milestone-6-compiler-workload/task-7-zero-report.md`.
+It agrees with rulings 47 and 48 on every number already recorded above (wall
+360 s, `Stage parse` 278.213, zero `opt done`) and adds four things the
+controller's direct collection did not cover. Nothing above is amended.
+
+**SCREEN of `engine.Compilation`, by `javap` on `OptimizedRuntimeOptions` and its
+`...OptionDescriptors` in `nqp/build/jvm/share/truffle/truffle-runtime-25.2.4.jar`:**
+the key **exists** (`OptionKey<Boolean> Compilation`, option name
+`engine.Compilation`); its **default is `true`** (`<clinit>` builds it with
+`iconst_1`); its **stability is EXPERIMENTAL**, category EXPERT, **not
+deprecated**; help text "Enable or disable Truffle compilation." EXPERIMENTAL is
+the same class as `CompilerThreads`, which ruling 30's gate already accepts on the
+real engine path. It was accepted here with no warning of any kind.
+
+**IN FORCE, third channel — the `/proc` thread count, sampled to completion.**
+The controller checked the live process once mid-run; the implementer sampled
+`/proc/<pid>/task/*/comm` every 12 s for the whole compile: **0 `TruffleCompiler`
+threads in 30 of 30 samples, maximum 0.** Not an idle pool — the pool is never
+created. Corroborated by the statistics block, which printed in full with
+`Compilations 0`, `Queues 0`, `Compilation Utilization 0.000000` and
+`Compilation Accuracy`/`Queue Accuracy` both **`NaN`** (0/0), and by the
+summarizer reporting `events=0 total-compiler-ms=0` with **`unparsed=0`**, so the
+zero is not a parse failure in disguise. `tools/build/truffle-trace-summary.raku`
+was not edited.
+
+**THE FULL STAGE BREAKDOWN, which qualifies ruling 47's "83 % sits in parse".**
+With no trace output to interleave, every stagestats line printed clean — no
+marker collisions to work around, so these are read directly:
+
+| stage | none | 1 thread | Δ | Δ % |
+|---|---|---|---|---|
+| `Stage parse` | 278.213 | 225.941 | **+52.272** | **+23.1 %** |
+| `Stage optimize` | 33.406 | 23.680 | **+9.726** | **+41.1 %** |
+| `Stage qast` | 21.751 | 21.169 | +0.582 | +2.7 % |
+| `Stage unit` | 25.644 | 24.352 | +1.292 | +5.3 % |
+| start/syntaxcheck/ast/jar | ~0 | ~0 | — | — |
+| **stage sum** | **359.016** | 295.143 | **+63.873** | — |
+
+Parse takes 82 % of the penalty while being 77 % of the run — over-represented,
+but only mildly, so "the hot loops live in parse" is supported rather than
+demonstrated. **`Stage optimize` is proportionally the worst-hit stage at +41 %,
+three times parse's relative penalty**, and it rises monotonically across the
+whole curve too (23.680 / 24.975 / 28.803 / 31.926 at 1/2/4/16 threads, 33.406 at
+none). No task in this milestone has examined optimize; neither the thread story
+nor the tier story currently explains it. Recorded as an open thread, not a claim.
+**`Stage qast` and `Stage unit` are essentially unaffected** (+2.7 %, +5.3 %) and
+are in fact FASTER here than in the 4- and 16-thread compiled runs (qast 21.751
+against 25.920 and 25.988) — they were getting nothing from guest compilation and
+were paying for it at high thread counts.
+
+**CAVEAT THAT BOUNDS RULING 47'S HEADLINE: the host JIT was never off.**
+`engine.Compilation=false` disables *Truffle* compilation of guest programs only.
+HotSpot's own JVMCI/Graal compiler kept compiling the Java bytecode of the Truffle
+interpreter throughout — the sampler counted 1-5 `jvmci`-named threads alive in
+every sample. So "interpreted" in this run means *AST-interpreted by a fully
+JIT-compiled Java interpreter*, not interpretation all the way down. This is
+almost certainly why the penalty is 21 % rather than the predicted order of
+magnitude, and it means ruling 47's "Truffle's entire JIT contribution is 17.5 %"
+should be read as **the guest-compilation layer's contribution on top of a host
+JIT that is already doing most of the work** — not as a statement about Truffle
+versus interpretation in general. The ceiling ruling 47 sets on this milestone's
+adoptions still holds; its causal reading needs that qualifier.
+
+Implementer's own caveats: one replicate (the effect is ~100x the 0.2 % wall noise
+floor, so direction is safe, the exact 63 s is one sample); the box was not idle
+(HEAD moved from `ac4980f905` to `37c5e465c3` mid-run, ledger prose only, `git
+diff --stat` one file +25 lines, no source change); `--stall`/`--max` were raised
+to 1560 s because the watchdog keys on output silence and a run with no trace
+output is silent for all of parse — the run finished in 360 s and never
+approached either; output jar 5 865 111 bytes, inside the same +/-20-byte band as
+all seven prior runs, so byte-identity is unavailable as a check and size band
+plus `EXIT=0` is what can be claimed; `blib` untouched;
+`NQP_CODE_MAX_COMPILE` unset before and after; `CompilerThreads` correctly not
+set, since its floor of 1 cannot express zero.
