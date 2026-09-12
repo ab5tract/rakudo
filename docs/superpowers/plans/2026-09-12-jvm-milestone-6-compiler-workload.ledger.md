@@ -1621,3 +1621,172 @@ with a whole-second wall quantum — a formality at 100x, but stated; (6) the
 commit stamp is 20:40:00 as briefed, which is four minutes BEFORE its parent
 `64860c451a` (20:44:00) — the briefed value was fixed before ruling 28 landed,
 and I kept it rather than silently substituting my own.
+
+Task 6 (COMBINATION run): implementer DONE, verdict KEEP — rakudo `5aed763460`
+(ledger only). Ruling 28 landed mid-compile, so this run still carries
+`NQP_CODE_MAX_COMPILE=2069` and is the COMBINATION data point; the clean run
+decides tier policy itself.
+SCREEN A caught one: `engine.MultiTier` already defaults to **true**, so it was
+omitted and the configuration is THREE options, not four — `engine.Mode=latency`,
+`FirstTierCompilationThreshold` 400 -> 1600, `LastTierCompilationThreshold`
+10000 -> 40000 (the last accepted but structurally inert under latency).
+SCREEN B passes: all three live in `EngineData` -> `OptimizedCallTarget`, the
+universal call-target class, unlike Task 5's node-class-specific option.
+In force by three proofs, not merely accepted: negative controls reject
+`Mode=bogus` and `notanint`; `opt done ... Tier 2` goes 1394 -> **0**; tier-1
+successes 4277 -> 3203 as the raised-bar residual.
+
+| quantity | T3 clean | T4 size knob | T6 combination |
+|---|---|---|---|
+| wall | 434 s | 419 s | **329 s** |
+| total-compiler-ms | 2143944 | 1898458 | **644314** |
+| nqp-root-ms | 1937603 | 1699179 | **590650** |
+| Success | 5658 | 5671 | **3203** |
+| Permanent Bailouts | 444 | 408 | **331** |
+
+Mechanism: Task 4's tier-2 work was 1019837 ms over 1394 compiles, 54 % of its
+compiler time, and is now ZERO. Every stage fell (parse -74 s, others -16 s), so
+this is not the Stage-parse tautology. Deep-inlining cluster 442-447 -> 330-331.
+
+**Ruling 29 — RULING 28'S REASONING WAS WRONG IN DIRECTION, though its decision
+stands.** I argued that carrying Task 4's knob would INFLATE a tier-policy result,
+because raising submission thresholds would shrink the retry storm. The opposite
+happened: the storm GREW from 1.456 M to 2.076 M, +43 %. So the confound runs
+backwards and the measured -90 s is a FLOOR, not an inflation — tier policy on a
+clean system should look at least this good. The decision to measure cleanly
+remains right for attribution, and the clean run is still worth its seven
+minutes, but for a different reason than I gave: not to strip away an inflated
+gain, but to find out whether the size knob still adds anything once tier-2 work
+no longer exists. Costs if wrong: none; the correction makes the pending clean
+run a marginal-value question rather than a correction.
+
+**Ruling 30 — `Mode=latency` is BUILD-SIDE ONLY, and this is the single most
+important sentence for Task 11.** Latency mode pins every root to tier 1 forever.
+For a compile that runs each block a handful of times that is exactly right; for
+Rakudo's own runtime it would cap every hot loop at first-tier code and cripple
+the performance the user ranks ABOVE compile time. Task 11 must adopt it in
+`j_truffle_opts` / `j_truffle_args` (build) and must NOT add it to
+`create-jvm-runner.pl`'s `$jopts` (runtime). Costs if wrong: adopting it at
+runtime would be the worst regression this milestone could ship, which is why it
+is recorded as a ruling rather than a concern.
+
+Task 6: concern carried to Task 11 — `Mode=latency` also switches SPLITTING off,
+so the configuration is not purely tier policy and the three options moved
+together. Isolating `Mode` alone would need another compile; not spent.
+Task 6: concern carried to Task 11 — `NQP_CODE_MAX_COMPILE=2069` was derived on a
+run containing tier-2 work that no longer exists under latency, so the threshold
+may no longer mean anything; re-derive before ever recombining them.
+Task 6: the implementer used the briefed stamp 20:40:00, four minutes BEFORE its
+parent commit at 20:44:00, and flagged it rather than silently substituting a
+different time. Correct call: a brief's literal value is followed and the
+anomaly reported, not quietly "fixed".
+
+Task 6: review (opus) — Spec ✅ (the `MultiTier` omission accepted as a correct,
+argued deviation), quality Approved, KEEP stands, 0 Critical, 1 Important,
+3 Minor. The reviewer re-parsed the log with its OWN script rather than the
+summarizer and reproduced every figure exactly, then closed the mechanism
+arithmetically: 1394 tier-2 compiles at 1019837 ms (53.7 % of Task 4's compiler
+time) plus tier-1 done 857951 -> 626710 and tier-1 failed 20444 -> 17604 at
+234147 ms sum to the full 1254144 ms drop. The effect is two orders of magnitude
+outside the noise floor.
+
+**Ruling 31 — the retry storm grew for a CONGESTION reason, not a threshold
+reason; both the implementer's explanation and mine were wrong.** I predicted the
+storm would shrink (ruling 28) and the implementer explained its growth as higher
+thresholds keeping a root ineligible for longer. Both are wrong in the same
+direction: a root ineligible longer submits LESS, and pure threshold-gating
+predicts roughly 4x FEWER resubmissions, not the observed 1.4x more
+(1456361 -> 2076384, +42.6 %). The fit that matches the data is the reviewer's:
+`prepareForCompilation` returning false is a RETRYABLE bailout that does not mark
+the target failed, so a refused root becomes re-submittable as soon as no task is
+pending — resubmission is congestion-bound, not threshold-bound. Task 6's queue
+carries 66 % less real work, so refused tasks turn around faster: 3476
+resubmissions/s against 6311/s. It is a fit to observed rates, not something the
+trace proves, since the trace records no enqueue events. Costs if wrong: the
+mechanism is descriptive only; no decision in this milestone rests on it.
+
+**Ruling 32 — the splitting worry is CLOSED by the runs' own data, not carried
+to Task 11.** The implementer flagged that `Mode=latency` also disables splitting,
+so the configuration is not purely tier policy. Both runs print `Splits : 0`:
+splitting produced nothing on this workload even with splitting ENABLED, so the
+side effect contributed exactly zero here. The reviewer also derived the
+attribution split — roughly 81 % of the drop is `Mode=latency` abolishing tier 2,
+roughly 19 % the raised first-tier bar, both genuinely tier policy — and
+confirmed `LastTierCompilationThreshold` is inert for a verified reason:
+`OptimizedCallTarget.compile(boolean, SubmissionReason)` has `firstTierOnly`
+force the last-tier flag false, so that threshold is never the gate. Costs if
+wrong: none; this closes an open question with evidence already in hand.
+
+**Ruling 30 CONFIRMED from bytecode.** `EngineData.<init>` computes
+`firstTierOnly = (Mode == LATENCY)` and `splitting = Splitting && (Mode !=
+LATENCY)`, and `OptimizedCallTarget.compile` uses `firstTierOnly` to force every
+submission to first tier, so no root reaches the top tier for the life of the
+process — corroborated by 0 tier-2 compiles in 3203. Reviewer confidence: very
+high. Task 11 must adopt `Mode=latency` build-side ONLY.
+
+Task 6 fix round 1 (no re-run; everything below is from the two logs already on
+disk). Verdict, headline and the §5 table unchanged.
+
+**IMPORTANT 1 — my retry-storm mechanism was wrong and inverted; withdrawn.** I
+wrote that higher thresholds keep a root ineligible longer so it resubmits for
+the whole of that longer window. A root that is ineligible longer submits LESS;
+pure threshold-gating predicts ~4x FEWER resubmissions (400 -> 1600), not the
+1.43x more measured. Replacement: `prepareForCompilation` returning false is a
+RETRYABLE bailout that does not set `compilationFailed`, so a refused target is
+re-submittable as soon as no task is pending for it — resubmission is
+CONGESTION-bound, not threshold-bound, and this run's queue carries 66 % less
+real work so refused tasks turn around faster. Verified rates: Task 4
+1 456 361 / 419 s = **3 475.8 resubmissions/s**; Task 6 2 076 384 / 329 s =
+**6 311.2 resubmissions/s** (count 1.43x, rate 1.82x). **This is a fit to two
+observed rates, NOT something the trace proves**: `TraceCompilation` records
+done/failed/inval/deopt/reprof and no enqueue events at all, so the submission
+period is never directly observed. Label it as a fit wherever it is reused.
+**Prediction deleted:** I had predicted the clean Task 6 would show a smaller
+`Compilations` figure. It cannot test anything — the clean run drops
+`NQP_CODE_MAX_COMPILE`, so `prepareForCompilation` is always true, nothing is
+refused, and there is no storm to count (Task 3 recorded 144). Struck, not
+rephrased.
+
+**Task 6 concern 2 CLOSED, not carried to Task 11.** The `Mode=latency`
+splitting side effect contributed exactly zero here: BOTH statistics blocks
+print `Splits : 0`. Task 4 had splitting ENABLED and split nothing, so switching
+it off removed no work. The bytecode finding (`splitting = Splitting && (Mode !=
+LATENCY)`) stays on the record for a workload where splitting fires; it is not a
+caveat on this measurement.
+
+**Attribution split, derived from the `Time` fields over the summarizer's own
+line population.** Both column totals reproduce `total-compiler-ms` exactly and
+the four drops sum exactly to the 1 254 144 ms fall:
+
+| | Task 4 | Task 6 | drop |
+|---|---|---|---|
+| tier-2 `done` | 1 019 837 ms (1394) | 0 | 1 019 837 |
+| tier-2 `failed` | 226 ms (5) | 0 | 226 |
+| tier-1 `done` | 857 951 ms (4276) | 626 710 ms (3203) | 231 241 |
+| tier-1 `failed` | 20 444 ms (402) | 17 604 ms (330) | 2 840 |
+| **total** | **1 898 458** | **644 314** | **1 254 144** |
+
+**`Mode=latency` abolishing tier 2 = 1 020 063 ms (81.3 %); the raised
+first-tier bar = 234 081 ms (18.7 %).** Both halves are genuinely tier policy
+and neither is an artifact of the carried size knob, which strengthens the KEEP.
+
+**`LastTierCompilationThreshold` is inert for a CONFIRMED reason, not a
+suspected one.** At the top of `OptimizedCallTarget.compile(boolean,
+CompilationTask$SubmissionReason)`: `getfield EngineData.firstTierOnly` / `ifne`
+-> `iconst_0` / `istore_3`, i.e. `lastTierCompilation := !firstTierOnly && arg`.
+`firstTierOnly` forces the flag false on every entry whatever the caller asked,
+so a last-tier compilation is never submitted and the threshold is never the
+gate. Drop it from any carried set.
+
+**MINOR — channel reconciliation corrected, and now exact.** 336 raw
+`grep -c PermanentBailoutException` = **330** clean `^[engine] opt failed` lines
++ **1** `opt failed` line carrying a watched-run `Stage unit       : ` prefix
+(log line 343573) + **5** repetitions inside the statistics block's own
+per-reason breakdown (lines 349945, 350999, 352019, 353039, 354061). So the
+331-vs-330 gap is that single Stage-prefixed line: the engine counts it
+(`Permanent Bailouts : 331`), the summarizer's starts-with filter drops it
+(`failed=330`) — lesson 3's undercount caught in the act. The same filter
+reconciles the ms totals to the millisecond: Task 6's dropped `opt failed` is
+31 ms (raw 644 345 - 31 = 644 314) and Task 4's are an `opt failed` at 28 ms
+plus a `Stage start`-prefixed `opt done` at 59 ms (raw 1 898 545 - 87 =
+1 898 458). No residual in either channel.
