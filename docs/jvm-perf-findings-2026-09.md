@@ -253,3 +253,70 @@ builder registers no Truffle feature at all and the binary dies with "No
 language and polyglot implementation was found on the module-path". The size
 tells the story: 28.9 MiB with Truffle on the module path, 67.6 MiB with it on
 the class path, the difference being the Graal compiler compiled in.
+
+## The hot loop, and the `slowEvals` question milestone 5 left open
+
+Baseline at rakudo `fa16081af3` / nqp `41c294b02`, stock `./rakudo-j` (no
+eval server, no engine option — everything milestone 6 adopted is
+build-side only):
+
+```
+ns/op=85.825 s=3
+dispatch stats: hits=90247946 misses=11623 slowEvals=976 invokes=13867 directs=13848
+  noTarget=19 badExpectation=0 notCodeRef=0
+  byKind[value,syscall,mapped,invoke,resumable]=[0, 95765, 45117640, 13467, 45021074]
+```
+
+`docs/bench/jesp/resume-smoke.raku` answers exactly as before.
+
+**The +3.5 % is not established.** Four identical stock runs at this one
+build gave 85.825, 89.375, 87.400 and 89.175 ns/op — a 4.1 % spread,
+wider than the regression — and printed a *byte-identical* dispatch-stats
+line each time. Milestone 5 compared one run per side.
+
+**Why the bench is that noisy: it times a loop its warm-up does not
+warm.** `TraceCompilation` shows plusquick's mainline `<unit>[705]` with
+two OSR call targets, one per `while` loop. The warm-up target is
+invalidated exactly when the timer starts; the timed loop then enters its
+*own, cold* target, whose two compilations land 200 ms and 470 ms later.
+The measured window is 3.010 s, so **15.6 % of it runs before the timed
+loop's final code exists**. Any future ns/op comparison wants a median of
+five runs, or a bench that times a loop it has already run.
+
+The loop is not a churn workload: 86 `opt done`, 33 `opt deopt`, 24 `opt
+inval.` over ~70 roots by `id=`, top reasons `uncommon trap` (28) and
+`validRootAssumption local tags updated` (14). The per-local type-tag
+signature from the CORE.c compile is present, and it is on the two OSR
+roots — but it is what *ends* each loop, not what slows it.
+
+**`slowEvals` = 976: narrowed, not pinned.** The counter is incremented in
+exactly three places, all in `NqpDispatch` (`AttrSrc.slow`,
+`UnboxSrc.slow`, `SlowSrc.eval`). Under `NQP_DISPATCH_STATS` each prints
+its distinct shapes once; this run prints three, all `AttrSrc`:
+`$!dispatchees` on a `RakuObject8L`, `@!dispatchees` and `$!do` on a
+`RakuObject16L`. All 976 are attribute reads, on three shapes, during
+start-up, and the number is identical in every run.
+
+- It cannot be the 3.5 %: a deterministic 976 boundary crossings would
+  have to cost 119 µs each to buy 116 ms, and a constant cannot explain a
+  quantity that varies 4 %.
+- **Both milestone 5 leads are ruled out by code.** `DecontSite` and
+  `BigIntSite` are `NqpTypeOps.Site`s, whose miss bookkeeping is a
+  per-site `misses: Int`; they touch neither `slowEvals` nor the `misses`
+  in the stats line. Lead 1's *defect* is real all the same:
+  `NqpTypeOps.decont` calls `miss(site)` only when the STable differs, so
+  a site whose STable matches but whose layout, getter or fetched value
+  does not falls into `decontSlow` forever — never pinning, never
+  repairing, invisible to every counter. Lead 2 is stale: `bigintArith`
+  does check `a.layout === layout && b.layout === layout`.
+- **The documented mismatch is ruled out by measurement.** `AttrSrc`'s
+  comment blames variant layouts from a rebless onto a smaller class;
+  `NQP_LAYOUT_STATS=1` on this bench answers `layouts=2122 variants=0
+  reblesses=2`. No variant is ever minted here.
+- **Best fit, labelled a fit:** the null-slot branch. `AttrSrc.eval` ends
+  `if (v != null) return v` and otherwise falls to `slow()`, so a
+  not-yet-vivified attribute is counted as a slow eval *although the
+  layout matched*. The three attributes named are exactly ones that are
+  legitimately null. Distinguishing that from a stale `rd.layout` needs
+  the counter split — `AttrSrc.slow` merges both branches into one number
+  and one key, which is why this cannot be closed from outside the code.
