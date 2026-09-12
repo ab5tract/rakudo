@@ -1421,3 +1421,41 @@ Task 5: the reviewer's second note is FIXED, not deferred — Tasks 6 and 7 carr
 `-Dpolyglot.engine.PartialBlockCompilation=true` literally in their example
 command lines, which is the precise habit the new default-value screen warns
 against. Removed from both, with a note saying why it is absent.
+
+Task 6: implementer dispatched (opus); BASE rakudo `04ed5e38da`. Tier policy as
+four options. Dispatched with BOTH screens mandatory before any compile, the
+probe-false-rejection routing, the noise floor with its limits, and the four
+lessons from Tasks 3-5 (poisoned fields, the Stage-parse tautology, the
+summarizer undercount, the three disagreeing count channels). Instructed that if
+all four options prove to be defaults, report the finding and do NOT compile.
+
+**Ruling 28 — USER DECISION 2026-09-12: the sweep stops being greedy-sequential.
+Tasks 6 and 7 do NOT carry Task 4's knob.** The user asked whether we were still
+spinning millions of refuse-and-retry submissions. We were, and Task 6's compile
+was doing it as the question was asked. The waste was known (ruling 18); what had
+not been named is that it is CONFOUNDING. Tier policy works by raising the call
+counts at which a target submits for compilation, which directly changes how
+often a size-refused root resubmits — so measured on top of Task 4's knob, part
+of any tier-policy result would be "the retry storm shrank", a property of the
+carried knob rather than of tier policy. Tasks 6 and 7 would have measured tier
+policy on a system already thrashing at roughly one useful compilation per 258
+submissions.
+
+Decision taken: Task 4's knob is adopted on its own merits (Task 11 still takes
+it, build-side only) and is NOT carried forward. Tasks 6 and 7 are measured
+against Task 3's clean baseline and answer "what does tier policy do to a clean
+compile". The permanent-refusal fix becomes milestone 7's first item beside the
+inlining lever, both being small runtime changes in the same area. Recorded in
+the plan at the carried-forward block, both task command lines, and the findings
+doc's milestone 7 section. Costs if wrong: the milestone never measures the
+combination of the two knobs, which Task 11 would otherwise have shipped
+together — mitigated below.
+
+Task 6: the in-flight run is KEPT as the combination data point rather than
+killed. It was already mid-compile when the decision landed, so stopping it
+would have produced nothing and discarded the only measurement of "tier policy
+ON TOP OF the size knob" — the configuration Task 11 would have shipped under
+the old design. It is recorded as confounded and NOT used to judge tier policy.
+A clean Task 6, without `NQP_CODE_MAX_COMPILE`, is dispatched after it. Costs if
+wrong: one extra ~7-minute compile, against a data point that cannot be
+recovered later without another.
