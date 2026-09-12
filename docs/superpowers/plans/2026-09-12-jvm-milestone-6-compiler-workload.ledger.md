@@ -2286,3 +2286,81 @@ Where this tree DOES use virtual threads is guest-level concurrency only:
 `Ops.kt:1125` (`Thread.ofVirtual().start`) and `Ops.kt:7182`
 (`Thread.ofVirtual().unstarted`), i.e. NQP-level thread creation. A separate
 axis from how the engine schedules its own compilations.
+
+**Ruling 39 — `CompilerThreads` IS adopted, as a configure-time halving of
+Truffle's own default, build-path only. This supersedes the draft ruling 38 that
+was never committed.** I had drafted a ruling against adoption, reading the
+user's "a four-core box will have a sad time" as a concern to protect small
+machines. **That was a misreading.** The user's point was the opposite: a
+four-core profile is IRRELEVANT to this project, because nobody with that
+hardware would choose to run rakudo-j. The commit was interrupted before it
+landed.
+
+Inverting the premise inverts the conclusion. Our hardware profile is mid-to-large
+machines, so the real hazard is UNDER-provisioning, not over-provisioning.
+Running Truffle's formula upward: 32 cores gives 10 threads, 64 gives 16 (its
+cap). A literal `CompilerThreads=3` would cut a large CI machine from 10 or 16 to
+3 — a drastic, unmeasured reduction on exactly the hardware that matters. The
+computed halving stays proportionate at any host size: 16 cores 6 -> 3, 32 cores
+10 -> 5, 64 cores 16 -> 8.
+
+So the computed form is right, but NOT for the portability reason the Task 7
+review gave and not for the small-machine reason I gave. It is right because it
+scales with the host.
+
+Adopted form, per the review's Recommendation E: reproduce the engine's own
+formula in `tools/build/create-jvm-runner.pl` (Perl, already assembles
+`$truffle_opts` conditionally at :202-205, where it already emits
+`-Dpolyglot.engine.WarnVirtualThreadSupport=false`) and halve it —
+`my $d = max(1, min(int($p/4) + log2(max(log2($p),1)), 16)); my $t = max(1, int($d/2));`
+
+**HAZARD Task 11 MUST handle, flagged by the review as Important:** that same
+generator emits the shipped `rakudo-j` runner, which already carries a
+`polyglot.engine` flag. Task 7's own evidence says the win is NOT transferable to
+a long-lived process. The knob must be gated to the build/compile path — or to an
+env var the Makefile sets — and must NOT reach `rakudo-j` unconditionally. The
+same gate already applies to `Mode=latency` (ruling 30).
+
+Caveat recorded with the adoption: **one point measured, 6 -> 3 on a 16-core
+box.** The halving extrapolates from it. Costs if wrong: a proportionate but
+unmeasured thread count on hosts unlike this one, visible in any later full build
+and revertible by deleting four lines.
+
+**Ruling 39 is PROVISIONAL pending a high-end measurement (user, 2026-09-12).**
+The user's position moved again, and usefully: measure the MAXIMUM practical
+compiler-thread count and see what it does to compile and parse times, rather
+than adopting a halving extrapolated from a single point.
+
+That is the right call and it dissolves ruling 39's own caveat. We currently have
+one measured point (3, Task 7) against an unknobbed control (6, Task 6 clean). A
+high-end run gives a **three-point curve on this box** — 3 / 6 / max — which
+shows the SHAPE rather than a direction, and tells us whether Task 7's -10 s came
+from relieving contention (in which case the curve has a minimum somewhere and
+going higher is worse) or from something monotone.
+
+Note the tension the curve will resolve: Task 7 found FEWER threads better, with
+its mechanism being fewer stale compiles (stale dequeues 190 -> 1137, demand
+rising +628 enqueues, queue fully drained on both sides). A naive
+"more cores, more compilation throughput" expectation predicts the opposite. One
+of those is wrong and a third point will say which.
+
+No adoption is written into any file until the curve exists. Task 11 does not run
+before then.
+
+**Curve plan agreed (user, 2026-09-12).** After the 16-thread run lands, ONE
+BATCHED dispatch measures **2, 8 and 12**, giving a six-point curve at 2 / 3 / 6 /
+8 / 12 / 16. Batching is the skill's same-shape rule: three compiles, one report,
+one review, roughly a third of the overhead of three separate task cycles.
+
+Two choices recorded with their reasons. (a) **2 rather than 4.** We already have
+3, so 4 sits one thread away and would mostly measure noise; 2 tests the boundary
+Task 7 explicitly flagged as untested — whether going below 3 keeps helping or
+falls off the starvation knee. (b) **The curve is read on
+`total-compiler-ms`.** The wall floor is a single whole-second quantum at ~337 s,
+so adjacent points will differ by less than the resolution, while compiler work
+has a 0.7 % floor and moved 21 % between 3 and 6.
+
+Stated up front so it cannot be forgotten at interpretation time: one workload,
+one machine, one sample per point. The curve can honestly deliver the SHAPE —
+flat middle, U with a real optimum, or monotone — not a minimum located to within
+a thread or two. A plateau means pick anything inside it and stop measuring.

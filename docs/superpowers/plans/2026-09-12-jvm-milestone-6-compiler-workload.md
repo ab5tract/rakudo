@@ -1471,6 +1471,46 @@ Claude-Session: https://claude.ai/code/session_01T8zpD6QrhN6Pmp5TePheq6"
 >   `create-jvm-runner.pl`'s `$jopts`: latency mode pins every root to
 >   first tier for the life of the process and disables splitting, which
 >   would cripple Rakudo's own runtime.
+> - **`engine.CompilerThreads`: DECISION DEFERRED pending a thread-count
+>   curve (user, 2026-09-12). Do not write any value into any file yet.**
+>   Task 7 measured 3 against the unknobbed default of 6 and found 3
+>   better, but that is one point, and its mechanism (fewer stale
+>   compilations) contradicts the naive expectation that more threads
+>   means more throughput on 16 cores. Rather than adopt a halving
+>   extrapolated from one point, the milestone is measuring the curve:
+>   **2, 3, 6, 8, 12, 16 threads**, all with the adopted tier policy, all
+>   on this box.
+>
+>   **Read the curve on `total-compiler-ms`, not wall.** The wall floor is
+>   a single whole-second quantum at ~337 s, so adjacent points will
+>   differ by less than the resolution; compiler work has a 0.7 % floor
+>   and moved 21 % between 3 and 6. It is also the quantity that says what
+>   the threads are doing.
+>
+>   **What the curve can honestly deliver is the SHAPE** — flat across a
+>   broad middle, U-shaped with a real optimum, or monotone — not a
+>   precisely located minimum. One workload, one machine, one sample per
+>   point; a best point located to within a thread or two would be
+>   overfitting. If it is flat from 2 to 8 and rises after, pick anything
+>   in the plateau and stop.
+>
+>   When a value is finally chosen, it must be **COMPUTED, not literal**,
+>   and build-path only. Reproduce the engine's own resolution of its `-1`
+>   default in `tools/build/create-jvm-runner.pl` (Perl, already assembles
+>   `$truffle_opts` conditionally around :202-205) and scale it:
+>
+>       my $d = max(1, min(int($p/4) + log2(max(log2($p),1)), 16));
+>
+>   A literal value would cut a 32-core machine from 10 threads and a
+>   64-core one from 16 to whatever was measured here — drastic,
+>   unmeasured reductions on exactly the hardware this project runs on.
+>
+>   **HAZARD:** that same generator emits the shipped `rakudo-j` runner,
+>   which already carries a `polyglot.engine` flag. Task 7's evidence
+>   says this win is NOT transferable to a long-lived process. Gate the
+>   knob to the build/compile path, or to an env var the Makefile sets.
+>   It must not reach `rakudo-j` unconditionally, exactly as for
+>   `Mode=latency`.
 > - **DO NOT ADOPT: `NQP_CODE_MAX_COMPILE`.** Record it as
 >   measured-but-not-adopted, with all four reasons. It is the sole cause
 >   of the reject-but-retry storm, so its marginal value cannot be
