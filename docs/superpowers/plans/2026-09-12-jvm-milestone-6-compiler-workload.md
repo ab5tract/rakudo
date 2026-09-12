@@ -1459,11 +1459,38 @@ Claude-Session: https://claude.ai/code/session_01T8zpD6QrhN6Pmp5TePheq6"
 - Produces: the adopted defaults and the ranked lever list that
   milestone 7 inherits.
 
+> **WHAT IS ACTUALLY ADOPTED (user decision, 2026-09-12 — read first).**
+>
+> - **ADOPT: tier policy, BUILD-SIDE ONLY.** `engine.Mode=latency` and
+>   `engine.FirstTierCompilationThreshold=1600`. Not
+>   `engine.MultiTier` (already default true), not
+>   `engine.LastTierCompilationThreshold` (inert, because
+>   `firstTierOnly` forces its gate false). Build side means
+>   `j_truffle_opts` and `j_truffle_args` in
+>   `tools/lib/NQP/Config/Rakudo.pm`, and **never**
+>   `create-jvm-runner.pl`'s `$jopts`: latency mode pins every root to
+>   first tier for the life of the process and disables splitting, which
+>   would cripple Rakudo's own runtime.
+> - **DO NOT ADOPT: `NQP_CODE_MAX_COMPILE`.** Record it as
+>   measured-but-not-adopted, with all four reasons. It is the sole cause
+>   of the reject-but-retry storm, so its marginal value cannot be
+>   evaluated until the refusal is made permanent. Its own case has
+>   weakened anyway: the -11.5 % came from suppressing large roots, and
+>   large roots are where tier-2 compilation happened, which tier policy
+>   now abolishes outright. Its threshold of 2069 was derived from a cost
+>   profile that no longer exists. And adopting it would ship a build
+>   default firing about 2 M wasted submissions per compile.
+> - **Milestone 7 inherits both halves:** make the refusal permanent,
+>   then re-derive the threshold and re-evaluate the knob on top of tier
+>   policy. The fix is behaviour-preserving when the knob is unset, so
+>   today's clean numbers stay comparable.
+
 **Two adoption mechanisms, not one.** Polyglot options are system
 properties and travel in the `j_truffle_*` config strings and `$jopts`.
 `NQP_CODE_MAX_COMPILE` is an environment variable read once by
 `NqpRootNode`'s static initializer, so it travels as an `$ENV{...}`
-assignment or an exported variable instead.
+assignment or an exported variable instead. With the size knob not
+adopted, only the first mechanism is exercised in this milestone.
 
 - [ ] **Step 1: Adopt the build-side polyglot options**
 
