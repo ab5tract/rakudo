@@ -797,6 +797,33 @@ Claude-Session: https://claude.ai/code/session_01T8zpD6QrhN6Pmp5TePheq6"
 > path. A Bytecode DSL language does not use the AST-interpreter classes.
 > Write the screen's answer in the ledger whether it passes or fails; a
 > knob screened OUT is a result worth recording and costs no compile.
+>
+> **AND SCREEN FOR THE DEFAULT VALUE, which is cheaper still and would
+> have killed Task 5's knob on its own.** `PartialBlockCompilation`
+> already defaults to **true**: `OptimizedRuntimeOptions.<clinit>` in
+> `truffle-runtime-25.2.4.jar` pushes `iconst_1` into its `OptionKey`,
+> and the descriptor reads "Enable partial compilation for BlockNode
+> (default: true)". Setting a knob to the value it already holds makes
+> the run a replicate, not an experiment. One `javap` on
+> `OptimizedRuntimeOptions` answers it for every option in Tasks 6 and 7.
+>
+> **THE MILESTONE'S NOISE FLOOR, measured by accident and now the
+> yardstick for every verdict.** Because Task 5 set an option to its own
+> default, its command line was byte-equivalent to Task 3's, so the two
+> runs are a genuine replicate pair — the only one the forward-only rule
+> permits us. Observed spread at n=2:
+>
+> | quantity | spread |
+> |---|---|
+> | wall clock | 0.2 % |
+> | `total-compiler-ms` | 0.7 % |
+> | `Success` | 0.7 % (41 compiles) |
+> | `Permanent Bailouts` | 0.9 % (4) |
+>
+> Use it. A wall-clock move under about 1 % is indistinguishable from
+> drift and must not be claimed. Task 4's -11.4 % on `total-compiler-ms`
+> sits an order of magnitude outside this floor, so what was recorded as
+> "unproven at n=1" is now a result standing clear of measured variance.
 
 ### Task 5: Knob 2 — `engine.PartialBlockCompilation`
 
@@ -1486,11 +1513,16 @@ a regeneration, not a rebuild; it does not invalidate any measurement.
    `total-compiler-ms`, and the verdict.
 1a. **The measurement caveats, stated once and prominently**, because
    every row inherits them:
-   - **There is no noise floor.** Forward-only means one sample per
-     configuration and no repeats, so a small wall-clock delta cannot be
-     distinguished from run-to-run drift. Task 1's and Task 3's figures
-     do not supply one either, being different configurations. Where a
-     verdict rests on something other than the clock, say what.
+   - **The noise floor, measured by accident.** Task 5 set
+     `PartialBlockCompilation` to the value it already defaults to, so
+     its command line was byte-equivalent to Task 3's and the pair is a
+     genuine replicate — the only one forward-only permits. Spread at
+     n=2: wall **0.2 %**, `total-compiler-ms` **0.7 %**, `Success`
+     **0.7 %** (41 compiles), `Permanent Bailouts` **0.9 %** (4). Quote
+     this beside the table and judge every verdict against it. A
+     wall-clock move under roughly 1 % must not be claimed. It is a
+     single pair, so treat it as an order of magnitude rather than a
+     confidence interval.
    - **`total-compiler-ms` and `nqp-root-ms` are the trustworthy
      quantities.** They are wall-clock-independent and, in Task 4, moved
      an order of magnitude further than the wall did.
