@@ -210,8 +210,13 @@ raku tools/build/watched-run.raku \
   --log=$CLAUDE_JOB_DIR/tmp/m6-nqp-suite.log \
   --show-file=$CLAUDE_JOB_DIR/tmp/m6-nqp-suite.markers \
   --show='Failed' \
-  -- ./nqp/gradlew -p nqp test
+  -- ./nqp/gradlew -p nqp testNqp
 ```
+
+`testNqp` is the task that runs the 151-file nqp suite (t/nqp, t/hll,
+t/qregex, t/p5regex, t/qast, t/jvm, t/serialization, t/nativecall).
+Plain `test` is Gradle's Java and Kotlin unit-test task and is NOT this
+gate.
 
 Expected: the nine known reds and no others — `t/jvm/01-continuations`
 3/22, `t/jvm/11-dispatch` 20/160, `t/nqp/021` 6/33, `t/nqp/022` 1/7,
@@ -1528,7 +1533,7 @@ close. Expect conflicts in `src/Raku/ast/` and the CORE setting sources.
 raku tools/build/watched-run.raku --log=$CLAUDE_JOB_DIR/tmp/m6-rebase-build.log \
   --show-file=$CLAUDE_JOB_DIR/tmp/m6-rebase-build.markers --show='Compiling' -- make
 RAKUDO_RAKUAST=1 raku tools/build/evalserver-sweep.raku --chunk=25 --jobs=1 --heap=8 t/01-sanity
-./nqp/gradlew -p nqp test
+./nqp/gradlew -p nqp testNqp
 ```
 
 Expected: `t/01-sanity` 25/25 and the nqp suite at its nine known reds.
