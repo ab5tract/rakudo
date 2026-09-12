@@ -3606,3 +3606,40 @@ imaging:
 Task 12 closes as PARK-then-CLOSED. Task 13 is largely discharged by rulings 58/59
 and needs only its write-up into the findings doc. The four images stay in the job
 scratch until the job is deleted; nothing durable depends on them.
+
+**Ruling 62 — USER DECISION 2026-09-12: Tasks 8 and 9 are SKIPPED.** The
+cold-start profile and the green `t/` subset are dropped from milestone 6 at the
+user's direction; the milestone goes straight to the loop bench (Task 10).
+
+Both had lost value independently, which makes the call easy to record honestly.
+**Task 8's premise was killed by ruling 53**: it existed to rank load-path levers
+on the argument that an image heap would remove the serial artifact load, and an
+image removes CLASS loading, not ARTIFACT loading. With the AOT direction now
+closed entirely (ruling 61), the profile had no consumer. **Task 9's green subset**
+was partly served by Task 12b's 151-file nqp run and would, at this point, mostly
+have measured a configuration nobody is adopting at runtime.
+
+Neither is lost work: the cold-start figure (4.10 s, and 3.77 s with compilation
+off) is on record from the opening research, and the subset's purpose — a
+start-up-share split for the suite clock — belongs with the 30-minute `t/` gate
+([[tspec-gate-30-minutes]]) rather than with a compiler-workload milestone.
+
+Task 10 dispatched (opus). Two traps verified by the controller and written into
+the brief, either of which would have silently invalidated it:
+1. **The bench must run STOCK.** Everything adopted is build-side only;
+   `Mode=latency` pins every root to first tier and disables splitting, which on a
+   hot-loop benchmark would be catastrophic and meaningless. Confirmed `./rakudo-j`
+   carries exactly one engine flag, `-Dpolyglot.engine.WarnVirtualThreadSupport=false`,
+   a warning suppressor with no performance effect.
+2. **It must NOT run through the eval server.** `create-jvm-runner.pl:301` has
+   `rakudo-eval-server` export
+   `RAKUDO_JVM_XOPTS="${RAKUDO_JVM_CHILD_XOPTS:--Dpolyglot.engine.Compilation=false}"`
+   to its children — a bench run that way would have compilation entirely
+   DISABLED and would measure nothing.
+
+The brief also carries a third hypothesis for the open `slowEvals` question that
+did not exist when milestone 5's two leads were written: tonight's
+deoptimisation-churn finding (1515+ targets averaging >2 compiles each,
+`encode_var` at 13, six of its eleven deopts being the Bytecode DSL's per-local
+type-tag assumption). If plusquick shows that signature, `slowEvals` may be
+recompilation churn rather than a layout-site bug.
