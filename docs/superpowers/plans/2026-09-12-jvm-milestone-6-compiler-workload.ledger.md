@@ -3489,8 +3489,8 @@ and write the recommendation. It should NOT re-derive the question.
 **Ruling 59 — EXTENDS 58 with the user's specification of the rule, and one
 consequence runs OPPOSITE to what ruling 58 said.** The user specified the two
 prohibitions: for any routine declared with the `native` trait, (i) **no adding
-arguments to a signature at run time** and (ii) **no replacing the routine of a
-signature at run time**.
+arguments to a signature at run time** and (ii) **no replacing the SIGNATURE OF A
+ROUTINE at run time**.
 
 **Ruling 58 understated this.** I wrote that an image of a specific Raku program
 is closed because every `is native` is in compiled source at build time. **That is
@@ -3520,3 +3520,13 @@ not miss it.
 Hedge recorded on both sides: whether signature mutation is currently REACHABLE in
 Rakudo is a separate question from whether the rule should forbid it. The rule is
 sound either way and reachability is cheap to check at implementation time.
+
+**Correction to ruling 59's transcription (user, 2026-09-12).** I wrote
+prohibition (ii) as "no replacing the routine of a signature". The user's rule is
+**"no replacing the SIGNATURE OF A ROUTINE"** -- the reverse, and the only one
+that makes sense. The two vectors are therefore (i) mutating a `Signature` object
+IN PLACE by adding parameters, and (ii) SWAPPING a different `Signature` onto the
+same `Routine`. Together they state that **the signature bound at declaration is
+the signature permanently**, which is exactly the property the descriptor argument
+needs. Every consequence drawn in rulings 58 and 59 stands; only my wording of the
+rule was wrong.
