@@ -628,3 +628,78 @@ have corrupted the sweep SILENTLY rather than stopping it: the `Reason:` colon,
 the second bailout spelling, and the loose `exceeds` guess. The instrument is the
 one Task 4's threshold comes from, so the rounds bought the milestone's central
 number.
+
+Task 3: implementer dispatched (opus); BASE rakudo `3db3362101`. One traced
+standalone CORE.c compile (~460 s), summarized. Instructed to STOP and report
+BLOCKED on the `none`-with-failures signature, and to report explicitly on a
+spuriously tiny minimum or anything size-related landing unclassified.
+
+Task 3: the traced CORE.c baseline. One standalone compile at rakudo `3db3362101`
+/ nqp `41c294b02`, `EXIT=0 verdict=ok elapsed=434s`, `--output` to the job dir so
+`blib` is untouched. Stages: start 0.001, parse **333.841**, syntaxcheck 0.000,
+ast 0.001, optimize **36.584**, qast 34.266, unit 27.539, jar 0.000 (sum 432.2 s).
+Summarizer: `events=10759 done=5656 failed=444 deopt=3249 inval.=1267 reprof=143
+unparsed=0 non-trace-lines=464803 reasons-parsed=4960`,
+`total-compiler-ms=2143944`, `nqp-root-ms=1937603`.
+
+Task 3 vs Task 1: comparable, and the difference is explained. Task 1 measured
+457 s marker-to-marker inside `make` with stages summing 439.9 s; this is 434 s
+wall with stages summing 432.2 s. `Stage optimize` is 36.584 against 36.588 —
+the same number. `Stage parse` is 333.8 against 344.1, 3 % faster, with
+TraceCompilation ON; tracing loads the compiler threads, not the interpreter, so
+3 % is run-to-run variance and not a measurement artefact. Nothing here voids
+Task 1's baseline.
+
+**Task 3 — the size-bailout lever has almost nothing left to pull.**
+`min-too-large-size=2070`, NOT `none`, so Task 4 is not blocked and the
+`(failed=N, reasons-parsed=0)` alarm did not fire (4960 reasons parsed). But the
+population behind it is **2 roots**, not 114: `IMPL-FOLD-CONSTANT[2070]` and
+`IMPL-OPTIMIZE-EXPRESSION[4030]`, 6.9 s of compiler time between them. The
+2026-09-07 trace recorded 114 roots at a mean 6.4 s, 733 s. That cluster is gone
+— 0.3 % of what it cost — and nothing in this milestone did it; milestone 5's
+layout work and the engine merge are the unexamined candidates. Task 4 should
+still run (the knob is unmeasured and the arithmetic is cheap) but its ceiling on
+CORE.c is now ~7 s of 2144 s compiler time and ~0 s of the 434 s wall clock, and
+it should be judged as a runtime-side decision rather than a build-side win.
+
+**Task 3 — the minimum is plausible, and the unclassified block is doing its
+job.** `by size:` has only the two entries above: 2070 then 4030, a factor of 2,
+not orders of magnitude, so no spuriously tiny minimum. The unclassified block
+holds one group, 442 of the 444 failures: `PermanentBailoutException: Too deep
+inlining, probably caused by recursive inlining.`, mean 54 ms, 23.7 s total. It
+is **not** a size bailout and must not be added to the selector's spellings: its
+sizes run from **27** to 17545 wire words, so classifying it would set
+`min-too-large-size=27` and produce a threshold at which essentially nothing
+compiles — exactly the failure Ruling on the `exceeds` guess anticipated. The
+bailout's own inlined-method dump names the recursion, and it is Java-side:
+`Throwable.printStackTrace()` -> `ExceptionHandling.dieInternal` ->
+`ClassRepository.parse`/`SignatureParser.parseClassSignature`, 33 frames deep.
+Recorded in the findings doc as a milestone 7 candidate; 442 discarded
+compilations from one Java call chain.
+
+**Task 3 — Step 4 confirmed, not repaired.** The real `opt failed` lines carry
+`|Reason: ` with the colon, as Task 2's decompilation said, and the parser reads
+them: `unparsed=0`, both reason groups non-empty. One wrinkle worth recording:
+the `Too deep inlining` reason text contains newlines (the inlined-method dump),
+so each such failure spills ~1000 lines that do not start with `[engine] opt `.
+They land in `non-trace-lines=464803` and the reason parses from the first line.
+The tally is loud rather than silent, and no event was lost to it.
+
+**Task 3 — Step 5: named Sources do NOT reach the statistics.** All 10 763 trace
+lines carrying a `Src` field report `Src n/a`, without exception, and the
+`CompilationStatistics` block has no per-Source grouping: it names targets by
+root name (`maxTarget=IMPL-FOLD-CONSTANT[2070]`, `maxTarget=walk[7260]`). The
+engine merge's per-block naming reaches the statistics through
+`NqpRootNode.getName()` — per-block, distinguishing, with the wire-word count in
+brackets — and not through Truffle Sources, which are absent. Attribution works;
+it is name-based. A real `SourceSection` on the root node is what file/line
+attribution would need. The deferred follow-up is answered: no.
+
+Task 3: minor: four trace lines were swallowed by stdout interleaving — the
+`--stagestats` label for optimize/qast/unit/jar is printed before the stage runs,
+and a compiler-thread trace line landed on the same line, so those four events
+(2 `done`, 1 `inval.`, 1 `reprof`) do not start with `[engine] opt ` and were
+counted as non-trace lines. This is why the summarizer reports `done=5656` while
+the statistics block reports `Success: 5658`; the stage times themselves survive
+on the following line and were read from there. Every later task in the sweep
+will see the same four-line loss identically, so it cannot move a comparison.
