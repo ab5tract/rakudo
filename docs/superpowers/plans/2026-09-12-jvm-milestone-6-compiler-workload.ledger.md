@@ -3566,3 +3566,43 @@ bails 100 % so this is an interpreter-only correctness result and slowness is
 expected, not news; and `try`/`CATCH` can swallow a missing-registration error and
 re-surface it as a nonsense NPE, so `NQP_VERBOSE_EXCEPTIONS=1` is the first triage
 step.
+
+**Ruling 61 — USER DECISION 2026-09-12: the AOT direction is CLOSED. The 9-minute
+CORE.c compile disproves its utility, and no further measurement is warranted.**
+The correctness run dispatched under ruling 60 was stopped (TaskStop) before it
+did any work. I had argued the correctness check had independent value; the user's
+point outranks it, and the evidence is one-sided:
+
+| workload | JVM | image |
+|---|---|---|
+| CORE.c compile | 297 s complete | **785 s and still in parse** |
+| `nqp -e 'say(1)'` | 1.93 s | 2.82 s (1.46x) |
+| `rakudo -e` | 3.66 s | 5.45 s |
+| nqp suite, 151 files | 599 s | 648 s (+8 %) |
+
+**It loses on every wall clock measured, at every workload size.** The single
+favourable axis is CPU — 4.3x cheaper on startup, roughly 4x across the suite —
+which matters only where CPU rather than wall time is the scarce resource, and
+that is not what this project optimises. Continuing to validate a thing we will
+not use is not a good use of the machine.
+
+**What is BANKED and survives the closure**, none of it contingent on pursuing
+imaging:
+1. **The artifact road is validated end to end** (ruling 51): an image built from
+   nqp alone loaded `rakudo.jar` as pure data and ran Raku. That is what
+   unit-artifact milestones 1-4 were for and it had never been tested.
+2. **The nqp runtime is semantically identical under a different execution model**
+   (ruling 55): nine known reds, nine identical reds, down to test numbers.
+3. **The FFI question is answered** (rulings 58, 59), with the user's rule
+   specified and recorded in `native-image-aot-direction.md`.
+4. **The recipe exists** and rebuilds in ~90 s, with the full list of what the
+   build demands — the real measure of the distance, should anyone revisit.
+5. **Milestone 7 lever #6**: guest compilation bails 100 % in an image on one
+   `WeakHashMap` read inside a PE root; one `@TruffleBoundary`.
+6. Two codebase findings that have nothing to do with imaging: charsets are not
+   compiled in (Rakudo would hit it too, and it was on nobody's list), and
+   `try`/`CATCH` masks missing-registration errors as nonsense NPEs.
+
+Task 12 closes as PARK-then-CLOSED. Task 13 is largely discharged by rulings 58/59
+and needs only its write-up into the findings doc. The four images stay in the job
+scratch until the job is deleted; nothing durable depends on them.
