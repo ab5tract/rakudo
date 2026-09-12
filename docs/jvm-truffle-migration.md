@@ -88,6 +88,12 @@ roast + CORE, no behavior change (nothing runs on Truffle yet).
     76b87c2d2 -- `NQP_CODE_REPORT`/`NQP_CODE_SURVEY` report,
     `NQP_CODE_ALSO`/`NQP_CODE_NO` re-measure per run). Results in the
     "Phase 1 results" section below.
+  - 2026-09-11: the regex engine's own language (`RxLanguage`, id `nqp-rx`)
+    and its second polyglot context are gone -- `NqpLanguage` (id `nqp`)
+    parses programs and descriptors alike, `NqpPolyglot.kt` holds the one
+    context, and `TruffleGrammarEngine` is `NqpGrammarEngine`
+    (nqp/docs/truffle-grammar-engine.md). Runtime-only; `TruffleEncoder.nqp`
+    keeps its name (QAST layer).
   - NOTE (scheduling): touching `nqp/src/vm/jvm/QAST/*.nqp` (nqp tree) rebuilds
     stage2, which invalidates every rakudo jar ("Missing or wrong
     version of dependency"); each iteration costs
