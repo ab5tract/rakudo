@@ -3083,3 +3083,38 @@ The no-source-changes constraint is NOT relaxed for this; a demanded source chan
 remains a finding.
 
 Time-box extended to ~2.5 hours of working time for the added scope.
+
+**Ruling 50 — USER DECISION 2026-09-12: pin Truffle compiler threads to 1 for the
+CORE setting compiles. ADOPTED and implemented.** The user's own reasoning for
+wanting the AOT experiment, stated after the fact, is sharper than mine was: the
+background compiler threads exist because the interpreter needs warming, so an
+image removes the NEED rather than tuning it. The thread pin and the image attack
+the same cost from opposite ends.
+
+Implemented in `tools/templates/jvm/rakudo-j-build.in`, both platform branches:
+
+    '-Dpolyglot.engine.Mode=latency',
+    '-Dpolyglot.engine.FirstTierCompilationThreshold=1600',
+    '-Dpolyglot.engine.CompilerThreads=1',
+
+**The scope is exact, not approximate.** `J_RUN_RAKUDO` — which is this driver —
+appears in the Makefile exactly three times: CORE.c (`:1312`), CORE.d (`:1331`)
+and CORE.e (`:1350`). Nothing else uses it. So the pin covers the CORE settings
+and nothing else. BOOTSTRAP goes through `J_NQP_RR` and is untouched, matching the
+user's "at least to start, the CORE settings". And it is structurally impossible
+for these to reach `rakudo-j`, which `create-jvm-runner.pl` generates separately —
+ruling 30's gate is satisfied by construction rather than by discipline.
+
+Not set, with reasons in the file: `MultiTier` (already default true, screened out
+in Task 6) and `LastTierCompilationThreshold` (inert under latency because
+`firstTierOnly` forces its gate false, confirmed in bytecode).
+
+The template carries a comment block with the measurements, both mechanisms, and
+the bounds — including that disabling guest compilation entirely costs 360 s, so
+all of it is worth at most 17.5 % and the stock default captured about a third of
+that. Anyone changing these later needs the ceiling, not just the wins.
+
+**NOT regenerated.** The edit is inert until `Configure.pl` runs, and running it
+now would rewrite the runners underneath the native-image spike currently using
+the tree. The adoption takes effect on the next configure-and-build, which is
+Task 14's post-rebase build at the latest.
