@@ -674,20 +674,41 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
             // only exist as a visibility aid for the class we adapt
             if (m.isSynthetic) continue
             if (counts[m.name]!! > 1) multi.getOrPut(m.name) { ArrayList() }.add(m)
-            plans.add(methodPlan(m))
+            /* One member the lookup refuses (a public method of a class this
+             * module may not reach) must not cost the whole class its
+             * interop: it gets a plan that dies when called, naming it. */
+            try { plans.add(methodPlan(m)) }
+            catch (e: ReflectiveOperationException) {
+                plans.add(unusablePlan("method/" + m.name + "/" + jvmDescriptor(m), e))
+            }
         }
         for ((name, ms) in multi) {
-            val handles = Array<Any?>(ms.size) { MethodHandles.lookup().unreflect(ms[it]) }
-            plans.add(MultiPlan("method/mmd+$name/([Ljava/lang/Object;)Ljava/lang/Object;", name, handles))
+            val descriptor = "method/mmd+$name/([Ljava/lang/Object;)Ljava/lang/Object;"
+            try {
+                val handles = Array<Any?>(ms.size) { MethodHandles.lookup().unreflect(ms[it]) }
+                plans.add(MultiPlan(descriptor, name, handles))
+            }
+            catch (e: ReflectiveOperationException) { plans.add(unusablePlan(descriptor, e)) }
         }
         for (f in target.fields) {
             if (f.isSynthetic) continue
-            plans.add(fieldGetPlan(f))
-            if (!Modifier.isFinal(f.modifiers)) plans.add(fieldSetPlan(f))
+            try { plans.add(fieldGetPlan(f)) }
+            catch (e: ReflectiveOperationException) {
+                plans.add(unusablePlan("field/get_" + f.name + "/" + f.type.descriptorString(), e))
+            }
+            if (!Modifier.isFinal(f.modifiers)) {
+                try { plans.add(fieldSetPlan(f)) }
+                catch (e: ReflectiveOperationException) {
+                    plans.add(unusablePlan("field/set_" + f.name + "/" + f.type.descriptorString(), e))
+                }
+            }
         }
         for (c in target.constructors) {
             if (c.isSynthetic) continue
-            plans.add(constructorPlan(c))
+            try { plans.add(constructorPlan(c)) }
+            catch (e: ReflectiveOperationException) {
+                plans.add(unusablePlan("constructor/new/" + jvmDescriptor(c), e))
+            }
         }
         // a varargs shortname &new()-equivalent, dispatching among the
         // constructors the same way the mmd+ method dispatchers do
