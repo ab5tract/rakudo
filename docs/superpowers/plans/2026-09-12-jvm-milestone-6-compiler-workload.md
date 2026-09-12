@@ -674,7 +674,31 @@ NQP_CODE_MAX_COMPILE=<N-1> java --module-path nqp/build/jvm/share/truffle \
 
 Required positive marker: the literal line `nqp-code check passed`. A
 non-numeric value would throw `NumberFormatException` here instead of
-eight minutes into a compile.
+eight minutes into a compile. This knob is an environment variable, not
+a polyglot option, so the experimental-option caveat below does not
+apply to it.
+
+> **The `NqpCheck` probe FALSE-REJECTS experimental options (Task 5,
+> 2026-09-12).** `NqpCheck.java:31` builds its context with plain
+> `Context.newBuilder(NqpLanguage.ID).build()`, no
+> `allowExperimentalOptions(true)`, while `NqpPolyglot.kt:49-51` — the
+> context the compiler actually uses — enables them. So the probe rejects
+> options the real engine accepts, and `engine.Mode`, `engine.MultiTier`,
+> the tier thresholds and `engine.CompilerThreads` are all experimental.
+>
+> A missing marker therefore means "the probe cannot judge this option",
+> NOT "the option is bad". Do not report BLOCKED on it. Verify on the
+> real engine path instead, which takes about 20 seconds:
+>
+> ```bash
+> JDK_JAVA_OPTIONS='<the options under test>' \
+>   RAKUDO_RAKUAST=1 ./nqp/nqp-j-gradle -e 'say("engine-ok")'
+> ```
+>
+> Accepted means it ran and printed. **Accepted is not the same as in
+> force**: confirm the option actually applied by checking the compile's
+> own statistics or trace for its effect, and say in the report which
+> evidence you used.
 
 - [ ] **Step 3: One compile**
 
@@ -758,6 +782,21 @@ Claude-Session: https://claude.ai/code/session_01T8zpD6QrhN6Pmp5TePheq6"
 > should remember that capacity here is churned, not freed. The proper
 > fix — marking a size-refused root permanently non-compilable — is a
 > runtime change and belongs to milestone 7.
+>
+> **SCREEN EACH KNOB FOR STRUCTURAL APPLICABILITY BEFORE SPENDING A
+> COMPILE (added after Task 5, which spent 433 s on an inert option).**
+> `engine.PartialBlockCompilation` turned out to be implemented solely in
+> `com.oracle.truffle.runtime.OptimizedBlockNode`. A grep for `BlockNode`
+> across `nqp/nqp-truffle/src` and `nqp/src/vm/jvm/runtime` returns zero
+> hits, and `NqpRootNode` is a `@GenerateBytecode` `BytecodeRootNode`
+> rather than an AST node tree — so the option could not apply to this
+> workload at all, and its measurement was a foregone conclusion.
+>
+> Before each remaining knob, spend two minutes asking where in the
+> Truffle runtime it is implemented and whether that machinery is on our
+> path. A Bytecode DSL language does not use the AST-interpreter classes.
+> Write the screen's answer in the ledger whether it passes or fails; a
+> knob screened OUT is a result worth recording and costs no compile.
 
 ### Task 5: Knob 2 — `engine.PartialBlockCompilation`
 
@@ -783,6 +822,10 @@ java --module-path nqp/build/jvm/share/truffle \
 Required positive marker: `nqp-code check passed`. A rejected option
 prints a `PolyglotImpl.buildEngine` stack trace instead; that is the
 whole point of probing.
+
+**This option is experimental, so the probe will reject it even
+though the engine accepts it. See the boxed note under Task 4 Step 2:
+verify on the real engine path and do NOT report BLOCKED.**
 
 - [ ] **Step 2: One compile**
 
@@ -859,6 +902,10 @@ these are chosen values, not multiples of an observed default.
 Run the NqpCheck probe from Task 5 Step 1 with all four options in
 `JDK_JAVA_OPTIONS`. Required positive marker: `nqp-code check passed`.
 
+**This option is experimental, so the probe will reject it even
+though the engine accepts it. See the boxed note under Task 4 Step 2:
+verify on the real engine path and do NOT report BLOCKED.**
+
 - [ ] **Step 3: One compile**
 
 Carry every knob Tasks 4 and 5 kept, and add the four tier options.
@@ -925,6 +972,10 @@ Use half of it. Record both numbers.
 
 NqpCheck probe with `-Dpolyglot.engine.CompilerThreads=<cores/2>` added
 to the winning set. Required positive marker: `nqp-code check passed`.
+
+**This option is experimental, so the probe will reject it even
+though the engine accepts it. See the boxed note under Task 4 Step 2:
+verify on the real engine path and do NOT report BLOCKED.**
 
 - [ ] **Step 3: One compile**
 
