@@ -3530,3 +3530,39 @@ same `Routine`. Together they state that **the signature bound at declaration is
 the signature permanently**, which is exactly the property the descriptor argument
 needs. Every consequence drawn in rulings 58 and 59 stands; only my wording of the
 rule was wrong.
+
+**Ruling 60 — "surgery to avoid NativeCall" is NOT NEEDED for an AOT rakudo-j
+image, because an image without NativeCall ALREADY EXISTS and already runs Raku.**
+The user, accepting that AOT is not the right option on the numbers, asked whether
+the surgery to avoid NativeCall entirely could be done so that a rakudo-j image
+could be tried. Checked before proposing any surgery:
+
+**The CORE setting does not use NativeCall.** Its only three references are inert:
+- `src/core.c/Exception.rakumod:1216-1219` — a trait-name-to-module STRING table
+  (`cpp-const`, `cpp-ref`, `encoded`, `mangled` => 'NativeCall') for error messages.
+- `src/core.c/traits.rakumod:189` — an error-message hint, "or did you forget to
+  'use NativeCall'?".
+- `src/core.c/VM.rakumod:90` — a config-key lookup, `self.config<nativecall.so>`,
+  for library naming.
+None of them performs a downcall or reaches FFM. NativeCall is a separate module
+loaded only on `use NativeCall`, and only `t/04-nativecall` (30 files), 2 files in
+`t/02-rakudo` and 1 in `t/packages` use it — 33 of roughly 450.
+
+And the images BUILT with `NativeCallOps` present; Task 12b showed it fails only
+at RUN time, when actually called. **So `rakudo-image` IS an AOT rakudo-j without
+NativeCall.** It has already run `say(1)` and `@a.map(* * 2).join(",")` correctly
+(ruling 51). Nothing was ever excised because nothing needed to be.
+
+What was missing is not surgery but a CORRECTNESS measurement, exactly analogous
+to Task 12b's for nqp. Dispatched: `t/01-sanity` (25 files, JVM baseline 25/25,
+none using NativeCall) through `rakudo-image`, extending to `t/06-telemetry`,
+`t/13-experimental` and `t/07-pod-to-text` if it goes well — which also serves the
+green-subset measurement Task 9 still owes.
+
+Carried into the dispatch so it is not rediscovered: `-Ilib` is mandatory (the
+in-tree runners have no module repo, and its absence produces an
+INDIRECT_NAME_LOOKUP cascade that looks like a real failure); guest compilation
+bails 100 % so this is an interpreter-only correctness result and slowness is
+expected, not news; and `try`/`CATCH` can swallow a missing-registration error and
+re-surface it as a nonsense NPE, so `NQP_VERBOSE_EXCEPTIONS=1` is the first triage
+step.
