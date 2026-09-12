@@ -335,3 +335,80 @@ Task 2: the entry above was first written against the pre-amend hash
 `4d9012b443`; `d92d405b80` is the same tree after one amend that only filled in
 that hash, and this follow-up commit corrects the citation. The tool commit to
 quote is `d92d405b80`.
+
+Task 2: implementer DONE — rakudo `d92d405b80` (tool, tests, fixture, ledger) and
+`da7b413cca` (ledger-only, fixing a self-citation: a ledger cannot cite its own
+pre-amend hash). 8/8 tests pass, red stage verified first at 7/8 failing. Smoke
+on a real short workload: events=2, done=2, marker met. Controller provenance
+check: the committed tool is byte-identical to the copy validated before the plan
+was committed, apart from its comment block; the fixture is byte-identical.
+Report: task-2-report.md.
+
+Task 2: review (opus) — Spec ✅, quality NEEDS WORK, **1 Critical**, 3 Important,
+4 Minor. Two commits ruled correct; explicitly do NOT squash, as squashing
+re-breaks the self-citation the second commit exists to fix.
+
+**Ruling 6 — the Critical defect is MINE, in the fixture, and it would have
+silently skipped the milestone's largest lever.** I wrote the two `opt failed`
+fixture lines from Truffle's documented layout rather than from this tree, and
+recorded in the plan that Task 3 would verify them. The reviewer did better than
+verify: it decompiled `TraceCompilationListener` out of this tree's own
+`nqp/build/jvm/share/truffle/truffle-runtime-25.2.4.jar` and read the format
+string. `FAILED_FORMAT` is `... |Tier %d|Time %18s|Reason: %s|UTC %s|Src %s` —
+**with a colon** — while `DEOPT_FORMAT`, `INV_FORMAT` and `UNQUEUED_FORMAT` use
+`|Reason %s` without one. The colon falls on exactly the verb that matters. The
+parser required whitespace after `Reason`, so against a real trace it would have
+parsed no reason at all and printed `min-too-large-size=none`. Task 4 would have
+read that as "no root was too large" and set no threshold, on a compile carrying
+roughly 114 of them — a plausible number, not a crash, which is the worst
+failure mode an instrument has. The field-by-leading-word property protected
+against field RE-ORDERING but not against a field NAME carrying punctuation.
+Fixed in the loop: optional colon, a real-format fixture line, and a loud
+`(failed=N, reasons-parsed=0)` annotation so a silent `none` can never again be
+mistaken for "nothing was too large". Plan Task 3 Step 4 rewritten from a repair
+step into a confirmation step that says STOP on that signature. Costs if wrong:
+none — the parser now accepts both spellings, which is strictly wider than
+either alone.
+
+Task 2: minor (deferred): `tier 0` / `ms 0` defaults make deopt and invalidation
+lines (which legitimately carry no Tier or Time) indistinguishable from a parse
+miss.
+Task 2: minor (deferred): the test writes `fixtures/empty.log` into the repo and
+unlinks it at the end; a mid-test failure leaves it behind. `$*TMPDIR` is the fix.
+Task 2: minor (deferred): report and ledger cite `NqpRootNode.java:91-93`; the
+method is 91-94. Immaterial, self-noted by the implementer.
+
+Task 2: fix round 1/5 (4 addressed, 0 open — commit stamped 19:25, the third on
+top of `d92d405b80` / `da7b413cca`). CRITICAL 1: the colon is now optional
+(`^ 'Reason' ':'? \s+ (.+) $`); fixture lines 4-5 rewritten into the real
+`|Reason: %s|` spelling and a new `opt deopt` line carries the colon-free
+spelling so both stay covered; and a failed-but-unreasoned run now prints
+`min-too-large-size=none  (failed=N, reasons-parsed=0)`, with a second fixture
+`fixtures/trace-noreason.log` pinning exactly that string. The red run is on the
+record: against the shipped tool, assertions 4 and 5 failed with the reason lost
+and `none` printed — the defect reproduced live before it was fixed, it was not
+taken on faith. IMPORTANT 2: the head is cut at the first whitespace-then-`|`
+(the format's `%-50s |` separator; a `|` inside a root name is never preceded by
+whitespace), so `infix:<+|>[12345]` survives whole, and both discard paths are
+tallied — `unparsed=` for `[engine] opt ` lines that fail the head match,
+`non-trace-lines=` for the rest. IMPORTANT 3: the minimum now prints its
+population — `too-large roots: N (S sized, U unsized)`, the sized names in size
+order, and an explicit `UNSIZED (excluded, so the minimum above reads high)`
+line when U > 0. IMPORTANT 4: `nqp-root-ms=` added alongside an unchanged
+`total-compiler-ms=`. Test gap closed: `events=5` pins the accepted-line count,
+which is structurally why the colon got through.
+
+Task 2: fix round 1/5 verified against reality, not only against the fixture.
+16/16 pass. The Step 6 smoke log still parses (`events=2 done=2 unparsed=0
+non-trace-lines=11 nqp-root-ms=33` of `total-compiler-ms=93`). And a line built
+by `sprintf` from the reviewer's verbatim `FAILED_FORMAT` — not hand-padded —
+now yields `reasons-parsed=1`, the full reason text, and
+`min-too-large-size=31337`: a number, where the shipped tool gave `none`.
+
+Task 2: fix round 1/5 note. This commit also carries the controller's own
+uncommitted ledger additions (the Critical 1 write-up and the three deferred
+minors), because the ledger is one blob and the fix entry had to append to it.
+Nothing above the appended lines was touched. The plan file
+`2026-09-12-jvm-milestone-6-compiler-workload.md` has uncommitted controller
+edits too and was deliberately LEFT uncommitted, being outside the
+implementer's commit scope.
