@@ -296,6 +296,37 @@ fresh `Configure.pl` regenerates `NQP_JARS` from the nqp build directory,
 which task 6 already cleaned (`tools/lib/NQP/Config/NQP.pm`'s
 `configure_jars`).
 
+Ruling (controller, 2026-09-12): the unsigned-native-attribute
+regression found by the sweep is load-bearing; one fix dispatch before
+the final review; gate = native-argument-snapshot.t 9/9, nqp/t/jvm/17,
+t/01-sanity, the sensitive slice; fix lands as new commits on top,
+pushed force-with-lease.
+
+The fix (2026-09-12, nqp `7e7aaca61`, rakudo: this commit): the root
+cause is not in `RakuObject` at all — `TruffleEncoder`'s `encode_args`
+wrote each argument's wire RESULT type straight into the callsite
+argument flag, and `$T_UINT` is 4, which is that flag's NAMED bit, so
+any call taking an unsigned native attribute decoded as "a named object
+argument" and the reader then read the following program word as a
+constant-pool index (the `ArrayIndexOutOfBoundsException`) or, once the
+stream had slipped by a word, hit `nqpp: unknown tag` further down; a
+uint ARGUMENT now travels in the int slot, as `classlib_t` already says
+and as a uint lexical already did. Gates: `native-argument-snapshot.t`
+**9/9**, new `t/02-rakudo/native-uint-attribute.t` **7/7**,
+`nqp/t/jvm/17-object-layout.t` **50/50** (three added uint32 cases),
+`18-rebless-layout.t` **14/14**, `mixin-identity.t` **8/8**,
+`t/01-sanity` **25/25**, `22-rakuast-ct-dispatch.t` **30/30**,
+`29-rakuast-attr-self-types.t` **21/21**,
+`32-rakuast-native-param-bind.t` **26/26**,
+`native-return-coercion.t` **19/23** (reds 7 and 17-19, unchanged),
+`sort-element-kinds.t` **63/63**,
+`nested-invocation-continuation.t` **6/6**, `keep-undo.t` **16/16**.
+The encoder is byte-identical between nqp `739ce7517` (the milestone-4
+head) and this milestone's head, so the failure predates milestone 5:
+milestone 4's task 11 saw the file red and cleared it as a
+`$*EXECUTABLE`-spawn cold-only artifact, which was a mis-attribution.
+Neither of task 2's two kept UINT rulings is implicated.
+
 ## Deferred minors (carried past the milestone)
 
 None of these blocked a task; each is recorded so it is not rediscovered.
