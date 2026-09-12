@@ -173,8 +173,15 @@ raku tools/build/watched-run.raku \
   -- make
 ```
 
-Expected: `EXIT=0`. Baselines to compare: `make` 1054 s from the top,
-CORE.c 464 s of it, parse 352.4 s, optimize 36.6 s.
+Expected: `EXIT=0`. Baselines to compare: CORE.c 464 s, parse 352.4 s,
+optimize 36.6 s.
+
+**Which `make` figure you compare against depends on what you ran.**
+Milestone 5 recorded two: **1054 s** for `make` after a clean nqp build
+(incremental), and **1133 s** for `make clean && make`, measured twice,
+with an identical CORE.c parse of 352 s. Compare clean to clean and
+incremental to incremental. Record in the ledger WHICH you ran, in
+words, next to the number.
 
 If the build fails, the two unbuilt encoder commits are the first
 suspects. Repairing that is inside this task; record the diagnosis and
@@ -189,7 +196,8 @@ into the ledger:
 | clock | milestone 5 | milestone 6 baseline |
 |---|---|---|
 | nqp clean buildJvm | 256 s | |
-| make from the top | 1054 s | |
+| make, `make clean && make` | 1133 s | |
+| make, incremental after a clean nqp | 1054 s | n/a this milestone |
 | CORE.c total | 464 s | |
 | CORE.c parse | 352.4 s | |
 | CORE.c optimize | 36.6 s | |
@@ -1315,6 +1323,17 @@ a regeneration, not a rebuild; it does not invalidate any measurement.
    clock it moves, the measured or estimated gain, and its cost
    (configuration, runtime-only code, stage build, or RakuAST).
 4. A statement that these numbers describe the **pre-rebase** tree.
+5. **The BOOTSTRAP v6c clock, named and left unmeasured on purpose.**
+   Task 1 found it at 398 s of the 1122 s build, 35 %, second only to
+   CORE.c's parse and not on this milestone's measurement list. The
+   sweep's knobs are build-wide, so BOOTSTRAP receives them without
+   being measured, and no adopted knob was chosen against it. Record the
+   number, say plainly that it was not measured, and name it as
+   milestone 7's leading candidate.
+6. **A statement of what the build graph does not express.** No rakudo
+   target lists an nqp artifact as a prerequisite, so a rebuilt nqp is
+   invisible to `make`. Any future measurement that changes nqp must run
+   `Configure.pl` and `make clean` first, or it measures the old nqp.
 
 - [ ] **Step 7: Commit**
 
@@ -1529,12 +1548,28 @@ close. Expect conflicts in `src/Raku/ast/` and the CORE setting sources.
 
 - [ ] **Step 4: Rebuild and re-gate**
 
+**`make` alone is not enough, and this is not a precaution.** Task 1
+established that **no rakudo target lists any nqp artifact as a
+prerequisite**, so a rebuilt nqp is invisible to make and a plain `make`
+after an nqp change is a no-op that silently leaves the old nqp in
+place. Task 1's own first attempt was exactly that: a 0-second `make`
+that would have produced a baseline built against the previous nqp. The
+rebase changes both trees, so the full sequence is required:
+
 ```bash
+./nqp/gradlew -p nqp clean buildJvm
+perl Configure.pl --backends=jvm --gen-nqp
+make clean
 raku tools/build/watched-run.raku --log=$CLAUDE_JOB_DIR/tmp/m6-rebase-build.log \
   --show-file=$CLAUDE_JOB_DIR/tmp/m6-rebase-build.markers --show='Compiling' -- make
 RAKUDO_RAKUAST=1 raku tools/build/evalserver-sweep.raku --chunk=25 --jobs=1 --heap=8 t/01-sanity
 ./nqp/gradlew -p nqp testNqp
 ```
+
+`Configure.pl` matters beyond the Makefile's own freshness: Task 1 found
+the generated Makefile still listed the two ASM jars milestone 5 deleted
+and omitted `nqp-truffle.jar`, which is the source of the stale
+`rakudo-j-build` classpath. Regenerating fixes both.
 
 Expected: `t/01-sanity` 25/25 and the nqp suite at its nine known reds.
 A new red is a rebase regression; diagnose before pushing.
