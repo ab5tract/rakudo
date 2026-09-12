@@ -206,3 +206,50 @@ per-block, distinguishing, and carries the wire-word count in brackets.
 Attribution works — through names, not Sources. Anything that wants
 file/line attribution out of the engine's own reporting needs a real
 `SourceSection` on the root node first.
+
+## 7. Native Image: it builds, it runs Rakudo from data, and it is slower
+
+The full spike is Task 12's report. The durable facts:
+
+**An image of the nqp runtime runs Rakudo.** `rakudo.jar` is three entries
+(`unit.meta`, `unit.programs`, `unit.serialized.lz4`) with no `.class` at all,
+so an image built with no knowledge of Rakudo's compiler loads it at run time
+and executes it. Verified through `-e 'say(1)'`, a `map`/`join` program, and
+the start of a CORE.c compile. The only Rakudo coupling is
+`rakudo-runtime.jar` (`RakOps`, `Binder`, …) on the image class path, plus a
+reflective registration of the op surface. This validates the milestone-4
+unit-artifact road end to end.
+
+**It is slower than the JVM on everything measured**, and — the surprise —
+short workloads are no different from long ones:
+
+| workload | JVM wall / CPU | image wall / CPU |
+|---|---|---|
+| `nqp -e 'say(1)'` | 1.93 s / 9.8 s | 2.82 s / 2.3 s |
+| `rakudo -e 'say(1)'` | 3.66 s / 22.8 s | 5.45 s / 4.7 s |
+| CORE.c (threads=1) | 297 s total | still in parse at 785 s, killed |
+
+Four to five times cheaper in CPU, about 1.5x slower on the clock for short
+runs and worse than that on CORE.c. The JVM wins because HotSpot spends five
+to six cores compiling the interpreter while it runs.
+
+**An image removes class loading, not artifact loading.** Cold start is ~1.9 s
+mostly because artifact load, LZ4, meta decode and the setting's load blocks
+are real work; JVM boot is around 0.1 s of it. Any future plan that expects an
+image heap to remove the cold-start cost has to put the *loaded units* in the
+image heap, which re-couples the image to one build.
+
+**Guest compilation fails 100 % inside the image, for one identified reason.**
+`NFGString.atomsOf` reads a `WeakHashMap` from inside `RxMatchRootNode.execute`,
+a partial-evaluation root. Native Image's Truffle feature rejects that at build
+time; suppressed, every root bails at run time with "Object of type
+FrameWithoutBoxing should not be materialized" and `CompilationStatistics`
+reports 0 successes. A `@TruffleBoundary` or a PE-safe grapheme cache is the
+fix. Until then no measurement taken in an image says anything about Truffle
+tiers.
+
+**Truffle jars must be on the image CLASS path.** On the module path the
+builder registers no Truffle feature at all and the binary dies with "No
+language and polyglot implementation was found on the module-path". The size
+tells the story: 28.9 MiB with Truffle on the module path, 67.6 MiB with it on
+the class path, the difference being the Graal compiler compiled in.
