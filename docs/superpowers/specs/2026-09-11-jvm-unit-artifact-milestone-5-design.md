@@ -463,3 +463,243 @@ hint semantics under multiple inheritance; t/spec.
 - Whether `RakuObject16L` is ever chosen by CORE.c (drop it if not).
 - The interop multi-dispatch cache's key (argument classes vs the
   existing descriptor string).
+
+## Done (2026-09-12)
+
+The milestone is closed. `P6Opaque` is gone: a P6opaque instance is a
+`RakuObject` on a static family of six storage classes, carrying a
+per-STable `RakuObjectLayout`; the interop adaptor is `JavaCallout` over
+per-member plans built from method handles; ASM is not a dependency, the
+vendored `3rdparty/asm/` is deleted, and **nothing in either tree
+generates a class at run time**.
+
+### Heads and commits
+
+Start: rakudo `b64c52cb1c`, nqp `739ce7517`. End: rakudo the docs commit
+on top of `a0f96f54b9`, nqp `a927b5fa1`.
+
+| task | nqp | rakudo |
+|---|---|---|
+| 1 baseline, pinning tests, bench | `8fc53c956` | `9d4c655279` |
+| 2 the runtime (layout, REPR, ops) | `a60cad516` | — |
+| 3 the Truffle sites | `4acb88fd7` | — |
+| 4 Rakudo consumers, the make, first gate | — | `3439a45c60` |
+| 5 interop as `JavaCallout` | `5ee98f770` | `a0f96f54b9` |
+| 6 ASM out of the build | `08029169a` | — |
+| 7 gate, docs, ledger, handoff | `a927b5fa1` | (this docs commit) |
+
+Every task was reviewed; tasks 1, 2, 4 and 5 each took exactly one fix
+round, tasks 3 and 6 none beyond it.
+
+### Numbers
+
+Build and compile, all on the engine build (`RAKUDO_RAKUAST=1`, Oracle
+GraalVM 25.2.4), one run each, forward only:
+
+| row | milestone 5 | milestone 4 baseline |
+|---|---|---|
+| nqp `clean buildJvm` | **256 s** | 253 s |
+| `make` from the top | **1054 s** | 1142 s |
+| CORE.c compile window | **464 s** | 467 s |
+| CORE.c `Stage parse` | 352.4 s | — |
+| CORE.c `Stage optimize` | 36.6 s | — |
+
+Benches (`docs/bench/jesp/plusquick.raku`, `docs/bench/jesp/attrquick.raku`,
+one run each, ns/op):
+
+| road | before | after | delta |
+|---|---|---|---|
+| `$a + $b` (plusquick) | 82.625 | 85.525 | +3.5 % |
+| getattr | 68.75 | 71.65 | +4.2 % |
+| bindattr | 57.05 | 57.65 | +1.1 % |
+| getattr_i | 107.3 | 85.95 | **−19.9 %** |
+| decont | 78.35 | 77.25 | −1.4 % |
+| bigint+ | 172.4 | 133.0 | **−22.9 %** |
+| create | 573.25 | 463.25 | **−19.2 %** |
+
+The three roads the storage family was meant to move — `create`,
+`getattr_i`, `bigint+` — are each about 20 % faster; nothing regressed
+past the plan's 10 % bar.
+
+Layout stats after a CORE.c load
+(`NQP_LAYOUT_STATS=1 ./rakudo-j -e 'say 1'`):
+**`layouts=2120 variants=0 reblesses=0`**, and `NQP_LAYOUT_TRACE=1` on the
+same program prints no `layout: variant` and no `rebless:` line. The
+spec's "requires zero variants" gate is met outright; the plan's looser
+reading (`variants <= reblesses`, for the one legitimate compiler mixin
+`QAST::Var+{QAST::SpecialArg}`) was never needed at this gate.
+
+### Gates
+
+| gate | result |
+|---|---|
+| `t/01-sanity` | **25 of 25** |
+| `t/03-jvm/01-interop.t` | **33/33** (8 in-source skips) |
+| jar census | 10/10 jars `unit.meta`-only, zero `.class` |
+| runtime jar directory | 7 jars, **no `asm*.jar`** |
+| ASM / `ByteClassLoader` / `defineClass` greps | all empty in both trees |
+| nqp suite (`testNqp`) | 151 files, 13182 tests; **the same nine pre-existing reds** as the pre-milestone-5 runtime |
+| `nqp/t/jvm/17-object-layout.t` | 47/47 |
+| `nqp/t/jvm/18-rebless-layout.t` | 14/14 |
+| `t/02-rakudo/mixin-identity.t` | 8/8 |
+| `nqp/t/serialization/04-repossession.t` | **20/22 + 2 reader skips** — it could not run at all before (it died at line 18 on a delegate cast) |
+
+The nine pre-existing nqp reds, classified against a throwaway
+pre-milestone-5 build at `a60cad516~1` and identical on it:
+`t/nqp/021-contextual.t` (6), `t/nqp/022-optional-args.t` (#7),
+`t/nqp/044-try-catch.t` (#57), `t/nqp/112-continuations.t` (#15-16),
+`t/qregex/01-qregex.t` (21), `t/p5regex/01-p5regex.t` (3),
+`t/qast/01-qast.t` (#10 + bad plan), `t/jvm/01-continuations.t`
+(#16-17, 19), `t/jvm/11-dispatch.t` (bad plan, 140 of 160).
+
+### The t/ sweep
+
+One sweep through the eval server, two servers at 4 GB (18 GB
+MemAvailable), `RAKUDO_RAKUAST=1`, over `t/01-sanity t/02-rakudo
+t/04-nativecall t/05-messages t/06-telemetry t/07-pod-to-text
+t/08-performance t/10-qast t/13-experimental t/14-smoke t/03-jvm`:
+
+```
+420 files in 6039s across 60 servers
+16 of 60 chunks failed
+=== EXIT=1 verdict=ok elapsed=6039s ===
+```
+
+**22 files red of 420.** Against milestone 4's list: **2 fixed, 3 new.**
+
+*Fixed since milestone 4* — `t/02-rakudo/04-settingkeys-6d.t` (2/2) and
+`t/08-performance/36-rakuast-begin-compiled-remark.t` (117/117), both
+re-run alone to confirm.
+
+*Still red, exactly as milestone 4 listed them* (19): the
+corekeys/settingkeys cluster less 6d — `03-corekeys.t`, `03-corekeys-6c/6d/6e.t`,
+`04-settingkeys-6c/6e.t`; `21-begin-time-compile-sub.t`,
+`begin-called-block-routine.t`, `compiler-frontend-id.t`,
+`constant-anon-var-value.t`, `custom-declarator-naming.t`,
+`make-regex-frame.t`, `m-flag-module-spec.t`,
+`parse-target-match-tree.t`, `regex-interpolation-backtrack.t`,
+`try-statement-backtrace-frame.t`, `native-return-coercion.t`
+(**19/23**, reds 7 and 17-19 — unchanged); `t/05-messages/02-errors.t`;
+`t/08-performance/15-rakuast-native-metaop.t`.
+
+*New, each confirmed by a solo run* (3):
+
+1. **`t/02-rakudo/native-argument-snapshot.t` 1/9 — a milestone-5
+   regression, and the one real finding of this gate.** An **unsigned**
+   native attribute throws
+   `java.lang.ArrayIndexOutOfBoundsException: Index 15 out of bounds for length 15`.
+   `int` and `int32` attributes are fine; `uint` and `uint32` are not.
+   Minimal reproducers:
+
+   ```
+   # AIOOBE
+   my class C { has uint32 $!cc = 32; method go { my $p := (7 => $!cc); $p.value } }; C.new.go
+   # a second shape, an encoder/wire refusal rather than a bounds error
+   my class C { has uint32 $!cc = 32; method go { $!cc = $!cc + 1; $!cc } }; C.new.go
+   #   -> java.lang.IllegalStateException: nqpp: unknown tag 51 at 128 of 160 words
+   ```
+
+   The suspect is the pair of UINT rulings task 2 took (a UINT box target
+   routed to `unboxIntSlot`; `set_int`/`set_uint` masking through
+   `sizedValue`), both of which were kept on the argument that no such
+   type exists in stage0 or CORE.c — true of the built setting, but not
+   of user code. The test dates from 2026-07-06, so it was green through
+   milestone 4. **Not fixed here** (task 7 does not touch runtime code);
+   it is the first item for whoever opens the next session.
+2. **`t/02-rakudo/long-int-literal.t` 8/33.** Dies compiling `-Ⅼ`
+   (U+216C) with `Confused`. A Unicode numeric-literal parse problem with
+   no connection to the object layout; the file dates from 2026-09-06,
+   so it is new against milestone 4's *sweep list* but may equally have
+   regressed in milestone 4's own fix wave, which landed after that
+   sweep.
+3. **`t/02-rakudo/03-cmp-ok.t` 6/7.** Test 7 fails with
+   `Method 'find_method' not found for invocant of class 'FooHOW'` —
+   the same mechanism as the known-red `custom-declarator-naming.t`
+   (`MetamodelX::RakuLevelNameHOW`), i.e. a second file exposing one
+   pre-existing bug rather than a new one.
+
+*Not reds, though the sweep's chunk exit codes suggest otherwise:*
+`t/04-nativecall/23-incomplete-types.t` and `t/05-messages/01-errors.t`
+are `Failed 0` with TODO tests that passed; `t/02-rakudo/15-gh_1202.t`
+passes 2/2 alone (it is simply slow — its chunk took 814 s);
+`t/02-rakudo/16-begin-time-eval.t` carries a hardcoded JVM `skip-all`
+from 2021 naming this very exception class.
+
+*Sweep hygiene.* Six of sixty chunks reported "a file produced no TAP"
+at chunk size 7 and 4 GB of heap. Each was resolved per file by a solo
+re-run; the only one that was a genuine no-output file is
+`21-begin-time-compile-sub.t`, whose known red *is* a compile failure
+with no TAP. A future sweep on this box should pass `--chunk=5`.
+
+### The questions the spec left open at plan time
+
+| question | answer |
+|---|---|
+| does a `TruffleObject` marker on `RakuObject` cost anything | not taken: `RakuObject` implements no Truffle interface. `nqp-runtime` stays free of a truffle-api compile dependency, and the sites read plain fields anyway |
+| the polymorphic depth for attribute sites | its own constant, **2** (`AttrSite` caches two layouts with their handles; a third marks the site unusable and the runtime op is taken) |
+| is stub-time forcing of REPR data cycle-free for CORE.c | sidestepped rather than answered: `SerializationReader.peekAttributeShape(st)` reads the attribute shape straight out of the raw table, with a `shapeCache`, so `deserialize_stub` picks the canonical class without forcing the STable. Zero variant layouts after CORE.c is the evidence |
+| is `RakuObject16L` ever chosen by CORE.c | kept: it is the `else` arm of both class-choice sites (`RakuObjectREPR.kt:253`, `RakuObjectLayout.kt:192`), i.e. the overflow shape every larger type lands on; not dropped |
+| the interop multi-dispatch cache's key | argument classes — `ConcurrentHashMap<List<Class<*>?>, Int>` in `RakudoJavaInterop.MultiPlan`, not the descriptor string |
+
+### Rulings that mattered in practice
+
+Recorded in full, with the cost-if-wrong each was taken against, in
+`docs/superpowers/plans/2026-09-11-jvm-milestone-5-rakuobject-layout.ledger.md`
+("Rulings made during execution"). The five that changed the shipped
+behaviour:
+
+1. `is_attribute_initialized` does **not** auto-vivify — the plan's code
+   was wrong and the old generated method's answer is kept.
+2. num32 rounding survives a native bind (`P6num.sizedValue`), as the old
+   `inlineBind` did; `set_num` stays raw.
+3. A UINT box target routes to `unboxIntSlot`, not `unboxObjSlot`
+   (intentional; no such type exists in stage0 or CORE.c).
+4. `set_int`/`set_uint` mask through `sizedValue`, as MoarVM does.
+5. A pre-milestone-5 runtime was built **once** for correctness triage of
+   the nqp red list — explicitly not a perf A/B — and deleted afterwards.
+
+Also: `t/serialization/04-repossession.t`'s JVM skip narrowed to the two
+tests that fail for the *reader* reason (`stubObjects` reuses a live
+object already in the SC), with that reason in the skip text, exactly as
+§3 asked.
+
+### Parked residuals
+
+One milestone-5 regression is open — **unsigned native attributes**
+(`t/02-rakudo/native-argument-snapshot.t`, above); it is the next
+session's first item, not a parked residual. The rest are real, narrow,
+and none of them milestone-5 regressions:
+
+- **`t/02-rakudo/native-return-coercion.t` 19/23**, unchanged from
+  milestone 4 (reds #7, #17, #18, #19, all `dies-ok` cases about boxed
+  Int / subset returns to a native num). It needs its own session.
+- **The six milestone-4 reds never root-caused**:
+  `21-begin-time-compile-sub.t`, `custom-declarator-naming.t`,
+  `make-regex-frame.t`, `try-statement-backtrace-frame.t`,
+  `regex-interpolation-backtrack.t`, `m-flag-module-spec.t` — plus the
+  expected corekeys/settingkeys cluster and the other known reds.
+- **The nine pre-existing nqp suite reds** listed above.
+- **`slowEvals` on the plusquick road went 364 → 976** with every other
+  dispatch counter identical, and plusquick is +3.5 %. Unexplained; the
+  natural place to look is the perf measurement session.
+- **A dead import in `Binder.kt`** left rather than pay a settings
+  rebuild for it.
+- The task-3 site minors (stale `NqpDispatch` comments; `DecontSite`
+  never `miss()`ing on a layout mismatch; `resolveBigInt` indexing
+  `kinds[unboxIntSlot]` unchecked; `BigIntSite` not re-verifying
+  `rd.layout === layout`; `AttrSite`'s unfenced triple publication, an
+  inherited shape) and the task-5 interop minors (an `unreflect` failure
+  on a public method of a non-public declaring class fails the whole
+  class at plan-build time where the old road failed at first call;
+  interop test cases that never read the exact cache). The ledger's
+  "Deferred minors" section has the whole list.
+
+Out of scope and still out: `DynamicObject`/`Shape`, an `Assumption` per
+STable, polyglot `InteropLibrary` exports, Native Image, t/spec.
+
+### Next
+
+First the unsigned-native-attribute regression above (a runtime fix in
+task 2's territory, with `native-argument-snapshot.t` as its gate), then
+the perf measurement session (truffle-only plan item 4, the compiler's
+own workload), then the engine merge — one Truffle language.

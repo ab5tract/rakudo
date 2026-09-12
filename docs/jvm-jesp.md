@@ -203,7 +203,10 @@ Two things the site had to learn:
   missed and the site pinned generic while still measuring faster than
   before -- the boundary switch's boxing was gone -- which is why a
   fast path is verified by its miss count (`JESP_DEBUG=1` narrates site
-  resolution and misses), never by its timing alone.
+  resolution and misses), never by its timing alone. (Milestone 5
+  deleted the delegate instance: a deserialized constant is an ordinary
+  `RakuObject` on its type's layout now. The lesson about miss counts
+  stands; the wrapper it was learned on is gone.)
 - **A plain value needs no speculation to decont.** The decont site now
   answers a non-container structurally (`STable.ContainerSpec == null`, a
   field load) and speculates only on the container it sees; before, a
@@ -212,7 +215,7 @@ Two things the site had to learn:
 
 **The intcache is not worth having here.** MoarVM's `sp_add_I` boxes a
 small result from a per-type cache of shared Ints. Behind
-`JESP_INTCACHE=1` this exists (`P6OpaqueREPRData.intCache`, -16..255,
+`JESP_INTCACHE=1` this exists (`RakuObjectREPRData.intCache`, -16..255,
 filled on demand) and engages (two `1 + 2` results are one object), and
 the loop measures the same with it as without (189 vs 190 ns), and so
 does the warm `t/01-sanity` sweep run back to back (70 s on, 74 s off,
@@ -784,7 +787,7 @@ after every nqp build with
 Runtime-only change: `./nqp/gradlew -p nqp :nqp-runtime:jar :nqp-truffle:jar syncRuntimeJars`
 (seconds), restart eval servers; no setting recompile.
 
-## Object model: not RootNode, maybe DynamicObject, probably an Assumption
+## Object model: the RakuObject layout (settled 2026-09-12)
 
 Asked 2026-09-07: could a P6opaque instance descend from `NqpRootNode`?
 No. A REPR instance roots in `SixModelObject` (single inheritance; every
@@ -795,22 +798,24 @@ slot and never scalar-replaced. Objects do not need a Truffle base class
 to be visible to PE: Graal reads plain fields, which is what `AttrSrc`
 and the diamond-3 decont and create sites exploit.
 
-Three related options, in order of cost:
-
-- **An `Assumption` per STable**, invalidated on compose, mixin and
-  rebless, so the istype and p6typecheckrv sites' trust in
-  `TypeCheckCache` and the create site's trust in `REPRData.instance`
-  become checked rather than assumed. Needs nqp-runtime to see
-  truffle-api at compile time (annotations and Assumption only); verify
-  that this does not put a second Truffle copy on the classpath. Small;
-  do it if the sweep ever shows a stale type-check cache.
-- **Truffle `DynamicObject` + `Shape`** as the object model: shape-guarded
-  field loads, shape transitions as the invalidation story, per-node
-  property caches. STable would map to the shape's type slot, attribute
-  slots to properties, mixins to transitions. A full migration of every
-  REPR, the serializer and the generated storage classes, duplicating what
-  STable plus `field_N` already give PE. Recorded as an idea; not planned.
-- **Not `RootNode`.**
+Milestone 5 settled the rest of the question, and neither of the two
+options this section used to float is the answer: there is no
+`DynamicObject`/`Shape` migration, and the per-STable `Assumption` is
+still only an idea. A P6opaque instance is a `RakuObject` — one of six
+static storage classes (`RakuObject4`, `4L`, `8`, `8L`, `16`, `16L`:
+plain reference and `long` fields up to the class's capacity, an
+overflow array after it) — carrying a per-STable
+`RakuObjectLayout` that says what each slot means: the slot kinds, the
+storage specs, the flattened STables, the name-to-slot map, the
+auto-vivification table, the class handles and the unbox and delegate
+slots. Nothing is generated at run time; the layout is the fact the
+sites guard on. The authority is the class comment on
+`nqp/src/vm/jvm/runtime/org/raku/nqp/sixmodel/reprs/RakuObjectLayout.kt`
+(slot assignment, the variant rule, the serialization shape) and the
+design spec
+`docs/superpowers/specs/2026-09-11-jvm-unit-artifact-milestone-5-design.md`
+with its "Done" section; the sited readers are `AttrSite`, `DecontSite`,
+`UnboxSrc` and `BigIntSite` in `nqp-truffle`.
 
 The real bound on object cost is escape: the `+` result travels through
 the heap `CallFrame`'s return registers, so no scalar replacement happens
