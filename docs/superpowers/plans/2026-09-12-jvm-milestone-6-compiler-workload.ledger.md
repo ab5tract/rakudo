@@ -2467,3 +2467,71 @@ territory where the optimum lies, including the starvation knee Task 7 flagged,
 and 4 brackets 3 so we learn whether 3 is a genuine local minimum or a point on a
 slope. Final curve: 1 / 2 / 3 / 4 / 6 / 16. Costs if wrong: two points of the
 upward slope go unmeasured, recoverable in one batched run.
+
+Task 7-max: review (opus) — spec compliance full, hygiene clean, **every number in
+section A verified independently and NO numeric error found**. The reviewer summed
+the trace's own time fields itself: 893412 against the reported 893381, the 31 ms
+gap being the single stage-collided `opt failed` line the summarizer cannot see,
+with the same structure at the control (783461/783440) and at 3 threads. Screen A
+re-verified in the jar by its own `javap`: the `bipush 16 / Math.min` clamp sits
+only in the `threads < 0` arm (branch `ifge 163` at 118 skips it), the key is
+built with single-arg `OptionKey(Object)`, stability is STABLE with usageSyntax
+`[1, inf)`, and there is no `prestartAllCoreThreads`. It endorsed the choice of 16
+for a STRONGER reason than the implementer gave: **the pool is demand-driven and
+this workload never averaged more than 2.73 busy threads, so a request above 16
+could not have manifested anything to measure.**
+
+**Ruling 41 — SUPERSEDES THE CAUSAL HALF OF RULING 40. "Contention dominates" is
+NOT established, and the run's own utilization contradicts it.** I recorded it as
+settled. It is not, and the evidence against it was in the same statistics block I
+quoted from.
+
+893381 ms of compiler CPU over a 346 s wall is **2.58 core-equivalents out of 16**,
+matching the engine's own `Utilization 2.730003`. Across the three points the
+occupancy is 1.89 / 2.32 / 2.58 cores (Utilization 2.501 at the control). **The
+machine was ~16 % busy. The extra capacity sat idle.** So 6 -> 16 is roughly
+**+0.25 cores of average occupancy buying +9 s of wall**, which is not a
+contention story at face value, and the implementer's concern that 16 threads
+starve the parse thread, GC and JVMCI is **not supported by this run** and should
+be withdrawn rather than carried.
+
+What survives: more threads cause more compiler CPU and a longer wall, monotone
+across the measured points. What does NOT survive: the causal account. "Off the
+critical path" was reached by SUBTRACTION — background compilation can touch the
+wall through contention or through when compiled code lands, the report showed
+the latter bought little, and inferred the former. Candidates not eliminated:
+burst contention that an average hides, code-cache or GC pressure from more
+installed code, or something unlooked-for. What would settle it is process-CPU
+accounting or a box-idle record, and neither was taken. Labelled a FIT, exactly as
+ruling 7 labels the queue chain. Costs if wrong: the direction is unaffected; only
+the explanation is.
+
+**Ruling 42 — two of my own sentences in ruling 40 were wrong and are corrected.**
+(a) "~1 s of wall per added thread" is arithmetically false across the range:
+3 -> 6 is **3.33 s/thread**, 6 -> 16 is **0.90 s/thread**, a **3.7x flattening**.
+The flattening is the real finding and it STRENGTHENS the redirect below 3; as
+written the sentence invited the opposite extrapolation. (b) "No interior minimum"
+is over-read from three points with uneven gaps (3 threads, then 10). The
+defensible statement is **"no dip AT the measured points, and both endpoints are
+worse than 3"**; a dip anywhere in 7-15 is untested and, given the redirect, will
+stay untested.
+
+Task 7-max: minor (deferred to the implementer's report, not the ledger):
+`Compilation cancelled` is tabled as "—" for the control and cited as a cost of
+the high end; the control had **87** (rising to 101, +16 %), so the high end's
+cost is overstated. Also a false aside that the neighbouring
+`CompilerThreadStackSize` is EXPERIMENTAL — it is STABLE; the experimental
+neighbour is `CompilerIdleDelay`. Neither moves the STABLE claim for
+`CompilerThreads`, which is correct.
+Task 7-max: minor — the floor argument used the WEAKER reading. The 0.7 % floor
+came from Success 5658 vs 5617, i.e. **41 compiles**; transferred as a percentage
+onto a base of 3334 it is ~23, so +21 is **at** the floor rather than comfortably
+below, while transferred as an absolute count (21 against 41) it is clearly below.
+The conclusion survives either way, but the report asserted the marginal version
+as settled and never made the robust one.
+
+**Reviewer's verdict, adopted: the curve's SHAPE is safe to build an adoption
+decision on; its MECHANISM is not.** Both axes monotone increasing, every number
+reproducing from raw logs, the configuration proven in force by direct thread
+sampling, and +9 s is 13x the wall floor. Adopt the direction — fewer threads, the
+steep slope is near 3, measure 1 and 2 next — and not ruling 40's causal half.
