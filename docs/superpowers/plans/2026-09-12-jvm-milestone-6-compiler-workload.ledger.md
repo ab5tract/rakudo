@@ -3304,3 +3304,72 @@ Open and honest: the implementer could not isolate why CORE.c was slower than th
 blocklist path as untested candidates. The nqp suite was NOT run because the
 harness hardcodes a `java` command line — said rather than contorted, and now
 dispatched to a separate agent with its own driver.
+
+---
+
+**Task 12b — the nqp suite through the Native Image. DONE 2026-09-12. The image's
+runtime behaves like the JVM's.** Report:
+`.superpowers/sdd/2026-09-12-jvm-milestone-6-compiler-workload/task-12b-nqp-suite-report.md`.
+
+All 151 `testNqp` files, driven by stock `prove --exec` against a three-line shim
+under the job tmp that impersonates `nqp-j-gradle` (the tree's harness was neither
+read into the run nor modified). Invocation:
+
+```
+<image> -Xmx4g -Dnqp.execname=<self> -Djava.class.path=<share/lib> <share/lib>/nqp.jar <file>
+```
+
+`-Xss64m` was not needed: nothing overflowed the image's stack, qregex included.
+
+**The nine known reds came back nine for nine, down to the individual test
+numbers** — 021-contextual (2,5-6,9,32-33), 022-optional-args (7), 044-try-catch
+(57), 112-continuations (15-16), qregex 21/845 (572-589,591,594,601), p5regex
+(78,159-160), qast exits at test 10 of 184, jvm/01-continuations (16-17,19),
+jvm/11-dispatch exits after 140 of 160. Nothing moved in either direction.
+13144 tests, not one different answer.
+
+**Three new red files, all missing metadata, none a wrong answer.**
+`t/nqp/082-decode.t`: `UnsupportedCharsetException: windows-1252` — Native Image
+ships only the default charsets; a build flag, and Rakudo would hit it too.
+`t/nativecall/02-libc.t`: `MissingForeignRegistrationError: Cannot perform
+downcall with leaf type (long,long,long)long`, thrown inside **buildnativecall**,
+i.e. at symbol lookup, before any user function is called.
+`t/nativecall/01-basic.t`: same cause wearing a `NullPointerException` at
+`NativeCallOps.kt:116` (`call.argTypes!!`), because the test's `try`/`CATCH`
+swallowed the real error; `NQP_VERBOSE_EXCEPTIONS=1` found it and a probe without
+the `try` reproduces the identical FFM error.
+
+**Which image, and the finding that came with it.** Only `rakudo-image` runs.
+`nqp-image` cannot start ("No language and polyglot implementation was found" —
+the module-path build). **`nqp-image-opt` dies during the first parse** on
+`MissingReflectionRegistrationError: … org.raku.nqp.runtime.Ops.exception(ThreadContext)`
+— `say(1+1)` is enough. Cause: its `config7` metadata registers `Ops` as an
+*enumerated* method list (whatever the tracing agent saw), where `config-rakudo2`
+registers 722 types with `allDeclaredMethods`. Classlib ops resolve by name at
+run time, so **tracing-agent metadata is structurally insufficient and will
+under-register silently, failing at a random op arbitrarily late.** The op
+surface must be emitted whole by the build.
+
+**Wall clock: 648 s against the 599 s baseline, +8 %, for 717 CPU-seconds against
+roughly 3000.** The per-file penalty is worst on the smallest file and shrinks
+with weight: `001-literals` 3.41 s vs 2.10 s (1.62x, and 3.4 CPU-s vs 12.4),
+`qregex` 18.2 s vs 14.6 s (1.24x, 18.5 CPU-s vs 121). The image never wins, it
+converges: the JVM buys its clock with 6-8 cores of JIT, the image runs one core
+throughout. The coordinator's correction holds — an image removes class loading,
+not artifact loading, and every one of the 151 processes paid full artifact load.
+
+Guest compilation bailed 100 % throughout (the known `NFGString.atomsOf`
+blocklist violation), so this is an interpreter-only runtime. That makes the
+correctness result stronger — the whole suite ran the uncompiled path, where no
+miscompile could hide or create a bug — and means the suite has **not** been run
+through an image with a working optimising runtime. If the `@TruffleBoundary`
+ever lands, repeat this run: a compiler is exactly where a divergence would
+appear, and this run could not have seen one.
+
+Trap for whoever repeats it: `grep -c '^not ok'` reports 60 for qregex, of which
+39 are `# TODO`. Diff against the baseline's per-test numbers or invent
+regressions.
+
+No source change in either tree, no image rebuilt or deleted, no build script
+touched. `blib/` and `nqp/build/` verified untouched; the nqp tree is clean and
+rakudo shows only the untracked files that predate the task.
