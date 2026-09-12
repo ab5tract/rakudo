@@ -292,3 +292,41 @@ in the header.
 
 Task 1: complete (commits `0a43dbed1e`..`1477806f7b`, review clean; plus
 controller commit `98f2db7132` correcting the plan and the spec at source).
+
+Task 2: implementer dispatched (opus); BASE rakudo `32f3800ee0`. Test-first:
+fixture, failing test, tool, passing test, then a real short-workload smoke whose
+required positive marker is a `done=` count above zero.
+
+Task 2: complete (commit rakudo `4d9012b443`). Test-first order honoured:
+fixture (6 lines, verbatim from the brief) → test (8 assertions, verbatim) → RUN
+AND SEE IT FAIL (7 of 8 failed; only the `nok` "ignores non-trace lines"
+assertion passed, vacuously, against the empty output of a missing tool) → tool
+(verbatim from the brief) → 8/8 pass. Nothing in the brief was altered; both
+files and the fixture were transcribed straight out of it by line range rather
+than retyped, so the asserted values (`done=2`, `failed=2`, `mean=6500`,
+`min-too-large-size=48213`, `min-too-large-size=none` on an empty log) all
+reproduced on the first run of the finished tool.
+
+Task 2: the field-driven property is intact. The parser splits the tail on `|`
+and matches `Tier`/`Time`/`Reason` by each field's leading word, so the two
+unverified `opt failed` fixture lines commit the tool to nothing but the
+presence of a field named `Reason` — which is what Task 3 Step 4 goes and
+confirms against a real failing trace.
+
+Task 2: smoke test PASSED the required positive marker. `NqpCheck` under
+`-Dpolyglot.engine.TraceCompilation=true` (java exit 0, "# Truffle runtime:
+Oracle GraalVM", `ok - add` / `ok - fib`) produced
+`events=2 / done=2 / min-too-large-size=none / total-compiler-ms=93`, the two
+roots being `org.graalvm.polyglot.Value<Program>.execute` (60ms) and
+`<anon>[0]` (33ms). `done=` above zero: the instrument sees real data.
+
+Task 2: notes for Task 3, none of them defects. (a) The brief's Step 6 command
+is one shell statement mixing `$CLAUDE_JOB_DIR` into a `raku` invocation, which
+this worktree-isolated harness refuses to run; it works split into two plain
+commands with the job path written out. (b) `total-compiler-ms` and the
+top-roots table count non-NQP roots too — the polyglot entry point is half of
+the smoke run's two events — so a Task 3 reading of "compiler time" should say
+whether it means all roots or only the bracketed (NQP program) ones. (c) `Time`
+is read as the total, not the `(a+b)` split. (d) `getName()` is at
+`nqp/nqp-truffle/src/main/java/org/raku/nqp/truffle/NqpRootNode.java:90-94`; the
+brief cites 91-93, off by one line at each end and immaterial.

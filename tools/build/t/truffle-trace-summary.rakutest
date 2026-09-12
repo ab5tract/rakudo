@@ -1,0 +1,28 @@
+use Test;
+
+my $tool = $*PROGRAM.parent(2).add('truffle-trace-summary.raku');
+my $fix  = $*PROGRAM.parent.add('fixtures/trace-sample.log');
+
+plan 8;
+
+my $out = run($*EXECUTABLE, $tool, $fix, :out).out.slurp(:close);
+
+ok  $out.contains('done=2'),   'counts the two successful compilations';
+ok  $out.contains('failed=2'), 'counts the two failed compilations';
+nok $out.contains('ok - warm add'),
+    'ignores lines that are not engine trace lines';
+ok  $out.contains('code installation failed: code is too large'),
+    'groups failures by their reason text';
+ok  $out ~~ / 'min-too-large-size=48213' /,
+    'reports the smallest wire size among too-large roots';
+ok  $out.contains('parse_expr'),
+    'names the roots in the top-roots table';
+ok  $out ~~ / 'mean=6500' /,
+    'reports the mean time of a reason group in ms';
+
+my $empty = $*PROGRAM.parent.add('fixtures/empty.log');
+$empty.spurt('');
+my $out2 = run($*EXECUTABLE, $tool, $empty, :out).out.slurp(:close);
+ok $out2.contains('min-too-large-size=none'),
+   'says none when no root failed for size';
+$empty.unlink;
