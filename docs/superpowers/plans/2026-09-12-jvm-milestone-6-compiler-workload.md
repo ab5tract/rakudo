@@ -1701,6 +1701,44 @@ Claude-Session: https://claude.ai/code/session_01T8zpD6QrhN6Pmp5TePheq6"
 
 ### Task 12: Native Image of nqp alone
 
+> **Does adopting `Mode=latency` conflict with imaging? No — they are on
+> different axes, and they are complementary (user question,
+> 2026-09-12).**
+>
+> Native Image compiles the HOST: our interpreter, the Java and Kotlin,
+> into a native binary. Truffle's tiers compile the GUEST: the encoded
+> NQP that interpreter runs. Both still exist inside an image, provided
+> it is built with the optimising Truffle runtime, and a root can still
+> climb interpreted to first tier to last tier there exactly as on the
+> JVM. `engine.Mode` is read when the engine is constructed, which
+> happens at runtime even inside an image, so it is a per-process option
+> and not a structural property. This milestone adopts it for the BUILD
+> JVM only and never for `rakudo-j`, so the image is unaffected either
+> way.
+>
+> They pull in the same direction. Latency mode stops us paying Graal to
+> optimise guest code that runs a handful of times; an image stops us
+> paying HotSpot to interpret the interpreter before it warms up. Both
+> address the same underlying fact, that a compiler's own code is
+> run-once work being treated as hot. Under latency we lean harder on
+> the interpreter loop, which is precisely what an image precompiles, so
+> today's tier-policy result RAISES the value of this spike rather than
+> lowering it.
+>
+> **Two things this task must therefore state explicitly:**
+>
+> - **Which kind of image it built.** An image without the optimising
+>   runtime is interpreter-only: no tiers, no guest compilation ever.
+>   That is a legitimate fast-startup configuration, but it is a choice,
+>   and the two kinds have very different performance shapes. Say which,
+>   and why.
+> - **What the auxiliary engine cache would actually hold.** It persists
+>   compiled guest code across runs and was one of the three reasons this
+>   direction was attractive. If the build pins everything to first tier,
+>   the cache stores first-tier code — still useful, but a smaller prize
+>   than caching fully optimised code. Note the interaction rather than
+>   assuming the original estimate still stands.
+
 A spike. The output is an answer and a recipe, never a kept binary:
 every runtime change invalidates an image.
 
