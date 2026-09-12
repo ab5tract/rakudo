@@ -18,17 +18,43 @@
 #     without one. The colon therefore lands on exactly the verb whose reason
 #     decides NQP_CODE_MAX_COMPILE, so the field match treats it as optional.
 #
-#   * A root name can itself contain '|': infix:<|> and infix:<+|> are real
-#     Rakudo operators. Splitting the whole line on '|' cuts such a name in
-#     half and loses its size. The head is cut instead at the first
-#     whitespace-then-'|', which is how the format separates the %-50s name
-#     from the fields (a '|' inside a name is never preceded by whitespace),
-#     and only the tail is split.
+#   * A '|' turns up inside the data on BOTH sides of the fields. A root NAME
+#     can contain one (infix:<|> and infix:<+|> are real Rakudo operators),
+#     and so can a REASON text, because those operator names appear in
+#     inlining-failure messages. Splitting the whole line on '|' cuts both in
+#     half. So the head is cut at the first whitespace-then-'|', which is how
+#     the format separates the %-50s name from the fields (a '|' inside a name
+#     is never preceded by whitespace); and within the tail, a piece that does
+#     not look like the start of a field is rejoined to the piece before it.
 #
 # Nothing is discarded silently: every [engine] opt line that fails the head
-# match is counted in unparsed=, and a failure whose reason did not parse is
+# match is counted in unparsed=, a failure whose reason did not parse is
 # announced on the min-too-large-size line itself rather than passing for
-# "nothing was too large".
+# "nothing was too large", and a failure reason that parsed but matched no
+# known size-bailout spelling is printed with the sizes behind it rather than
+# quietly leaving the population.
+
+# The spellings of "this root was too large to compile". They are not one
+# message: "code is too large" is the code-installation limit, while "too big
+# to safely compile. Node count: N" is the PermanentBailoutException on graph
+# size in libjvmcicompiler.so. Substring matches, never exact ones -- and the
+# unclassified-reasons report below is what covers the spellings not listed
+# here, which matters more than the list, because the list will go stale.
+my @SIZE-BAILOUT-SPELLINGS = 'code is too large', 'too big to safely compile', 'exceeds';
+
+sub size-bailout($reason --> Bool) {
+    so @SIZE-BAILOUT-SPELLINGS.first({ $reason.contains($_) });
+}
+
+# A field starts with a capitalised word then whitespace, optionally with a
+# colon: Tier, Time, AST, Inlined, IR, CodeSize, Addr, CompId, UTC, Src,
+# "Reason:". Anything else is the continuation of a value that contained a
+# '|'. This is deliberately a SHAPE test and not a list of known field names,
+# so an unfamiliar future field still reads as a field; and if it ever guesses
+# wrong the result is an over-long value, never a truncated one.
+sub field-start($piece --> Bool) {
+    so $piece ~~ / ^ <[A..Z]> \w* ':'? \s /;
+}
 
 sub MAIN($log, Int :$top = 20) {
     my @events;
@@ -54,8 +80,18 @@ sub MAIN($log, Int :$top = 20) {
         my $verb = ~$<verb>;
         my $name = ~$<name>;
         my $size = $name ~~ / '[' $<n>=(\d+) ']' $ / ?? +$<n> !! Int;
+        # Rejoin the pieces of a field value that itself contained a '|'.
+        my @fields;
+        for $tail.split('|') -> $piece {
+            if @fields && !field-start($piece) {
+                @fields[*-1] ~= '|' ~ $piece;
+            }
+            else {
+                @fields.push: $piece;
+            }
+        }
         my %f;
-        for $tail.split('|') -> $f {
+        for @fields -> $f {
             my $t = $f.trim;
             %f<tier>   = +$0 if $t ~~ / ^ 'Tier' \s+ (\d+) /;
             %f<ms>     = +$0 if $t ~~ / ^ 'Time' \s+ (\d+) /;
@@ -86,9 +122,10 @@ sub MAIN($log, Int :$top = 20) {
         }
     }
 
-    my @too-large = @failed.grep({ .<reason>.contains('code is too large') });
-    my @sized     = @too-large.grep({ .<size>.defined });
-    my @unsized   = @too-large.grep({ !.<size>.defined });
+    my @too-large    = @failed.grep({ size-bailout(.<reason>) });
+    my @sized        = @too-large.grep({ .<size>.defined });
+    my @unsized      = @too-large.grep({ !.<size>.defined });
+    my @unclassified = @failed.grep({ .<reason>.chars && !size-bailout(.<reason>) });
     # A bare "none" must never be mistakable for "nothing was too large" when
     # the real story is that the reason field itself stopped parsing.
     my $note = @failed && !@reasoned
@@ -101,6 +138,19 @@ sub MAIN($log, Int :$top = 20) {
         # the threshold UP and makes the knob miss the roots it exists to skip.
         say "  UNSIZED (excluded, so the minimum above reads high): { @unsized.map(*<name>).join(', ') }"
             if @unsized;
+    }
+    # The spelling list above will go stale. Every other failure reason is
+    # named here WITH its sizes, so a root that belongs in the population but
+    # was not recognised shows up as a line to read rather than as an absence.
+    # A size here smaller than the minimum above is the alarm: the minimum is
+    # reading high, and a threshold set from it would miss that root.
+    if @unclassified {
+        say "  unclassified failure reasons (not matched as a size bailout):";
+        for @unclassified.classify(*<reason>).sort(-*.value.elems) -> $g {
+            my $sizes = $g.value.sort({ .<size> // Inf })
+                              .map({ .<size>.defined ?? ~.<size> !! 'no-size' }).join(', ');
+            say "    count={ $g.value.elems }  sizes: $sizes  { $g.key }";
+        }
     }
 
     say "\n--- top $top roots by compile time ---";

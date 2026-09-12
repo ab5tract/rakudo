@@ -3,17 +3,17 @@ use Test;
 my $tool = $*PROGRAM.parent(2).add('truffle-trace-summary.raku');
 my $fix  = $*PROGRAM.parent.add('fixtures/trace-sample.log');
 
-plan 16;
+plan 21;
 
 my $out = run($*EXECUTABLE, $tool, $fix, :out).out.slurp(:close);
 
 ok  $out.contains('done=2'),   'counts the two successful compilations';
-ok  $out.contains('failed=2'), 'counts the two failed compilations';
+ok  $out.contains('failed=5'), 'counts the failed compilations';
 nok $out.contains('ok - warm add'),
     'ignores lines that are not engine trace lines';
 ok  $out.contains('code installation failed: code is too large'),
     'groups failures by their reason text';
-ok  $out ~~ / 'min-too-large-size=48213' /,
+ok  $out ~~ / 'min-too-large-size=900' /,
     'reports the smallest wire size among too-large roots';
 ok  $out.contains('parse_expr'),
     'names the roots in the top-roots table';
@@ -23,14 +23,14 @@ ok  $out ~~ / 'mean=6500' /,
 # Pins the accepted-line count. Without this nothing noticed that a whole
 # class of lines had stopped parsing -- which is how the "Reason:" colon in
 # TraceCompilationListener.FAILED_FORMAT got through as a silent zero.
-ok  $out.contains('events=5'), 'accepts every trace line in the fixture';
+ok  $out.contains('events=8'), 'accepts every trace line in the fixture';
 ok  $out.contains('unparsed=0'),
     'no [engine] opt line is dropped without a tally';
 
 # FAILED_FORMAT writes "|Reason: %s|" with a colon; DEOPT/INV/UNQUEUED write
-# "|Reason %s|" without one. Three of the five events carry a reason, and all
-# three must parse -- two with the colon, one without.
-ok  $out.contains('reasons-parsed=3'),
+# "|Reason %s|" without one. Six of the eight events carry a reason, and all
+# six must parse -- five with the colon, one without.
+ok  $out.contains('reasons-parsed=6'),
     'parses Reason with and without the colon';
 
 # infix:<|> and infix:<+|> are real Rakudo operators, so a root name can
@@ -38,13 +38,39 @@ ok  $out.contains('reasons-parsed=3'),
 ok  $out.contains('infix:<+|>[12345]'),
     'a root name containing | is not split mid-name';
 
-ok  $out.contains('too-large roots: 2 (2 sized, 0 unsized)'),
+# ... and so can a reason text, because operator names turn up in inlining
+# failures. Truncating at the pipe drops the root from the population AND
+# defeats the size-bailout match, since a cut reason matches no spelling.
+ok  $out.contains('inlining of infix:<+|> failed: code is too large'),
+    'a reason text containing | is not truncated at the pipe';
+
+# "code is too large" is not the only spelling of too large: the graph-size
+# PermanentBailoutException in libjvmcicompiler.so says "too big to safely
+# compile". Both roots must be in the population, in size order.
+ok  $out.contains('by size: graph_bail[900], inline_pipe[1500], parse_stmt[48213], parse_expr[91002]'),
+    'every spelling of a size bailout joins the population';
+ok  $out.contains('too-large roots: 4 (4 sized, 0 unsized)'),
     'shows the population behind the minimum, not just the minimum';
 
-ok  $out.contains('total-compiler-ms=13109'),
+# The part that outlives any list of spellings I can write today: a failure
+# reason nobody classified is printed with its size, so a fourth spelling
+# shows up named rather than silently leaving the population.
+ok  $out.contains('sizes: 700  inlining budget exhausted'),
+    'prints unclassified failure reasons with the sizes behind them';
+
+ok  $out.contains('total-compiler-ms=23709'),
     'totals every root';
-ok  $out.contains('nqp-root-ms=13037'),
+ok  $out.contains('nqp-root-ms=23637'),
     'totals the bracketed (NQP) roots separately';
+
+# A trace where EVERY failure is an unrecognised spelling: the minimum is
+# honestly none, but the reason and its size must still be on screen.
+my $unknown = $*PROGRAM.parent.add('fixtures/trace-unknown-bailout.log');
+my $out4 = run($*EXECUTABLE, $tool, $unknown, :out).out.slurp(:close);
+ok $out4.contains('min-too-large-size=none'),
+   'an unrecognised bailout spelling does not invent a minimum';
+ok $out4.contains('sizes: 555  graph too chunky for the backend'),
+   'an unrecognised bailout spelling is named and sized, never silent';
 
 # A failure whose reason field is named something else must be loud, never a
 # bare "none" that Task 4 would read as "nothing was too large".
