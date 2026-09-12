@@ -214,3 +214,141 @@ Dispatch stats from the plusquick run:
 noTarget=19 badExpectation=0 notCodeRef=0`,
 `byKind[value,syscall,mapped,invoke,resumable]=[0, 95661, 45117402, 13446,
 45021030]` — identical to the "before" run except `slowEvals` 364 → 976.
+
+## Rulings made during execution
+
+Every ruling the SDD ledger
+(`.superpowers/sdd/2026-09-11-jvm-milestone-5-rakuobject-layout/progress.md`)
+recorded, in order, with the cost-if-wrong each was taken against.
+
+**Pre-flight scan.** `deserialize_stub(tc, st)` has exactly one caller
+(`SerializationReader.kt:386`, the line task 2 switches to the three-arg
+form); no other REPR is affected by the signature change.
+
+**Task 2 — the runtime.** Five findings from the review were ruled on
+rather than simply applied:
+
+1. *`is_attribute_initialized` auto-vivifies* (the plan's code said so):
+   the plan was wrong. The old generated method answered 0 on a null slot
+   without vivifying. **FIX** — drop the auto-viv term. Tests 17 and
+   `t/nqp/058-attrs.t` pin the old answer.
+2. *num32 rounding dropped on a native bind*: **FIX** — a
+   `P6num.sizedValue(spec, v)` mirror of `P6int.sizedValue`
+   (`bits == 32` → `v.toFloat().toDouble()`) applied in
+   `bind_attribute_native`'s NUM arm only, as the old `inlineBind` did;
+   `set_num` stays raw, as the old generated `set_num` was.
+3. *A UINT box target routes to `unboxIntSlot`, not `unboxObjSlot`*:
+   **KEEP**, intentional. The old fall-through was a commented-out line,
+   `StorageSpec.integer(unsigned)` marks UINT as an integer, and no type
+   in stage0 or CORE.c has a UINT box target. Cost if wrong: an
+   out-of-tree type with a uint box target reads its serialized unbox
+   slots differently.
+4. *`set_int`/`set_uint` mask through `sizedValue`*: **KEEP** — MoarVM
+   stores into the sized slot and truncates, and no sized box target
+   exists in CORE.c.
+5. *The `getBI`/`makeBI` nested-boxed fallback was removed*: **KEEP** —
+   the old fallback indexed `flattenedSTables[hint]!!`, which is null for
+   a REF slot (an NPE), so it was unreachable; the reviewer could not
+   construct a case either. Gates: `t/nqp/060-bigint.t`, `t/01-sanity`.
+
+Minors 6 (a hint range check on the hinted `Ops.getattr`) and 7 (an
+atomics kind guard) went to the fix round as cheap; minor 8 (`!!` on the
+slow-road helpers) was parked as provably non-null; 9 (a box-failure
+message naming the type rather than the REPR) was accepted; 10 (peek-seek
+documentation) was deferred.
+
+**Task 3 — the sites.**
+
+- A pre-milestone-5 runtime may be built **once**, in a throwaway nqp
+  worktree at `a60cad516~1` under the job directory, to classify the ten
+  red suite files as pre-existing or regression. This is correctness
+  triage, not a perf A/B (which the "no A/B compiles" rule forbids); the
+  worktree is deleted afterwards. Outcome: all nine remaining reds are
+  pre-existing, and `t/serialization/04-repossession.t` was *worse*
+  before (it died at line 18 on a delegate cast; it now runs to 20/22).
+- The stats gate is **`variants <= reblesses`**, not `variants == 0`: a
+  real compiler mixin (`QAST::Var+{QAST::SpecialArg}`) legitimately makes
+  one variant. Task 4 reads the CORE.c gate the same way. `NQP_LAYOUT_TRACE`
+  names each variant, so a mis-classed stub cannot hide behind a rebless
+  count.
+- `t/serialization/04-repossession.t` narrows its JVM skip to the tests
+  that fail for the *reader* reason (`stubObjects` reuses a live object
+  already in the SC), with that reason written into the skip text, per
+  spec §3.
+
+**Task 5 — interop.** Fix round 1 is trailers plus minors 1 and 3
+(test cases that actually hit the plan cache; `ConcurrentHashMap` for the
+multi exact map). Minor 2 (boolean widening: `LongArg` tests all 64 bits
+where the old road tested the low 32) is accepted as the saner semantics.
+Minors 4 and 6 (an `unreflect` failure on a non-public declaring class
+failing the whole class rather than the first call; a `dispatchName()`
+accessor) go to the final review. The dead `storageForType` and
+`JavaCallinException.kt` go in task 6 with the other deletions.
+
+**Task 6 — ASM.** `BytecodeVersion.kt` was already deleted in task 5, so
+step 2's `git rm` of it is skipped (ruling a); `storageForType` and
+`JavaCallinException.kt` are deleted here (ruling b).
+
+**Task 7 — this task.** The rakudo-side build scripts drop the asm jar
+names, and the dead `nqp/src/vm/jvm/runners/nqp-j{,.bat}` are deleted.
+The generated rakudo `Makefile` is not committed and is not edited: a
+fresh `Configure.pl` regenerates `NQP_JARS` from the nqp build directory,
+which task 6 already cleaned (`tools/lib/NQP/Config/NQP.pm`'s
+`configure_jars`).
+
+## Deferred minors (carried past the milestone)
+
+None of these blocked a task; each is recorded so it is not rediscovered.
+
+- **Task 1.** `t/02-rakudo/mixin-identity.t` binds `$w2` without
+  asserting on it; `docs/bench/jesp/attrquick.raku` binds `$s` without
+  reading it; `nqp/t/jvm/17-object-layout.t` has no labelled "0 longs"
+  case (it is implicit in the ref-only classes).
+- **Task 2.** Minor 8 (the `!!` assertions on the slow-road helpers,
+  provably non-null) and minor 10 (documenting the raw table seek in
+  `peekAttributeShape`).
+- **Task 3.** Stale comments in `NqpDispatch.kt:70-75` and `:297-301`
+  ("generated accessor", "storage class"); `DecontSite` never `miss()`es
+  on a layout mismatch (a perf nit, not a correctness one);
+  `NqpTypeOps.resolveBigInt` indexes `kinds[unboxIntSlot]` unchecked;
+  `BigIntSite` does not re-verify `rd.layout === layout`; `AttrSite`'s
+  triple publication is unfenced (an inherited shape, not new).
+- **Task 4.** A dead `RakuObjectREPRData`-era import in `Binder.kt` (left
+  deliberately: a settings rebuild is not worth one import, and task 6
+  rebuilt anyway); the `variants <= reblesses` gate was measured on
+  `say 1` only (`mixin-identity.t` exercises rebless separately);
+  `slowEvals` on the plusquick road went 364 → 976 with every other
+  dispatch counter identical — unexplained, and the plusquick bench is
+  +3.5 %.
+- **Task 5.** Added interop test cases fall to the casting road and never
+  read the exact cache; `MultiPlan`'s exact map was unsynchronized (fixed
+  in the fix round); an `unreflect` failure on a public method of a
+  non-public declaring class fails the whole class at plan-build time
+  where the old road failed at the first call (probed clean over 12
+  classes / ~600 members); a `dispatchName()` accessor.
+- **Task 6.** The rakudo-side asm jar names and the dead nqp-j runners —
+  both closed in task 7, above.
+
+## Close (2026-09-12)
+
+Heads: nqp `739ce7517` → `a927b5fa1`, rakudo `b64c52cb1c` → the docs
+commit below.
+
+The closing t/ sweep: 420 files, 6039 s, `EXIT=1 verdict=ok`, 22 files
+red — **2 fixed** since milestone 4 (`04-settingkeys-6d.t`,
+`36-rakuast-begin-compiled-remark.t`) and **3 new**, each confirmed by a
+solo re-run. One of the three is a real milestone-5 regression:
+**unsigned native attributes** (`uint`, `uint32`) throw
+`ArrayIndexOutOfBoundsException` when boxed and die with
+`nqpp: unknown tag 51` when written — `int` and `int32` are unaffected,
+and the suspects are task 2's two kept UINT rulings (findings 3 and 4),
+whose justification was "no such type in stage0 or CORE.c", true of the
+setting but not of user code. `t/02-rakudo/native-argument-snapshot.t`
+(1/9) is its gate. Not fixed in task 7, which touches no runtime code.
+
+The gate numbers, the bench table and the full sweep diff are
+written up in the spec's "Done (2026-09-12)" section
+(`docs/superpowers/specs/2026-09-11-jvm-unit-artifact-milestone-5-design.md`);
+the plan's position rows are `docs/jvm-truffle-only-plan.md` item 9 and
+the Position table. Next: the perf measurement session (plan item 4),
+then the engine merge (one Truffle language).
