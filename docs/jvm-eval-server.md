@@ -191,7 +191,7 @@ to GC roots) standing in for MAT. Two holders:
   universe in a static forever. It now builds a self-contained STable;
   nothing looks through the null's STable (serializer and `isnull()`
   go by identity).
-- **`TruffleGrammarEngine.STATES`** — weak keys, but the EngineState
+- **`NqpGrammarEngine.STATES`** — weak keys, but the EngineState
   values strongly hold pending captures, and a WeakHashMap only
   expunges on access; between runs each finished run stayed reachable.
   Cleared per run via `registerResettable`, like every other cache.

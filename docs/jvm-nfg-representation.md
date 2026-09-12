@@ -94,7 +94,7 @@ O(1), and correct by construction.
   id (equality/hashing stay integer compares).
 - **Must survive across eval-server runs but never be reset per run.** Unlike
   the resolution caches that leaked (`evalserver-leak-hunting`:
-  `TruffleGrammarEngine.STATES`, `WvalSite`, etc.), the synth table holds no
+  `NqpGrammarEngine.STATES`, `WvalSite`, etc.), the synth table holds no
   run-owned objects — only immutable `int[]` codepoint sequences and boxed ids.
   It is legitimately process-global and monotonic (bounded by the distinct
   synthetics the workload actually forms), so it does **not** register with

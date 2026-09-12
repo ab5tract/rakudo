@@ -9,7 +9,7 @@ section first — it is the stuff that keeps getting re-explained.
   (`nqp/src/vm/jvm/QAST/TruffleEncoder.nqp`) plus the wire consumer
   (`nqp/nqp-truffle/.../NqpProgramBuilder.java`, `NqpWire.java`,
   `NqpOps.java`, `NqpRootNode.java`). The *Truffle regex engine* is
-  `QAST::RxDescriptor` → `RxWire.kt` → `TruffleGrammarEngine.kt`; it already
+  `QAST::RxDescriptor` → `RxWire.kt` → `NqpGrammarEngine.kt`; it already
   works and the compiler only emits an `rxmatch` op referencing the
   descriptor. Regex is NOT a refusal.
 - **watched-run.raku, streamed so the user can follow it.** Long builds/tests
