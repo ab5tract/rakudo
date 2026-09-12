@@ -3118,3 +3118,127 @@ that. Anyone changing these later needs the ceiling, not just the wins.
 now would rewrite the runners underneath the native-image spike currently using
 the tree. The adoption takes effect on the next configure-and-build, which is
 Task 14's post-rebase build at the latest.
+
+**Task 12 — the Native Image spike. DONE 2026-09-12. It builds, it runs nqp,
+and it runs RAKUDO.** Report: `task-12-report.md`.
+
+The result nobody had tested: an image of the **nqp** runtime, built with no
+knowledge of Rakudo's compiler, loads `rakudo.jar` at run time and compiles
+Raku. The unit-artifact road from milestone 4 paid off exactly as designed —
+`rakudo.jar` is three files (`unit.meta`, `unit.programs`,
+`unit.serialized.lz4`) and nothing else, and an nqp image plus
+`rakudo-runtime.jar` on the image class path executes it. `-e 'say(1)'` and
+`@a.map(* * 2).join(",")` give correct output; the CORE.c compile started
+correctly and reached `Stage start`, then was killed on time grounds (below).
+
+**Four images, two of them working**, all kept in `$CLAUDE_JOB_DIR/tmp`:
+
+| binary | built by | size | build wall | Truffle features | works |
+|---|---|---|---|---|---|
+| `nqp-image-opt` | `iterate-initbt.raku` | 67.6 MiB | 1 m 30 s | all 7 | YES, runs nqp |
+| `rakudo-image` | `build-image-rakudo.sh` | 77.5 MiB | 1 m 27 s | all 7 | YES, runs Rakudo |
+| `nqp-image` | `build-image-mod.sh` | 28.9 MiB | 42 s | none | no: "No language and polyglot implementation was found" |
+| `nqp-image-empty` | `bi-empty.sh` | 19.7 MiB | 35 s | none | no: control, dies in `LZ4Factory` |
+
+The 19.7 -> 28.9 -> 67.6 MiB progression is the whole spike: no metadata, then
+metadata but Truffle on the MODULE path (no feature registers, no engine in the
+binary), then Truffle on the CLASS path -- and the 39 MiB difference is the
+Graal compiler compiled in.
+
+**And the image loses on wall clock, consistently, by about 1.5x:**
+
+| workload | JVM wall | image wall | JVM CPU | image CPU |
+|---|---|---|---|---|
+| `nqp -e 'say(1)'` | 1.93 s | 2.82 s | 9.8 s | 2.3 s |
+| `rakudo -e 'say(1)'` | 3.66 s | 5.45 s | 22.8 s | 4.7 s |
+| CORE.c | 297 s (whole compile) | **still in parse at 785 s, killed** | — | — |
+
+Four to five times cheaper in CPU, half again slower on the clock. The JVM
+wins because HotSpot spends five to six cores compiling the interpreter while
+the interpreter runs; the image runs one thread of AOT code and cannot make
+that back. Milestone finding 3 was right about the mechanism and the sign of
+the effect is the opposite of what we hoped.
+
+**The single most actionable finding: guest compilation FAILS 100 % in the
+image, and one line of Kotlin is why.** `NFGString.atomsOf` consults a
+`WeakHashMap` from inside `RxMatchRootNode.execute`, a partial-evaluation
+root. Native Image's Truffle feature refuses that at build time
+(`Found 1 compilation blocklist violations`); with the check suppressed the
+compiler bails at run time on *every* root with
+"Object of type FrameWithoutBoxing should not be materialized".
+`CompilationStatistics` reports successes 0. A `@TruffleBoundary` or a PE-safe
+grapheme cache separates "an image with a working optimising runtime" from
+what was measured. The no-source-changes constraint held, so it stays a
+finding.
+
+**What the build demanded, in order** (full detail in the report): lz4 impl
+classes registered reflectively; NO bare primitive-type entries in the agent
+metadata (they make the builder resolve the platform-restricted
+`CEntryPointLiteral.create` — this cost the most time and was bisected with a
+per-entry probe driver); four Truffle/polyglot symbol holders at build-time
+init; **Truffle jars on the image CLASS path, not the module path** (on the
+module path no Truffle feature registers at all and the image dies with "No
+language and polyglot implementation was found"); six language classes at
+build-time init, found by an auto-iterating driver (blanket
+`--initialize-at-build-time=org.raku.nqp.truffle` crashes the builder with an
+internal NPE); `-Djava.class.path=` at run time so `UnitLoader` can find
+`ModuleLoader.jar`; and for Rakudo, `rakudo-runtime.jar` on the class path,
+the whole op surface registered (734 types — classlib ops are named as
+strings, so resolution is open-world reflection), and the three JDK classes
+the classlib road can name. That last set is closed and tiny: grepping both
+trees for quoted JVM descriptors yields exactly eight classes, so a build step
+could emit the metadata mechanically.
+
+**Nothing demanded a source change to build or run.** The only source change
+worth making is the `@TruffleBoundary`, and it changes the result rather than
+the feasibility.
+
+**Question 1 — which kind of image:** built WITH the optimising Truffle runtime
+(`--macro:truffle-svm`, all seven Truffle features register, 67.6 MiB for nqp
+vs 28.9 MiB without), but it BEHAVES as interpreter-only because every guest
+compilation bails. So these numbers are the interpreter-only shape with 39 MiB
+of dead Graal in the binary.
+
+**Question 2 — the auxiliary engine cache:** on today's evidence it would hold
+nothing (successes 0); once the boundary is fixed it would hold mostly
+first-tier code, because `Mode=latency` rarely promotes on a compile-once
+workload; and the whole prize is bounded by Task 7's 17.5 % ceiling regardless,
+since a cache removes compilation time, not interpretation time. **It is no
+longer a reason to pursue imaging.**
+
+Build wall time, once the flags are known: **~90 s**. Options reach the image
+as plain `-D` properties on its own command line, read at engine construction
+at run time — verified, not assumed (`TraceCompilation` and
+`CompilationStatistics` both took effect). `JDK_JAVA_OPTIONS`, which the JVM
+drivers use, is ignored by an image.
+
+The nqp suite was NOT run through the image: the harness invokes the generated
+`nqp-j` shell script with a fixed `java` command line, and pointing it at a
+binary with a different argument shape means writing a shim that impersonates
+`nqp-j`. Said rather than contorted, per the brief.
+
+**RECOMMENDATION: PARK.** Not drop — the structural result is permanent, the
+recipe rebuilds in 90 s, and a one-line `@TruffleBoundary` stands between this
+measurement and a real one. Not pursue — the image was still in CORE.c's parse
+stage at 785 s against a 297 s whole compile, 2.8x the parse of the JVM run
+with guest compilation disabled (the like-for-like comparison).
+
+**The surprise, and the thing that should change how this direction is valued:
+short workloads do NOT look different from long ones. The image loses on the
+two-second workload too** (1.46x on nqp `say(1)`, 1.49x on Rakudo `say(1)`).
+Finding 1's premise is half wrong: cold start is 1.9 s not because of JVM boot
+(~0.1 s of it) but because artifact load, LZ4, meta decode and the setting's
+load blocks are real work, and the image does all of it too, with unprofiled
+AOT code on one core while the JVM throws five. An image removes CLASS loading,
+not ARTIFACT loading. Putting loaded units in the image heap would remove the
+rest, but that re-couples the image to one Rakudo build and is a different
+project.
+
+Revisit only if (a) the PE blocklist violation is fixed so guest compilation
+works, and (b) somebody wants `raku -e` startup enough to try PGO — and then
+measure the two-second case first, because it is the best case and today it
+still loses.
+
+Binaries, metadata and logs stay in `$CLAUDE_JOB_DIR/tmp` and are not
+committed — every runtime change invalidates an image. `blib/` and
+`nqp/build/` untouched; CORE.c output went to the job dir.
