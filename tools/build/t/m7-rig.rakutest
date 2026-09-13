@@ -1,0 +1,19 @@
+use Test;
+
+my $tool = $*PROGRAM.parent(2).add('m7-rig.raku');
+my $fix  = $*PROGRAM.parent.add('fixtures');
+
+plan 8;
+
+my $cold = run($*EXECUTABLE, $tool, '--parse-cold=' ~ $fix.add('m7-cold.err'), :out).out.slurp(:close);
+ok $cold.contains('misses=6815'),               'misses parsed from the stats line';
+ok $cold.contains('hits=125055'),               'hits parsed from the stats line';
+ok $cold.contains('lang-meth-call=1473'),        'per-dispatcher histogram line parsed';
+ok $cold.contains('stage-lines=2'),              'unit-load stage lines counted';
+
+my $sweep = run($*EXECUTABLE, $tool, '--parse-sweep=' ~ $fix.add('m7-sweep.log'),
+                '--baseline=' ~ $fix.add('m7-red-baseline.txt'), :out).out.slurp(:close);
+ok $sweep.contains('warm=5205'),                 'warm seconds parsed';
+ok $sweep.contains('red=2'),                     'two red files found';
+ok $sweep.contains('new-red=t/02-rakudo/brand-new-red.t'), 'the file outside the baseline is named';
+ok !$sweep.contains('03-cmp-ok'),                'a baseline red is not new';
