@@ -13,6 +13,127 @@ Measured starting points (recorded 2026-09-10 to 2026-09-12, not re-measured
 here): cold `nqp-j -e 'say(1)'` 1.93 s wall / 9.8 s CPU, of which JVM boot is
 about 0.1 s; cold `rakudo-j -e 'say 1'` 3.66-4.10 s.
 
+## Revision 1 — Phase 0 findings and handoff (2026-09-13)
+
+**Read this section first.** Phase 0 ran the same day the design was approved,
+and it overturned the design's premise. The next session re-ranks the work
+(user decision: "C", revise the spec and re-rank before choosing) and then
+decides the order. Everything from "Goal" onward is the original design; the
+parts Phase 0 superseded are marked in place.
+
+### What Phase 0 found
+
+1. **Artifact decoding was a small share of cold start.** Exclusive load time
+   before any fix: `nqp -e` spent about 51 ms (under 3% of 1.92 s) in read,
+   inflate, meta, programs, SC decompress and `buildTable`; `rakudo -e` about
+   410 ms (about 11% of 3.64 s). Load blocks (62-72%) and deserialize programs
+   (18-24%) dominated.
+2. **The top cost was quadratic wire parsing, not load logic.** JFR
+   `hot-methods`: `Grapheme.nextBoundary` + `GraphemeBreakIterator.setText` +
+   `ArrayList.grow` were about 70% of `nqp -e` samples and 40% of `rakudo -e`.
+   Every such stack came from `NqpWire.graphemeEnd` (engine programs) and the
+   identical code in `RxWire.kt` (regex descriptors): a fresh `BreakIterator`
+   with `setText` over the whole text for every pooled string, O(pool x
+   length) per parse. It is the 2026-09-06 outer-framing bug again, in the
+   inner pool framing. The "expensive" QAST.jar load block (742 ms) was mostly
+   this: it is the first code to run, so it parses hundreds of programs.
+
+### What landed (uncommitted at handoff)
+
+`GraphemeCursor` (`nqp/src/vm/jvm/runtime/org/raku/nqp/runtime/GraphemeCursor.kt`):
+one lazily created iterator per text, `setText` once, plus an ASCII fast path
+(a char below U+0300 that is not CR, followed by the end or another char below
+U+0300, is one grapheme). `NqpWire.decode` and `RxWire.Reader` use one cursor
+per parsed text. 7 unit tests (`nqp-runtime/src/test/.../GraphemeCursorTest.kt`)
+compare it with the old fresh-iterator behaviour, including 500 mixed segments
+in and out of order. Runtime-only: wire format unchanged, no stage0
+regeneration, no setting recompile.
+
+| Benchmark (best of 5, stock runners) | Before | After |
+|---|---|---|
+| `nqp-j -e 'say(1)'` | 1.924 s | **1.122 s** (-42%) |
+| `rakudo-j -e 'say 1'` | 3.638 s | **2.681 s** (-26%) |
+| `t/01-sanity/01-literals.t` | 5.017 s | **3.940 s** (-21%) |
+| nqp suite, one warm eval server (154 files) | 340 s | **186 s**, green |
+| `t/01-sanity`, one warm eval server | 105 s | **56 s**, 25/25 |
+
+### What is left in `rakudo -e` cold start (after the fix)
+
+Exclusive load time 1918 ms of 2.68 s wall; JFR's top method is now the Truffle
+interpreter (`NqpRootNodeGen$CachedBytecodeNode.continueAt`, 33% of samples).
+
+| Candidate | Evidence | Measured | Unknown |
+|---|---|---|---|
+| CORE.c load block | exclusive stage time | **541 ms** | what it runs; not profiled below the stage |
+| Deserialize programs beyond the SC reader (`perl6` 223, CORE.c 222) | exclusive stage time | **~446 ms** | which ops: fixups, closures, orphan code refs, repossession |
+| Interpreter cost of cold engine code | JFR `continueAt` 33% | overlaps the two rows above | whether it is parse, first execution, or specialization |
+| Design phase 1: decoding and tables | inflate 89, SC decompress 65, programs 59, meta 48, table 41, read 14, static lex 12 | **~310 ms** | how much mmap and stored entries save against 6x artifact size (CORE.c SC is 28 MB uncompressed, 4.5 MB as LZ4) |
+| Design phase 2: SC stub + finish | exclusive stage time | **~225 ms** | how much of CORE.c's 275k objects a small program touches |
+
+### Decisions for the next session
+
+1. **Re-rank the five candidates**, and choose the order. The first two rows
+   are unprofiled below the stage; profiling inside them (JFR with stack
+   filtering, or NQP_CODE_WHY on the named blocks) is the cheap first step.
+2. **Keep or restate the targets.** Decision 5 below (nqp < 1.0 s, rakudo
+   < 2.0 s) predates Phase 0. nqp is now 0.12 s off its target; rakudo is
+   0.68 s off, which the design phases alone (~535 ms) would not close.
+3. **Whether phases 1 and 2 stay as designed** (kotlinx records, mmap store,
+   lazy tables, SC demand) once they are ranked against the first two rows.
+
+### How to resume
+
+- Work only in the worktree `.claude/worktrees/jesp-direct-lazy-records`
+  (both trees). The session's starting directory is the stale main checkout.
+- Timers: `NQP_UNIT_LOAD_STATS=1` (`UnitLoadStats.kt`; first line
+  `unit-load: stats on`), one line per stage per unit, depth-indented.
+- Profile: `raku tools/build/unit-load-profile.raku --out=<dir>` under
+  watched-run (best-of-5 per benchmark, then one JFR each). Break a run down:
+  `raku tools/build/unit-load-exclusive.raku <dir>/rakudo-e-run<N>.err`.
+  Rank a recording: `jfr view --width 170 hot-methods <dir>/rakudo-e.jfr`;
+  find callers: `jfr print --events jdk.ExecutionSample --stack-depth 30`.
+- Pitfalls hit this session: launching a child JVM from a script with an
+  inherited stdin and separate stdout/stderr hung `rakudo-j` under
+  watched-run (the profile tool uses a closed stdin and merged output); a
+  `cd` in one tool call moves the next call's directory (pin paths); a test
+  file's non-ASCII literals are hard to verify (the unit test builds strings
+  from codepoints).
+- Gates: `tools/build/evalserver-sweep.raku --suite=nqp '--chunk=*'`, then
+  rakudo `make` only if that is green, then `evalserver-sweep.raku '--chunk=*'
+  t/01-sanity`. The wire fix is runtime-only; the rakudo build from before it
+  (make 948 s) stays valid.
+
+### Uncommitted inventory at handoff
+
+**nqp tree** (`jesp-direct-lazy-records` at d328dc042), 20 modified and 3 new
+files, all gated green together (nqp suite 154/154, `t/01-sanity` 25/25):
+
+- *`$*` dynamic variables:* `TruffleEncoder.nqp` (contextual reads use the
+  dynamic road unless the current block declares the name; explicit
+  `getlexdyn`/`bindlexdyn` route to the engine op), `NqpOps.java` and `Ops.kt`
+  (the engine op starts at the caller, or `tc.frame` for a frame-free block).
+- *Signature order errors:* `TruffleEncoder.nqp` dies with MoarVM's messages.
+- *Frame-free bind failure:* `TruffleEncoder.nqp` (explicit `assertparamcheck`
+  routes to the engine op), `NqpDispatch.kt` (`enterEngine` resumes a
+  resumable dispatch).
+- *Regex lookaround over groups:* `RxTree.kt`, `RxDescriptor.kt`, `RxProgram.kt`,
+  `RxDescriptor.nqp`.
+- *Continuation clone:* `CodeEngine.kt`, `Ops.kt`, `NqpCodeEngine.java`.
+- *qast:* `TruffleEncoder.nqp` ("has not appeared" wording), `t/qast/01-qast.t`
+  (`backend.start` tests skipped on JVM).
+- *No Perl 5 regex on JVM:* `build.gradle.kts`.
+- *nqp eval server launcher:* `GenerateRunnerTask.kt`, `build.gradle.kts`,
+  `.gitignore`.
+- *Phase 0 timers:* `UnitLoadStats.kt` (new), `UnitLoader.kt`, `UnitZip.kt`,
+  `ProgramUnit.kt`, `SerializationReader.kt`.
+- *Wire fix:* `GraphemeCursor.kt` and its test (new), `NqpWire.java`,
+  `RxWire.kt`.
+
+**rakudo tree** (`worktree-jesp-direct-lazy-records` at 0a2f4600e7): the
+`evalserver-sweep.raku` port (`--suite=nqp`, `--chunk=*`), and the two new
+profile tools named above. Committed today: the RakuAST JVM Perl 5 regex guards
+(0a2f4600e7) and this spec (1658840f07).
+
 ## Goal
 
 Make loading a unit artifact lazy, so that a program pays only for the parts of
@@ -65,7 +186,8 @@ first invoke (`MVM_bytecode_finish_frame`, `src/core/bytecode.c`).
    writes v2; stage0 is regenerated from it; the v1 reader is deleted (option A).
 5. **Absolute clocks as the done-criterion** (option B): cold
    `nqp-j -e 'say(1)'` under 1.0 s and cold `rakudo-j -e 'say 1'` under 2.0 s
-   once both phases have landed.
+   once both phases have landed. *Superseded pending re-decision: see
+   Revision 1. The phases alone cannot reach the rakudo target.*
 6. **Approach 2: lazy tables inside today's runtime classes plus a
    memory-mapped store.** The mapping is part of the design, not a phase-0
    decision.
@@ -104,7 +226,9 @@ compilation for its children).
 
 A short findings section in the implementation plan's ledger: the share of each
 cold-start clock taken by each stage, and the resulting order of work inside
-phases 1 and 2. Phase 0 does not reopen the decisions above.
+phases 1 and 2. Phase 0 does not reopen the decisions above. *Superseded:
+Phase 0 did reopen them, because it found decoding to be a small share of cold
+start; see Revision 1.*
 
 ## Phase 1: artifact v2 and lazy tables
 
@@ -307,6 +431,7 @@ are reported without pass/fail; the targets are checked at phase 2 close.
 
 - Phase 2 has landed and every gate passes, including the `NQP_SC_EAGER` run.
 - Cold `nqp-j -e 'say(1)'` best of 5 is under 1.0 s and cold
-  `rakudo-j -e 'say 1'` best of 5 is under 2.0 s.
+  `rakudo-j -e 'say 1'` best of 5 is under 2.0 s. *Pending re-decision; see
+  Revision 1.*
 - The v1 reader and the `NQP_SC_EAGER` diagnostic are gone.
 - The documentation above is written.
