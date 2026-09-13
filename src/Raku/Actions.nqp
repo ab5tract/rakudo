@@ -859,6 +859,7 @@ class Raku::Actions is HLL::Actions does Raku::CommonActions {
         if nqp::isconcrete($exception) {
             if $*R.has-compilation-errors {
                 # Really has errors, so report them.
+                self.dump-undeclared($exception) if nqp::getenvhash()<RAKUDO_DUMP_UNDECLARED>;
                 $exception.throw;
             }
             else {
@@ -876,6 +877,30 @@ class Raku::Actions is HLL::Actions does Raku::CommonActions {
                     !! self.render-worries(nqp::isconcrete($failure)
                         ?? self.exception-reason($failure)
                         !! 'the gist returned no text'));
+            }
+        }
+    }
+
+    # RAKUDO_DUMP_UNDECLARED=1: the names behind an X::Undeclared::Symbols
+    # whose message cannot render (a setting compile has no setting to
+    # render it with). Prints each hash attribute's keys to stderr.
+    method dump-undeclared($exception) {
+        my @payloads := [$exception];
+        try { @payloads := Nodify('Node').IMPL-UNWRAP-LIST($exception.sorries) if nqp::can($exception, 'sorries') }
+        for @payloads -> $p {
+            stderr().print('undeclared-dump: ' ~ $p.HOW.name($p) ~ "\n");
+            for <%!unk_types %!unk_routines %!post_types> -> $attr {
+                try {
+                    my $raw := nqp::getattr($p, $p.WHAT, $attr);
+                    unless nqp::ishash($raw) {   # a Raku Hash: its nqp hash is Map's $!storage
+                        for $raw.HOW.mro($raw) -> $t {
+                            try { my $s := nqp::getattr($raw, $t, '$!storage'); $raw := $s if nqp::ishash($s) }
+                        }
+                    }
+                    my @names;
+                    if nqp::ishash($raw) { for $raw { nqp::push(@names, nqp::iterkey_s($_)) } }
+                    stderr().print('  ' ~ $attr ~ ': ' ~ nqp::join(' ', @names) ~ "\n") if @names;
+                }
             }
         }
     }
