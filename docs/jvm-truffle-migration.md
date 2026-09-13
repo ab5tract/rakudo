@@ -342,7 +342,7 @@ threads virtual):**
 - *Sanity*: t/01 303/303; t/02 matches its baseline except the three
   pre-existing files; the full nqp suite on-engine 9187/9187.
 
-**Phase 5 — Deletion. IN PROGRESS (2026-09-02).** At 100% coverage per
+**Phase 5 — Deletion. DONE 2026-09-12** (milestone 4 took the JAST layer, jast2bc and the class road on 2026-09-10; milestone 5 took ASM, `ByteClassLoader` and run-time class generation on 2026-09-12; what remains of the inventory below is entries 4 and 5, tracked as items 1-3 of `docs/jvm-truffle-only-plan.md`). *Written 2026-09-02:* At 100% coverage per
 tier, delete jast2bc, AutosplitMethodWriter, the indy budget, and the
 JAST layer for that tier. This is the payoff beyond speed: three of the
 five bugs fixed in the 2026-08-31..09-01 session lived in code this
