@@ -58,6 +58,43 @@ by the suites, not by a targeted red.
 
 | tag | rakudo hash | nqp hash | cold rakudo-e (s) | cold nqp-e (s) | misses | hits | warm t/02-rakudo (s) | new red | verdict |
 |---|---|---|---|---|---|---|---|---|---|
+| base | bc00863fef | c17d93d27 | 2.502 | 1.135 | 6815 | 125055 | 3204 | t/02-rakudo/99-misc.t t/02-rakudo/regex-interpolation-fold-length.t t/02-rakudo/str-raku-prepend.t | base |
 
 ## Rulings and deferred minors
 
+Ruling (base row, new red): the base row's `new-red` names three files, so
+by the plan's own rule they are pre-existing, not any lever's. In detail:
+
+- `t/02-rakudo/99-misc.t` is **not** a failure — `Wstat: 0 Tests: 14
+  Failed: 0`, listed by the harness only for `TODO passed: 6`. The rig's
+  `parse-sweep` treats every `(Wstat` summary line as red, so this is a
+  parser false positive. Left as is: it is constant across every row, so
+  it cancels in a row-to-row comparison, and narrowing the regex would
+  also drop the "no TAP / parse error" cases, which are real reds. Task
+  2..9 compare their `new-red` against *this* set, not against the
+  milestone-5 baseline alone.
+- `t/02-rakudo/regex-interpolation-fold-length.t` (18/21 failed) and
+  `t/02-rakudo/str-raku-prepend.t` (7/9 failed) are genuine reds in
+  upstream tests that landed 2026-09-11 and 2026-09-10 (rakudo
+  `00feb606ab`, `3feb5e7075`) — NFG case-folding and `.raku` grapheme
+  escaping. Pre-existing engine gaps, out of milestone 7's scope.
+
+Three files on the milestone-5 list are green at base — `15-gh_1202.t`,
+`16-begin-time-eval.t`, `native-argument-snapshot.t` — which is why the
+red count is 22 in both places. They stay listed (the 2026-09-12 flicker
+ruling). Costs if wrong: a lever's regression in one of those three would
+not be flagged as new red; the row's `red=` count still moves.
+
+Ruling (rig, `Proc` exit codes): the first base run died after 54 minutes
+without writing anything — Raku's `Proc` throws `X::Proc::Unsuccessful`
+when the child's handle is closed, and the sweep exits non-zero whenever
+any file is red, which is always. The rig now captures a child's output
+before closing the handle and takes the exit code off the exception
+(`capture`). Costs if wrong: nothing; the cold benchmarks still die on a
+non-zero exit, as they must.
+
+Deferred minor: the brief's rig source had three Raku bugs, fixed as
+written — a missing `my` on `%*SUB-MAIN-OPTS`, `$*PROGRAM.parent(2)` for
+the repo root (it is `parent(3)`; `parent(N)` goes N levels up), and
+`"$tag-sweep.log"`, where `-` is an identifier character so the whole
+`$tag-sweep` parsed as one variable.
