@@ -111,6 +111,43 @@ first):**
    inventory; item 4's other inherited entries (size refusal, deopt
    churn, decont pinning, root names) ride along with (a).
 
+**Update, 2026-09-13 evening (steps 0 and 2 of the order above done; step 1
+running).** Step 0: both branches pushed; rakudo rebased onto upstream main
+(164 commits over it; one conflict, the P5Regex slang guard moved into
+upstream's new `standard-slangs` table; one setting fix, `$*COLLATION`'s
+registration guarded `#?if !jvm` because Collation.rakumod is JVM-excluded
+and upstream's streamlined dynamic-variable table registers it in
+Process.rakumod; `RAKUDO_DUMP_UNDECLARED=1` now names the symbols behind
+an unrenderable X::Undeclared::Symbols); clean make green, CORE.c parse
+232.9 s (231.7 before the rebase). Step 2, the profile below the two
+rows, is Revision 2 of the lazy-loading spec: **the CORE.c load block is
+guest execution, not loading** — the mainline runs 1207 package bodies
+once each and about 4600 dispatch misses inside it each run a dispatcher
+program cold (`raku-invoke`, the method-call dispatchers, ~1400 each) plus
+1148 `Block.clone`s; the lazy phases 1-2 cover decode + SC + tables, about
+21 % of the cold start, and the larger lever is the dispatch miss (fewer,
+cheaper, or persisted per call site in the artifact). The ranking in
+step 3 waits for step 1's suite clock, running on the rebased build.
+
+**Update, 2026-09-13 night (step 1 done; step 3 is a recommendation, to
+be decided in a brainstorm with the user, not here).** The suite clock:
+whole `t/`, 427 files, one warm 8 GB server, **5078 s** against
+milestone 5's 6039 s (-16 %); 2.8x from the 30-minute rule; 23 red = 21
+of milestone 5's 22 plus two tests upstream added this week; no
+regression. A warm-server JFR mid-sweep put per-run loading at 4 % of
+the server's time (eval-server cross-run sharing is struck) and the rest
+in the DSL interpreter, the `NqpOps.classlib` boundary road and the
+dispatch cold path. Recommendation for step 3, from both clocks: a
+"first execution" milestone ahead of the lazy-loading phases — the
+dispatch miss (about 6800 per cold start, each an interpreted dispatcher
+run plus CHM-heavy record/realize: fewer, cheaper, or persisted per call
+site in the artifact), the classlib boundary and the `@TruffleBoundary`
+survey (milestone 7's inherited pattern), the stub road and its
+method-handle spinning; then lazy phases 1-2 for the remaining ~0.55 s
+of cold start (they do not move the suite clock); eval-server sharing
+dropped. Cheap and independent: presize the SC reader's maps. The
+findings are Revision 2 of the lazy-loading spec.
+
 Targets: keep cold `nqp -e` under 1.0 s (0.12 s away); cold `rakudo -e`
 under 2.0 s stays the direction, not the done-criterion of any single
 phase, since the spec's phases alone cannot reach it.
