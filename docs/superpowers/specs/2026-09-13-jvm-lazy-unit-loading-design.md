@@ -134,6 +134,134 @@ files, all gated green together (nqp suite 154/154, `t/01-sanity` 25/25):
 profile tools named above. Committed today: the RakuAST JVM Perl 5 regex guards
 (0a2f4600e7) and this spec (1658840f07).
 
+
+## Revision 2 — below the stage (2026-09-13, later the same day)
+
+Revision 1 left two rows unprofiled: the CORE.c load block (541 ms) and
+the deserialize programs (about 446 ms). This revision opens both, on
+the rebased tree (rakudo `36ef2127e6`, nqp `c17d93d27`, the same
+runtime as the wire fix). Method: cold `rakudo-j -e 'say 1'` under JFR
+at 1 ms with `-XX:FlightRecorderOptions:stackdepth=512` (the default 64
+frames truncates the interpreter's stacks below the container frames,
+which is why an earlier recording showed 4 samples in the load block),
+attributed with `tools/build/jfr-attribute.raku` (inclusive by container
+frame, or `--innermost` for the Java frames between the leaf and the
+nearest interpreter frame); then `NQP_CODE_TRACE=1`, whose line now
+carries the block's id, unit and source line (nqp `c17d93d27`), cut at
+the stage-timer lines; then `NQP_DISPATCH_STATS=1`.
+
+### The rows, opened
+
+| row | what it is | evidence |
+|---|---|---|
+| CORE.c load block, 45 % of main-thread samples | **guest execution**, not loading: the setting's mainline runs 1207 package bodies once each (1210 entries at `CORE.c.setting:0`, 1207 distinct blocks), and everything they touch dispatches cold | 8147 stub-road block entries between the CORE.c deserialize program and its `load-block` line; leaf is the interpreter loop for 37 % of the row's samples; entered through DispatchOp 20 %, ClassLibOp 13 %, RunOp 5 % |
+| of which: dispatch misses | **4635 of those 8147 entries are dispatcher programs** from `src/vm/moar/dispatchers.nqp`, one run per miss: `raku-invoke` 1473, the method-call initial dispatch 1432, `raku-meth-call` 1422, the multi initial dispatch and proto 58 each, `raku-call` 49, `raku-rv-decont` 40; plus `Block.clone` from BOOTSTRAP 1148 times (the closure clone behind `p6capturelex`) | whole run: 6815 misses, 125 055 hits, 7733 invokes; the Java side of a miss (record + realize) is 9-10 % of main-thread samples on its own, the dispatcher program's interpreted run is inside "interpreter self" |
+| deserialize programs, 73 % inclusive | **nesting**: contains the row above, the SC read and the dependency decode; its own share (the fixup tasks) is about 7 %; CORE.c's deserialize program enters 17 blocks | container view |
+| SC read | 10 % of samples: fastutil `Object2IntOpenHashMap.rehash` 17 % of it, `Unsafe.getIntUnaligned` 13 %, `deserializeObjects` 11 %, `stubObjects` 7 %, `HashMap.resize` 6 % | `--innermost sc-read` |
+| unit decode | 9 % of samples, LZ4 two thirds of it, `readMeta` a fifth | `--innermost unit-decode` |
+| program materialization | 2-3 % (wire decode plus the Bytecode DSL builder) | `materialize` + Builder leaf frames |
+| build-table | 2 % (`insertArguments`, the LambdaForm editor) | |
+| GC | 145 ms in 18 pauses, about 4 % of wall | `jdk.GCPhasePause` |
+
+Exclusive shares (innermost Java frames, 1479 main-thread samples):
+interpreter self 35.7 %; hash maps of every kind 13.0 %; SC reader
+10.1 %; dispatch miss/record/realize 9.3-9.6 %; unit decode 8.8 %;
+`ArgsExpectation.invokeByExpectation` 8.0 %; `java.lang.invoke`
+(LambdaForm spinning, `insertArguments`, `StackMapGenerator`) 7.6 %.
+The rows overlap where one region holds several.
+
+The compile of `-e` after the settings load is the same shape in
+miniature: 6997 block entries, 3215 of them dispatcher programs.
+
+### The warm path (one eval server, mid-sweep)
+
+A two-minute JFR recording attached with `jcmd JFR.start` to the server
+running the whole-t/ sweep (started 19:43, recording at 19:49-19:51,
+inside `t/02-rakudo`), 773 samples over four busy threads. JFR samples
+at most a handful of threads per tick, so the count is small but the
+distribution across the busy threads holds; the default 64-frame depth
+applies (attach-time recordings cannot deepen it), so only the
+leaf-side `--innermost` view is read.
+
+| subsystem (exclusive) | share |
+|---|---|
+| `NqpOps.classlib` as the leaf (the boundary road into the classlib; the op bodies behind its method handle are hidden frames, so they land here) | 17.7 % |
+| interpreter self (generated frames as leaf) | 12.8 % |
+| `sun.misc.Unsafe.putObject/putLong` under the Truffle frame API (interpreter frame slot writes) | 14.6 % |
+| hash maps | 6.3 % |
+| `java.lang.invoke` (MH spinning: `SplitConstantPool`, `EntryMap`) | 4.8 % |
+| stub road `invokeByExpectation` | 3.5 % |
+| dispatch record | 3.0 % |
+| SC read | 2.6 % |
+| program materialization | 1.2 % |
+| build-table + unit decode | 0.5 % |
+| GC pauses (from the recording, not samples) | 1.37 s in 120 s, about 1 % |
+
+**Per-run loading is not a suite-clock lever.** The eval server
+rebuilds tables and deserializes every SC per run, and all of that
+together is about 4 % of the server's sampled time; eval-server
+cross-run sharing (the candidate "(b)" of the 2026-09-13 order) is
+struck. The warm clock is execution: the DSL interpreter running each
+test file's fresh code (cached tier, frame writes through Unsafe), the
+classlib boundary (`NqpOps.classlib` and its `ClassLibSite.resolve`),
+and method-handle spinning. That is the plan's items 1-2 and milestone
+7's "slow paths visible to the inliner", not this design.
+
+### The suite clock (step 1 of the 2026-09-13 order)
+
+The whole `t/` suite, the milestone-5 directory list (427 files), one
+warm 8 GB eval server, on the rebased build with the wire fix:
+**5078 s** (`Files=427, Tests=5653`), against milestone 5's 6039 s for
+420 files: **-16 %**, per file -17 %. The 30-minute rule is 1800 s, so
+the distance is **2.8x**. The wire fix's -47 % on warm `t/01-sanity`
+did not carry: sanity files are tiny and load-dominated, the suite is
+not. Red: 23 files, 21 of milestone 5's 22 (`04-settingkeys-6d.t` is
+green) plus two tests upstream added on 2026-09-10/11 that the JVM had
+never run (`regex-interpolation-fold-length.t` 18/21,
+`str-raku-prepend.t` 7/9); no regression from the rebase or the fix.
+Six more files appear in the harness summary only for "TODO passed".
+Pitfall: the sweep is silent until its chunk ends, so watched-run's
+default stall watchdog kills it at 900 s; launch with a `--max`
+ceiling or a stall past the run.
+
+### What this decides for the design
+
+1. **Phases 1-2 as designed address unit decode + SC + tables, about
+   21 % of main-thread samples, about 0.55 s** — the 535 ms Revision 1
+   estimated, confirmed from the other side. They do not touch the
+   largest row.
+2. **The largest row is first-execution cost, and its unit is the
+   dispatch miss.** Roughly 4600 misses inside the CORE.c load, 6800 in
+   the run, each one an interpreted run of a dispatcher program plus
+   the Java record/realize (9-10 %), plus the stub road and its method
+   handles (8 % + 7.6 %). The levers are: fewer misses (why do 1207
+   package bodies and 1148 `Block.clone`s dispatch cold at all: the
+   `p6capturelex(clone(...))` road of `IMPL-CLOSURE-QAST` at setting
+   load), a cheaper miss (the dispatcher programs run in the cold DSL
+   interpreter; the record/realize Java side is CHM-heavy), or a
+   persisted miss (a per-call-site dispatch outcome cached in the unit
+   artifact, valid while the guards it recorded hold — the artifact
+   road makes call sites stable, the same property the engine cache
+   would have needed). The last is the one that fits this design's
+   frame: it is a unit-artifact question.
+   The suite clock says the same from the other side: the warm path is
+   the interpreter, the classlib boundary and the dispatch cold path, and
+   loading is 4 % of it, so the dispatch miss and the boundary road are
+   the levers on both clocks while phases 1-2 move only the cold one.
+3. **Cheap and independent of the ranking:** presize the SC reader's
+   `Object2IntOpenHashMap` and `HashMap`s from the header counts (rehash
+   and resize are 23 % of the reader's samples, about 2.5 % of the
+   run); `UnitLoadStats.report` formats with `String.format` (only when
+   the timers are on).
+
+### Targets, restated
+
+Cold `nqp-j -e 'say(1)'` under 1.0 s stays (0.12 s away). Cold
+`rakudo-j -e 'say 1'` under 2.0 s stays as the direction and is not
+reachable by phases 1-2 alone (2.68 - 0.55 = 2.13 s at best); it needs
+the dispatch-miss row as well.
+
+
 ## Goal
 
 Make loading a unit artifact lazy, so that a program pays only for the parts of
