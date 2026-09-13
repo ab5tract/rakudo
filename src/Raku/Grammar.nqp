@@ -1,4 +1,6 @@
+#?if !jvm
 use NQPP5QRegex;
+#?endif
 use Raku::Actions;
 
 sub p6ize_recursive($x) {
@@ -157,7 +159,17 @@ role Raku::Common {
 #-------------------------------------------------------------------------------
 # Quote parsing
 
+#?if jvm
+    # The JVM backend does not build NQPP5QRegex, so there is no P5Regex slang.
+    method Regex($P5?) {
+        self.panic('Perl 5 regexes (:P5 / :Perl5) are not supported on the JVM backend')
+          if $P5;
+        self.slang_grammar('Regex')
+    }
+#?endif
+#?if !jvm
     method Regex($P5?) { self.slang_grammar($P5 ?? 'P5Regex' !! 'Regex') }
+#?endif
 
     method Quote() { self.slang_grammar('Quote') }
 
@@ -1192,7 +1204,9 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
         nqp::hash(
           'Quote',   [Raku::QGrammar,       Raku::QActions],
           'Regex',   [Raku::RegexGrammar,   Raku::RegexActions],
+#?if !jvm
           'P5Regex', [Raku::P5RegexGrammar, Raku::P5RegexActions],
+#?endif
         )
     }
 
@@ -6804,6 +6818,7 @@ grammar Raku::RegexGrammar is QRegex::P6Regex::Grammar does Raku::Common {
 #-------------------------------------------------------------------------------
 # Grammar to parse PCRE like regexes
 
+#?if !jvm
 grammar Raku::P5RegexGrammar is QRegex::P5Regex::Grammar does Raku::Common {
     token rxstopper { <stopper> }
 
@@ -6824,3 +6839,4 @@ grammar Raku::P5RegexGrammar is QRegex::P5Regex::Grammar does Raku::Common {
         <block=.LANG('MAIN','block')>
     }
 }
+#?endif

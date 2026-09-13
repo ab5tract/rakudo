@@ -1,5 +1,7 @@
 use NQPP6QRegex;
+#?if !jvm
 use NQPP5QRegex;
+#?endif
 
 #-------------------------------------------------------------------------------
 # The classes of the AST nodes come from the Raku setting bootstrap, so
@@ -5805,8 +5807,10 @@ class Raku::RegexActions is HLL::Actions does Raku::CommonActions {
     }
 }
 
+#?if !jvm
 class Raku::P5RegexActions is HLL::Actions does Raku::CommonActions {
     method nibbler($/) {
         self.attach: $/, Nodify('Regex::Assertion::Fail').new;
     }
 }
+#?endif
