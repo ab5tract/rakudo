@@ -1,0 +1,8 @@
+unit-load: stats on
+unit-load 1 nqp.jar sc-read 210.40
+unit-load 0 nqp.jar load-total 412.10
+dispatch stats: hits=125055 misses=6815 slowEvals=12 invokes=7733 directs=3 noTarget=0 badExpectation=0 notCodeRef=0 byKind[value,syscall,mapped,invoke,resumable]=[100, 200, 300, 400, 500]
+  misses 1473 lang-meth-call
+  misses 1432 lang-call
+  noTarget 0 nothing
+1

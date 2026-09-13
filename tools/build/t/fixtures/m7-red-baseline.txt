@@ -1,0 +1,2 @@
+# fixture baseline
+t/02-rakudo/03-cmp-ok.t
