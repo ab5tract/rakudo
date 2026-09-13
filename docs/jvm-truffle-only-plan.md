@@ -19,7 +19,103 @@ compile at all. Baseline at the directive: CORE.c parse 270.5 s
 standalone, `+` loop 82 ns, cold `t/01-sanity` 139 s at 4 jobs, warm
 67-81 s.
 
-## Position (2026-09-12)
+## Position (2026-09-13)
+
+Milestones 1-6 of the unit-artifact road are closed; the previous
+position table (kept below as history) is unchanged for items 1-3 and
+5-9. What the branch gained since the milestone-6 close (rakudo
+`211f7ac21c` / nqp `41c294b02`, 2026-09-12), in the order it landed:
+
+- **Item 4, second measurement (2026-09-12, "milestone 7 build timings"):**
+  the tier policy now reaches `J_NQP_RR` too (rakudo `b62f083d75`), with
+  the `-Xss512m` that driver never had; clean `make` 985 -> 922 s. BOOTSTRAP
+  v6c at 412 s is the largest single compile in the build and has never
+  been profiled; the tier knobs are worth 5.5 % on it because v6c
+  *executes* a 55k-line BEGIN block as well as parsing it. One JVM for
+  several setting compiles is blocked by process-global compiler state
+  (`Package 'Mu' already has a method`, `Circular dependency compiling
+  routine 'FALLBACK'`), a project rather than a knob.
+- **The nqp suite back to 154/154 (2026-09-13, nqp `1e24c3e34`..`17b47d46e`):**
+  `$*X` reads take the dynamic road unless the block declares the name,
+  `getlexdyn`/`bindlexdyn` start at the caller as MoarVM does, a
+  frame-free callee's bind failure resumes the dispatch it was entered
+  from, lookarounds over group nodes, a continuation clone gets its own
+  engine frame, two encoder refusals became compile errors, and the JVM
+  builds no `NQPP5QRegex` (rakudo `0a2f4600e7` guards the slang in RakuAST).
+- **Cold start, designed then measured (2026-09-13):** the lazy unit
+  loading design (`docs/superpowers/specs/2026-09-13-jvm-lazy-unit-loading-design.md`,
+  rakudo `1658840f07`, revision 1 in `d614e62313`) and its Phase 0.
+  Phase 0 overturned the premise: artifact decoding was under 3 % of
+  `nqp -e` and about 11 % of `rakudo -e`. The top cost was quadratic
+  wire pool parsing (a fresh `BreakIterator` with `setText` per pooled
+  string in `NqpWire` and `RxWire`), fixed by `GraphemeCursor` (nqp
+  `f2407eff9`, runtime-only): cold `nqp -e` 1.92 -> 1.12 s, cold
+  `rakudo -e` 3.64 -> 2.68 s, warm nqp suite 340 -> 186 s, warm
+  `t/01-sanity` 105 -> 56 s. Per-stage load timers ship behind
+  `NQP_UNIT_LOAD_STATS=1` (nqp `dacbdd4fd`); the profile and exclusive-time
+  tools are `tools/build/unit-load-profile.raku` and
+  `unit-load-exclusive.raku` (rakudo `4a44ecd6e3`).
+
+| item | state on 2026-09-13 |
+|---|---|
+| 1 plain call | unchanged: partial, paused (per-call `Object[]`, mainline OSR shape) |
+| 2 language id | unchanged: partial, paused (slice 2: hllbool, box types, hlllist/hllhash) |
+| 3 calling convention | unchanged: partial, paused (`NQP_CODE_NOFRAME` off, dispatch blocks deferred) |
+| 4 compiler workload | **measured twice, partly landed** (milestone 6 + the 2026-09-12 timings). Tier policy + one compiler thread on every setting compile and on `J_NQP_RR`: CORE.c 434 -> 297 s, clean make 985 -> 922 s. Ceiling found: guest compilation is at most 17.5 % of a CORE.c compile, so this item cannot move CORE.c much further by knobs. Open inside it: the eight items milestone 6 handed to milestone 7 (`docs/jvm-perf-findings-2026-09.md`, "What milestone 7 inherits"), six of them one pattern (slow paths visible to the inliner: `nqp/src/vm/jvm/runtime` still has zero `@TruffleBoundary` against 113 in `nqp/nqp-truffle/src`, re-counted 2026-09-13); v6c unprofiled; setting compilation not idempotent |
+| 5-9 | DONE, unchanged (milestones 1-5) |
+| cold start (outside the nine) | spec written, Phase 0 done, wire fix landed; phases 1-2 (artifact v2, lazy tables, SC demand) **not started and pending a re-rank** (user decision "C", 2026-09-13): the spec's own phases are worth about 535 ms of the 2.68 s that remain, and the two largest remaining rows (CORE.c load block 541 ms, deserialize programs about 446 ms) are unprofiled below the stage |
+
+**Against the north star.** `docs/jvm-truffle-migration.md` is at its
+end state except for two entries of its Phase 5 inventory: the calling
+convention (item 3 here) and `Ops.kt` reached across a boundary from the
+engine (items 1-2 plus the `@TruffleBoundary` pattern above). Everything
+else that document set out to delete is gone. The measurable proxy for
+the whole direction is the suite clock: the whole `t/` suite under 30
+minutes on one warm server (user rule 2026-09-12), last measured at
+6039 s for 420 files at the milestone-5 close and **not re-measured since
+the wire fix**, which cut the warm sanity run by 47 %. NFG on
+TruffleString stays parked behind that gate (its checklist is `t/spec`).
+
+**The order from here (proposed 2026-09-13, cheapest and most decisive
+first):**
+
+0. Hygiene before code: both branches are unpushed (rakudo 7 commits,
+   nqp 9 ahead of `ab5tract`); rakudo owes 145 upstream commits (57 at
+   the milestone-6 close), and they touch `src/Raku/Grammar.nqp`,
+   `src/Raku/Actions.nqp`, four `src/Raku/ast/*.rakumod` files and three
+   `src/core.c` files this branch also changed, so the rebase gets
+   harder every day it waits. The gates it needs are cheap now (nqp
+   suite 186 s, `t/01-sanity` 56 s, both warm). Also: two stray untracked
+   scripts under `tools/build/` (`t3b-repro.raku`, `t3b-wait.raku`) and
+   the log files at the worktree root.
+1. **Measure the suite clock once**, whole `t/` on one warm server
+   (`evalserver-sweep.raku '--chunk=*'`), on the post-wire-fix runtime.
+   That number is the distance to 1800 s and decides how much of the
+   next work is cold start versus warm throughput. With it, one JFR of
+   the server during a single `t/` file: Phase 0 profiled cold runs only,
+   and the eval server rebuilds every table and deserializes every SC
+   per run (`UnitLoader.prime` caches parsed records only), so the warm
+   path has its own unprofiled repeat work.
+2. **Profile below the two unprofiled cold rows** (CORE.c load block,
+   deserialize programs) with JFR stack filtering or `NQP_CODE_WHY` on
+   the named blocks. Minutes, not hours, and it decides item 3.
+3. Then rank, on those numbers, between (a) the `@TruffleBoundary`
+   survey (milestone 7 item 1: runtime-only rebuild, runtime performance,
+   the side the user weights higher), (b) cross-run sharing in the eval
+   server (out of the spec's scope today, but the direct suite-clock
+   lever if step 1's JFR shows per-run rebuild), and (c) the lazy-loading
+   phases 1-2 as designed (a format change plus a stage0 regeneration,
+   about 535 ms cold). Recommendation: (a) and (b) before (c); (c) only
+   if step 2 shows decoding and tables dominate what is left.
+4. Items 1-3 resume after that, as the migration document's remaining
+   inventory; item 4's other inherited entries (size refusal, deopt
+   churn, decont pinning, root names) ride along with (a).
+
+Targets: keep cold `nqp -e` under 1.0 s (0.12 s away); cold `rakudo -e`
+under 2.0 s stays the direction, not the done-criterion of any single
+phase, since the spec's phases alone cannot reach it.
+
+## Position (2026-09-12) -- history
 
 Where each item stands with milestone 4 of the unit-artifact plan closed
 by its fix wave (2026-09-11) and **milestone 5 closed 2026-09-12**: the
