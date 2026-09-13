@@ -1,0 +1,26 @@
+# t/02-rakudo files red at the milestone-5 close (job 4bfdb802 base-red.txt,
+# 22 files, 2026-09-12). The rig reports any red file NOT in this list as new.
+# Ruling 2026-09-12 (engine merge): 15-gh_1202.t and native-argument-snapshot.t
+# went green afterwards; they stay listed so a flicker is not a regression.
+t/02-rakudo/03-cmp-ok.t
+t/02-rakudo/03-corekeys-6c.t
+t/02-rakudo/03-corekeys-6d.t
+t/02-rakudo/03-corekeys-6e.t
+t/02-rakudo/03-corekeys.t
+t/02-rakudo/04-settingkeys-6c.t
+t/02-rakudo/04-settingkeys-6e.t
+t/02-rakudo/15-gh_1202.t
+t/02-rakudo/16-begin-time-eval.t
+t/02-rakudo/21-begin-time-compile-sub.t
+t/02-rakudo/begin-called-block-routine.t
+t/02-rakudo/compiler-frontend-id.t
+t/02-rakudo/constant-anon-var-value.t
+t/02-rakudo/custom-declarator-naming.t
+t/02-rakudo/long-int-literal.t
+t/02-rakudo/make-regex-frame.t
+t/02-rakudo/m-flag-module-spec.t
+t/02-rakudo/native-argument-snapshot.t
+t/02-rakudo/native-return-coercion.t
+t/02-rakudo/parse-target-match-tree.t
+t/02-rakudo/regex-interpolation-backtrack.t
+t/02-rakudo/try-statement-backtrace-frame.t

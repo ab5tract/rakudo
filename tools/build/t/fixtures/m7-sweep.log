@@ -1,0 +1,9 @@
+rakudo: 306 files, 1 chunk(s) of 306, 1 server(s) x 8 GB
+[5205s] chunk 1/1: FAIL
+
+306 files in 5205s across 1 server(s)
+1 of 1 chunks failed
+--- chunk 1 (exit 1) ---
+t/02-rakudo/03-cmp-ok.t (Wstat: 0 Tests: 7 Failed: 1)
+t/02-rakudo/brand-new-red.t (Wstat: 0 Tests: 2 Failed: 1)
+  Failed test:  2
