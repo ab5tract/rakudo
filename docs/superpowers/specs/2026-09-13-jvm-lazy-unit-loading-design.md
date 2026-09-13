@@ -262,6 +262,16 @@ reachable by phases 1-2 alone (2.68 - 0.55 = 2.13 s at best); it needs
 the dispatch-miss row as well.
 
 
+## Revision 3 — phase 1 moves into milestone 7 (2026-09-13)
+
+Phase 1 (tasks 1.1-1.6: store, codec, lazy tables, eval-server mapping,
+the transition window) is executed as Phase B of
+`2026-09-13-jvm-milestone-7-first-execution-design.md`, which adds a
+fifth entry, `unit.dispatch`, and a site identity to the v2 format so
+that the format changes once. Phase 2 (SC demand deserialization) is
+what remains of this design after milestone 7. The tasks below are
+unchanged and are the reference text for milestone 7's Phase B.
+
 ## Goal
 
 Make loading a unit artifact lazy, so that a program pays only for the parts of
