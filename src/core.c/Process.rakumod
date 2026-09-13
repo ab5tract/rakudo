@@ -101,9 +101,11 @@ augment class Rakudo::Internals {
           PROCESS::<@ARGS> := @ARGS
       },
 
+#?if !jvm
       '$*COLLATION', anon sub COLLATION() is raw {
           PROCESS::<$COLLATION> := Collation.new
       },
+#?endif
 
       '$*DEFAULT-READ-ELEMS', anon sub DEFAULT-READ-ELEMS() is raw {
           PROCESS::<$DEFAULT_READ_ELEMS> :=
