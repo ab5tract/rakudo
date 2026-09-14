@@ -3,7 +3,7 @@ use Test;
 my $tool = $*PROGRAM.parent(2).add('truffle-trace-summary.raku');
 my $fix  = $*PROGRAM.parent.add('fixtures/trace-sample.log');
 
-plan 22;
+plan 23;
 
 my $out = run($*EXECUTABLE, $tool, $fix, :out).out.slurp(:close);
 
@@ -95,3 +95,5 @@ my $out2 = run($*EXECUTABLE, $tool, $empty, :out).out.slurp(:close);
 ok $out2.contains('min-too-large-size=none'),
    'says none when no root failed for size';
 $empty.unlink;
+
+ok $out.contains('distinct-ids='), 'reports distinct compilation ids beside distinct names';

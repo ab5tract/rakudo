@@ -88,12 +88,13 @@ sub MAIN($log, Int :$top = 20) {
             $head = $line.substr(0, $/.to - 1);
             $tail = $line.substr($/.to);
         }
-        $head ~~ / ^ '[engine] opt ' $<verb>=(\S+) \s+ 'engine=' \d+ \s+ 'id=' \d+ \s+ $<name>=(.+?) \s* $ /
+        $head ~~ / ^ '[engine] opt ' $<verb>=(\S+) \s+ 'engine=' \d+ \s+ 'id=' $<id>=(\d+) \s+ $<name>=(.+?) \s* $ /
             or do { $unparsed++; next };
-        # Read both captures BEFORE any further match: the next ~~ replaces
-        # $/, and $<verb> would then resolve against the wrong match.
+        # Read all three captures BEFORE any further match: the next ~~
+        # replaces $/, and $<verb> would then resolve against the wrong match.
         my $verb = ~$<verb>;
         my $name = ~$<name>;
+        my $id   = +$<id>;
         my $size = $name ~~ / '[' $<n>=(\d+) ']' $ / ?? +$<n> !! Int;
         # Rejoin the pieces of a field value that itself contained a '|'.
         my @fields;
@@ -113,7 +114,7 @@ sub MAIN($log, Int :$top = 20) {
             %f<reason> = ~$0 if $t ~~ / ^ 'Reason' ':'? \s+ (.+) $ /;
         }
         @events.push: {
-            :$verb, :$name, :$size,
+            :$verb, :$name, :$id, :$size,
             tier => %f<tier> // 0, ms => %f<ms> // 0,
             reason => %f<reason> // '',
         };
@@ -123,6 +124,7 @@ sub MAIN($log, Int :$top = 20) {
     my %by-verb  = @events.classify(*<verb>);
     say "events=@events.elems()";
     say "$_=%by-verb{$_}.elems()" for %by-verb.keys.sort;
+    say "distinct-ids={ @events.map(*<id>).unique.elems } distinct-names={ @events.map(*<name>).unique.elems }";
     say "unparsed=$unparsed";
     say "non-trace-lines=$non-trace";
     say "reasons-parsed={ @reasoned.elems }";
