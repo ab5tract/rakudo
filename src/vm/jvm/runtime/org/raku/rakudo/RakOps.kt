@@ -690,6 +690,36 @@ object RakOps {
         return codeObj
     }
 
+    /**
+     * The closure-creation clone, natively: what Block.clone (and Code.clone)
+     * do when the block has no phasers hash and no declarator docs -- the
+     * compiler emits this op only for such code objects (IMPL-CLOSURE-QAST) --
+     * and no pending compile-time fixup, which only a unit still being
+     * compiled has (@!compstuff): that case takes the method road, as before.
+     * The REPR clone, a clone of the $!do CodeRef re-pointed at the clone, and
+     * the code object set on it. Milestone 7, A6'.
+     */
+    @JvmStatic
+    fun p6clonecode(obj: SixModelObject?, tc: ThreadContext): SixModelObject? {
+        val gcx = key.getGC(tc)
+        val self = Ops.decont(obj, tc) ?: return obj
+        if (Ops.isconcrete(self, tc) == 0L) return self
+        val compstuff = self.get_attribute_boxed(tc, gcx.Code, "@!compstuff", -1)
+        if (compstuff != null && Ops.isnull(compstuff) == 0L) {
+            /* A BEGIN-time clone while the unit compiles: the fixup in
+             * @!compstuff[2] must run; Block.clone does that. */
+            Ops.invokeDirect(tc, Ops.findmethod(self, "clone", tc),
+                Ops.invocantCallSite, arrayOf<Any?>(self))
+            return Ops.result_o(tc.curFrame!!)
+        }
+        val cloned = Ops.clone(self, tc)
+        val cr = self.get_attribute_boxed(tc, gcx.Code, "$!do", HINT_CODE_DO) as CodeRef
+        val cldo = cr.clone(tc)
+        cloned.bind_attribute_boxed(tc, gcx.Code, "$!do", HINT_CODE_DO, cldo)
+        Ops.setcodeobj(cldo, cloned, tc)
+        return cloned
+    }
+
     /** Captures the closure's outer from whichever calling frame runs the
      * static code its outer names, the way MoarVM's try-capture-lex-callers
      * syscall does. This is what lets a phaser cloned at frame exit close
