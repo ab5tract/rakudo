@@ -64,6 +64,7 @@ by the suites, not by a targeted red.
 | a3 | ee460e4775 | 7602b2254 | 2.543 | 1.100 | 6815 | 125055 | 3209 | none | struck (kept) |
 | a4 | e6a29ddc9e | 39688c263 | 2.496 | 1.116 | 6815 | 125055 | 3179 | none | struck (kept) |
 | a5 | 7287e64a60 | 942ff0a5f | 2.516 | 1.145 | 6815 | 125055 | 3153 | none | struck (kept) |
+| a7 | e965a90438 | f36509da7 | 2.611 | 1.151 | 6815 | 125055 | 3165 | none |  |
 
 ## Rulings and deferred minors
 
@@ -305,3 +306,68 @@ one KDoc sentence would warn); the `invokeMethodViaDispatch` prose
 comment now sits above `HelperSite`; `dispatchWithDescriptor` still
 `find`s per record (Dispatch.kt:193).
 Task 6: complete (commits nqp 39688c263..942ff0a5f + rakudo 7287e64a60..ce851a2aae, review clean; row a5 struck (kept))
+
+Task 7: a7 misses histogram (cold rakudo-e best run):
+
+      misses 4626 lang-meth-call
+      misses 1947 lang-call
+      misses 206 boot-syscall
+
+Task 7: boundary-check rakudo-j=true nqp-j-gradle=false
+
+Ruling (Task 7, Step 1): `nqp-j-gradle` prints
+`boundary-check: dieInternal TruffleBoundary=false (3 overloads)` while
+`./rakudo-j` prints `true` — the runner puts the runtime jars on
+`-Xbootclasspath/a`, so the boot loader loads `ExceptionHandling` without
+being able to resolve `com.oracle.truffle.api.CompilerDirectives$TruffleBoundary`
+and the annotation is silently dropped. Per the brief: runtime-tree
+boundaries hold for `rakudo-j` only; moving the runner's runtime jars from
+`-Xbootclasspath/a` to `-cp`
+(`nqp/buildSrc/src/main/kotlin/GenerateRunnerTask.kt:153-155`) is a
+follow-up task in this plan, re-measured by the nqp cold row only. The
+nqp-truffle-tree boundaries of this task (`classlib`, `NFGString.of`) are
+unaffected: nqp-truffle is on the module path under both runners. Costs
+if wrong: the a7 cold nqp-e number carries no dieInternal boundary, so
+the nqp clock under-reports this lever.
+
+Task 7: promotion list: none (a7 not slower than a5)
+
+Ruling (Task 7, Step 8 skipped): the trigger is cold rakudo-e above
+2.64 s or warm above about 3210 s. a7 is 2.611 s and 3165 s — both inside
+the base row's spread (cold 2.50-2.64, warm 3153-3232 across a1..a5), so
+Step 8 did not run and no op was promoted. Nominally a7 is 0.095 s / 12 s
+"slower" than a5, but a5 is itself the fastest warm row of the series and
+the cold best-of-5 varies by 0.15 s run to run; the honest reading is
+that the classlib boundary is **inside the noise on both clocks** — the
+lever the spec expected to move the warm clock did not move it either
+way. Costs if wrong: a real few-percent classlib regression is carried
+forward unnoticed; `NQP_CLASSLIB_INLINE=1` restores the old road for a
+one-command A/B whenever Phase B wants it.
+
+Task 7: getattr/bindattr chain: not the prescribed cut — the
+`attrHandleFailed` fix was written, measured and reverted; deferred to
+Phase B.
+
+Ruling (Task 7, Step 9): the chain IS reproduced on a cold `./rakudo-j -e
+'say 1'`: three `PermanentBailoutException: Too deep inlining` roots, one
+of them `mro@...:qb_187[204]`, whose inlined-method list is
+`java.lang.Class.getSimpleName() [495]` under
+`java.lang.invoke.Invokers.newWrongMethodTypeException(MethodType,
+MethodType)` -> `MethodType.toString()` -> `NqpOps.getattr(...)` ->
+`GetAttrOp.doGet` (2973 of the trace's 3277 lines are `getSimpleName`).
+The brief's second branch (a `@TruffleBoundary static RuntimeException
+attrHandleFailed(Throwable)` replacing both `catch (Throwable t) { throw
+shouldNotReachHere(t); }` bodies at `:1503`/`:1539`) was implemented, the
+jars rebuilt, and the trace re-taken: **bit-identical** — 3 bailouts,
+2973 `getSimpleName` lines, before and after. It cannot work: the message
+construction is inside `invokeExact`'s own wrong-method-type throw arm,
+*upstream* of the catch, so a boundary on the catch body never sees it.
+The change was reverted (the nqp tree is at `f36509da7`, no second
+commit). Real diagnosis for Phase B: `getter`/`setter` is a phi merged
+from `site.e1` and `site.e2`, so the handle is not a PE constant, so
+`invokeExact`'s type guard does not fold and the JDK's exception path
+stays in the graph. The fix is to make each entry's `invokeExact` see a
+constant handle (split the two-entry road into two guarded call sites, or
+bind through a `@Cached` node per entry) — a structural change, out of
+Step 9's ten-minute bound. Costs if wrong: the 204-root bailout persists
+into Phase B, where it is the same three roots to re-measure.
