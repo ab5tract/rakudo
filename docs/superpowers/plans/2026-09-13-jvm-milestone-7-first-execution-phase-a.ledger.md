@@ -59,6 +59,7 @@ by the suites, not by a targeted red.
 | tag | rakudo hash | nqp hash | cold rakudo-e (s) | cold nqp-e (s) | misses | hits | warm t/02-rakudo (s) | new red | verdict |
 |---|---|---|---|---|---|---|---|---|---|
 | base | bc00863fef | c17d93d27 | 2.502 | 1.135 | 6815 | 125055 | 3204 | none | base |
+| a1 | 76b62a0b4f | cb654e4bf | 2.518 | 1.125 | 6815 | 125055 | 3232 | none | |
 
 ## Rulings and deferred minors
 
@@ -138,3 +139,8 @@ tooling-in-Raku rule is restated in the fix dispatch. Costs if wrong:
 nothing.
 
 Task 1: fix round 1 — base row new-red re-derived offline: none.
+
+Task 1: fix round 1/5 (4 findings dispatched: TODO-passed parser + fixture, two upstream reds into the baseline with the base row re-derived offline, warm marker + exit code, --chunk=*; commit 325054757c..76b62a0b4f; re-review pending)
+Task 1: fix round 1/5 (4 addressed, 0 open; commits 325054757c..76b62a0b4f)
+Task 1: minor (deferred): m7-rig.raku:9 header comment still says "chunk = file count" (now --chunk=*); jvm-t02-rakudo-red-baseline.txt:2 header says "22 files" while the file lists 24.
+Task 1: complete (commits 5066de7070..76b62a0b4f, review clean after 1 fix round)
