@@ -66,6 +66,7 @@ by the suites, not by a targeted red.
 | a5 | 7287e64a60 | 942ff0a5f | 2.516 | 1.145 | 6815 | 125055 | 3153 | none | struck (kept) |
 | a7 | e965a90438 | f36509da7 | 2.611 | 1.151 | 6815 | 125055 | 3165 | none | struck (kept) |
 | a7b | b3daa412c1 | 9f0417c5d | 2.604 | 1.165 | 6815 | 125055 | - | none | landed (marker true) |
+| a8 | 56e78028bf | 4736905d0 | 2.597 | 1.148 | 6815 | 125055 | 3202 | t/02-rakudo/compose-added-method-precomp.t (stale .precomp, not the change - see ruling) |  |
 
 ## Rulings and deferred minors
 
@@ -751,3 +752,42 @@ Task 8b: fix round 1/5 (3 findings dispatched; rakudo 7787c1c871..b4ff53d361; re
 Task 8b: fix round 1/5 (3 addressed, 0 open; rakudo 7787c1c871..b4ff53d361)
 Task 8b: minor (deferred): the condensation parenthetical says "988 lines over :4205-5195" where the repeat region is :4209-5195 = 987 lines; the review record at the end of the ledger says "verbatim" of a block now labelled "condensed from" (a faithful record of the review as given).
 Task 8b: complete (commits rakudo 157695f982..b4ff53d361, ledger only, review clean after 1 fix round; fork 3b; the fix is Task 8c)
+
+Task 8c: before failed=3 (raku-invoke bailed) / after failed=0
+(raku-invoke done at entry ~400). The three "Too deep inlining" roots of
+the a8b block -- `<anon>@perl6:qb_4626[2838]` (raku-invoke),
+`<anon>@perl6:qb_126[349]`, `mro@FD5A9459...:qb_187[204]` -- all compile
+now: `grep -c 'Too deep inlining'` 3 -> 0, `opt failed` 3 -> 0,
+`opt done .*perl6:qb_4626[` 0 -> 1 (Tier 1, 202 ms, IR 3463/8175,
+CodeSize 41157), and a `TraceCompilationDetails` run puts the queue at
+`Count/Thres 400/400`, so raku-invoke runs compiled for roughly the last
+2100 of its 2546 cold entries instead of none of them. The fix is the
+one the Task 8b block named: each cache entry invokes its own handle on
+its own branch (`readSlot`/`writeSlot`, plain private statics so PE
+inlines them with the branch's constant handle), no phi, so
+invokeExact's exact-type check folds and the JDK's
+`newWrongMethodTypeException` -> `MethodType.toString` ->
+`Class.getSimpleName` cycle leaves every getattr/bindattr graph. The
+brief's fallback (hand-inlining the two invokeExact calls) was not
+needed. Inherited item 1 (the 204-root half) closes with it.
+
+Task 8c: a8 misses histogram (cold rakudo-e best run):
+
+      misses 4626 lang-meth-call
+      misses 1947 lang-call
+      misses 206 boot-syscall
+
+Ruling (row a8, new red): the sweep's `new-red=1`
+(`t/02-rakudo/compose-added-method-precomp.t`, "No plan found in TAP
+output") is **not this change**. The failure is
+`Missing or wrong version of dependency '.../nqp/build/jvm/stage2/NQPHLL.nqp'`
+raised by the stale `t/02-rakudo/test-packages/.precomp` store written
+by the Task 7b build (13 Sep 19:44/21:08), which any runtime-jar
+rebuild invalidates. Verified by reverting `NqpOps.java` to HEAD~1,
+rebuilding the jars and re-running: the test fails identically on the
+pre-change jar; with `.precomp` removed it passes on the new jar
+(2/2, harness PASS). A rig row taken right after a `syncRuntimeJars`
+will show this class of red for any lever; clearing the test-packages
+`.precomp` before the warm sweep would remove it. Costs if wrong: a red
+attributed to the cache that was really the change -- excluded by the
+revert run above.
