@@ -425,3 +425,136 @@ Task 7: minor (deferred): the `NFGString.of` boundary also hides the
 boundary would keep the hit path PE-visible); the marker uses `any`
 where `all` would be unambiguous (verified all three in the jar).
 Task 7: complete (commits nqp 942ff0a5f..f36509da7 + rakudo e965a90438..5361381aba, review clean; row a7 struck (kept); Task 7b ruled; getattr chain deferred to Phase B with its cause)
+
+Task 8: A8 spike (no code; recommendation only). Runner `./rakudo-j -e 'say 1'`,
+`RAKUDO_RAKUAST=1`, stock runner (no eval server), nqp `f36509da7` / rakudo
+`114175eaa8`. Logs: `$CLAUDE_JOB_DIR/tmp/a8-trace.log` (`NQP_CODE_TRACE=1`,
+18415 lines), `a8-compile.log` (`RAKUDO_JVM_XOPTS=-Dpolyglot.engine.TraceCompilation=true`,
+3132 lines), `a8-both.log` (both at once, 21547 lines — this is what gives the
+"entry N" column, since trace lines and opt events interleave in one stderr).
+**Join key**: `cuid=` prints `?` for every jar-bound block, so the key used
+throughout is `unit=<unit> + method=qb_N`, which is exactly the `@<unit>:qb_N[`
+form the Task 3 root names carry (`<anon>@perl6:qb_4626[2838]`). Not the
+brief's `@$c[` cuid form.
+
+(a) Step 1 — which blocks are the dispatchers, and how often they run
+(`grep dispatchers.nqp a8-trace.log | ... | sort | uniq -c`; 11130 dispatcher
+entries of 18415 traced block entries; 45 distinct blocks, top 20 shown):
+
+| entries | key (unit:qb_N) | file:line | dispatcher |
+|--------:|-----------------|-----------|------------|
+| 2546 | perl6:qb_4626 | src/vm/moar/dispatchers.nqp:3524 | `raku-invoke` |
+| 2500 | perl6:qb_4604 | src/vm/moar/dispatchers.nqp:1466 | `raku-meth-call-resolved` initial dispatch |
+| 2479 | perl6:qb_4597 | src/vm/moar/dispatchers.nqp:1126 | `raku-meth-call` |
+| 1637 | 26A3F645…074C:qb_167 | NQP::src/core/dispatchers.nqp:273 | `nqp-call` |
+| 1574 | 26A3F645…074C:qb_161 | NQP::src/core/dispatchers.nqp:5 | `nqp-meth-call` |
+| 74 | perl6:qb_4617 | src/vm/moar/dispatchers.nqp:2982 | `raku-multi-core` initial dispatch |
+| 74 | perl6:qb_4608 | src/vm/moar/dispatchers.nqp:1887 | `raku-multi` initial dispatch |
+| 65 | perl6:qb_4595 | src/vm/moar/dispatchers.nqp:1041 | `raku-call` |
+| 57 | perl6:qb_4561 | src/vm/moar/dispatchers.nqp:94 | `raku-rv-decont` |
+| 35 | perl6:qb_4583 | src/vm/moar/dispatchers.nqp:657 | `raku-assign` |
+| 34 | perl6:qb_4566 | src/vm/moar/dispatchers.nqp:227 | assign-scalar-no-whence-no-typecheck |
+| 5 | perl6:qb_4619 | src/vm/moar/dispatchers.nqp:3164 | (raku-multi-core arm) |
+| 5 | perl6:qb_4032 | src/vm/moar/dispatchers.nqp:2069 | (raku-multi arm) |
+| 4 | perl6:qb_4027 | src/vm/moar/dispatchers.nqp:2057 | (raku-multi arm) |
+| 4 | 26A3F645…074C:qb_162 | NQP::src/core/dispatchers.nqp:57 | `nqp-meth-call-mega-name` |
+| 3 | perl6:qb_4046 | src/vm/moar/dispatchers.nqp:55 | (raku-rv-decont arm) |
+| 3 | 26A3F645…074C:qb_168 | NQP::src/core/dispatchers.nqp:386 | `nqp-multi` initial dispatch |
+| 2 | perl6:qb_4060 | src/vm/moar/dispatchers.nqp:3298 | (raku-invoke arm) |
+| 2 | perl6:qb_4028 | src/vm/moar/dispatchers.nqp:2058 | (raku-multi arm) |
+| 2 | perl6:qb_4026 | src/vm/moar/dispatchers.nqp:2052 | (raku-multi arm) |
+
+Matches the spec Revision 2 estimate (top three ~1400 each; measured 2479-2546
+after the six Phase-A levers). Everything below entry 74 is noise for this
+question; the top five are 96% of all dispatcher entries.
+
+(b) Step 2 — whether they ever compile during the cold run. The whole cold run
+produces only **71 Truffle compilation events over 25 distinct roots**
+(`truffle-trace-summary.raku`: done=40, failed=3, inval=10, deopt=18,
+distinct-ids=25, unparsed=0). Per dispatcher root (opt events naming it in
+`a8-compile.log`; "first compiled at entry N" from the interleaved
+`a8-both.log`):
+
+| key | entries | done | failed | inval | deopt | first `opt done` at entry | reached compiled code? |
+|-----|--------:|-----:|-------:|------:|------:|--------------------------:|------------------------|
+| perl6:qb_4626 `raku-invoke` | 2546 | **0** | **1** | 0 | 0 | never (submitted at 609, bailed) | **NO — permanent bailout** |
+| perl6:qb_4604 `raku-meth-call-resolved` | 2500 | 3 | 0 | 0 | 2 | 626 (25% in) | yes, then 1 inval + 2 deopt, recompiled at 1134 / 1470 |
+| perl6:qb_4597 `raku-meth-call` | 2479 | 4 | 0 | 0 | 3 | 548 (22% in) | yes, then 1 inval + 3 deopt, recompiled at 1459 / 1558 / 2266 |
+| 26A3F645…074C:qb_167 `nqp-call` | 1637 | 2 | 0 | 0 | 1 | 660 (40% in) | yes, 1 inval/deopt at 778, recompiled at 899 |
+| 26A3F645…074C:qb_161 `nqp-meth-call` | 1574 | 2 | 0 | 0 | 1 | 660 (42% in) | yes, 1 inval/deopt at 777, recompiled at 827 |
+| all 40 remaining dispatcher blocks | ≤74 each | 0 | 0 | 0 | 0 | never | no (never reach the 400-entry threshold) |
+
+The `raku-invoke` failure is deterministic — identical in both independent
+runs, same id, same size, submitted exactly once (a `PermanentBailout` is not
+retried):
+
+    [engine] opt failed engine=1 id=928 <anon>@perl6:qb_4626[2838] |Tier 1|Time 80( 80+0 )ms|
+      Reason: jdk.graal.compiler.core.common.PermanentBailoutException:
+              Too deep inlining, probably caused by recursive inlining.
+
+So the honest answer to "do the dispatcher roots reach compiled code in a cold
+run" is **four of the top five do, at 22-42% of the way through their entries;
+the single busiest one never does, and not for a threshold reason.**
+
+(c) Step 3 — what the engine offers per root. There is no public per-root
+"compile now" for a Bytecode DSL root; the levers are engine options. Present in
+this GraalVM (`javap -cp nqp/build/jvm/share/truffle/truffle-runtime-25.2.4.jar
+-p -c com.oracle.truffle.runtime.OptimizedRuntimeOptions`, defaults read out of
+`<clinit>` — `javap -constants` does not print `OptionKey` defaults):
+
+| option (`polyglot.engine.*`) | type | default |
+|---|---|---|
+| `FirstTierCompilationThreshold` | Integer | **400** |
+| `FirstTierMinInvokeThreshold` | Integer | 1 |
+| `FirstTierBackedgeCounts` | Boolean | true |
+| `LastTierCompilationThreshold` | Integer | 10000 |
+| `SingleTierCompilationThreshold` | Integer | 1000 |
+| `MinInvokeThreshold` | Integer | 3 |
+| `MultiTier` | Boolean | true |
+| `Mode` | EngineMode | `DEFAULT` (`latency` / `throughput` also accepted) |
+| `CompileImmediately` | Boolean | false |
+| `CompileAOTOnCreate` | Boolean | false |
+| `BackgroundCompilation` | Boolean | true |
+| `Compilation` | Boolean | true |
+| `CompilerThreads` | Integer | -1 (auto) |
+| `DynamicCompilationThresholds` | Boolean | true |
+| `MaximumCompilations` | Integer | 100 |
+| `OSR` / `OSRCompilationThreshold` | Boolean / Integer | true / 100352 |
+| `CompileOnly` | String | (unset) |
+
+`./rakudo-j` sets none of these today (its only polyglot flag is
+`engine.WarnVirtualThreadSupport=false`); milestone 6's tier policy was
+build-side only. So every default above is what a cold Rakudo run actually gets.
+
+(d) Recommendation — **shape 1, struck**: *dispatcher roots compile within the
+first ~550-660 entries (22-42% of their cold-run entries) and a lower first-tier
+threshold cannot help at all — it costs 193-452 ms.* Measured directly, 7
+interleaved rounds (each round runs base / 150 / 50 / 10 back to back, so the
+box's upward drift hits all four equally), medians of 7 in ms:
+
+| `FirstTierCompilationThreshold` | median | vs base | round-1 (least-loaded) | vs base |
+|---|---:|---:|---:|---:|
+| 400 (default) | 2653 | — | 2653 | — |
+| 150 | 3177 | +524 | 2665 | +12 |
+| 50 | 3479 | +826 | 2846 | +193 |
+| 10 | 3739 | +1086 | 3105 | +452 |
+
+The ordering base ≤ 150 < 50 < 10 holds in **all 7 rounds** — lowering the
+threshold is monotonically worse, because the cold run's bottleneck is
+compilation *capacity*, not compilation *latency*: only 40 roots finish
+compiling in 2.5 s, and submitting more of them earlier steals CPU from the
+interpreter that is doing the actual work. `DynamicCompilationThresholds=false`
+alongside 50 was worse again (3519-3761 ms). **No Task 8b; no option goes into
+the runner defaults.**
+
+Task 8: not a recommendation, a finding for the controller / Phase B inbox: the
+busiest root in the whole cold run, `raku-invoke` (2546 entries, AST size 2838),
+is permanently un-compilable in this build ("Too deep inlining, probably caused
+by recursive inlining"). It is the one dispatcher that provably runs 100%
+interpreted, and no engine option addresses it — the lever would be structural
+(shrink the root, or break the recursive inline), which is A-list Phase B work,
+not an A8 runner flag. Recording it here so the A8 "struck" ruling is not read
+as "the dispatchers are fine".
+
+Task 8: complete (ledger only; no source file touched; row a8 struck, Task 8b
+not ruled)
