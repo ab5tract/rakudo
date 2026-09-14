@@ -62,6 +62,7 @@ by the suites, not by a targeted red.
 | a1 | 76b62a0b4f | cb654e4bf | 2.518 | 1.125 | 6815 | 125055 | 3232 | none | struck (kept: harmless) |
 | a2 | b5c559de25 | 793161369 | 2.509 | 1.085 | 6815 | 125055 | 3193 | none | diagnostics |
 | a3 | ee460e4775 | 7602b2254 | 2.543 | 1.100 | 6815 | 125055 | 3209 | none | struck (kept) |
+| a4 | e6a29ddc9e | 39688c263 | 2.496 | 1.116 | 6815 | 125055 | 3179 | none |  |
 
 ## Rulings and deferred minors
 
@@ -244,3 +245,9 @@ Task 4: minor (deferred): the flag test asserts slot 0 only and has no
 negative case; `enterUnit` itself has no unit test (covered by the
 suites on every miss).
 Task 4: complete (commits nqp f5be515e3..7602b2254 + rakudo ee460e4775..160dd68bf1, review clean; row a3 struck (kept))
+
+Task 5: a4 misses histogram (cold rakudo-e best run):
+
+      misses 4626 lang-meth-call
+      misses 1947 lang-call
+      misses 206 boot-syscall
