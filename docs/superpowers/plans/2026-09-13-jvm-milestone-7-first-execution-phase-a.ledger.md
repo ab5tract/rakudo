@@ -61,6 +61,7 @@ by the suites, not by a targeted red.
 | base | bc00863fef | c17d93d27 | 2.502 | 1.135 | 6815 | 125055 | 3204 | none | base |
 | a1 | 76b62a0b4f | cb654e4bf | 2.518 | 1.125 | 6815 | 125055 | 3232 | none | struck (kept: harmless) |
 | a2 | b5c559de25 | 793161369 | 2.509 | 1.085 | 6815 | 125055 | 3193 | none | diagnostics |
+| a3 | ee460e4775 | 7602b2254 | 2.543 | 1.100 | 6815 | 125055 | 3209 | none | |
 
 ## Rulings and deferred minors
 
@@ -217,3 +218,9 @@ Task 3: fix round 1/5 (2 rulings dispatched: root-name fallback unit:qb_N, decon
 Task 3: fix round 1/5 (2 addressed, 0 open; nqp 793161369..f5be515e3). Root names are now `<name>@<cuid>[N]` or `<name>@<unit-sha>:qb_N[N]`; trace summary parses them (distinct-ids=26 distinct-names=26 on a cold -e).
 Task 3: minor (deferred): `NqpTypeOps.create` still misses unconditionally on a layout/REPRData mismatch (not the stub shape); trace summary reads no size from an OSR name (`[N]<OSR@...>`), pre-existing; `o.layout` read twice in decont (stat-only race).
 Task 3: complete (commits nqp cb654e4bf..f5be515e3 + rakudo 8d2e795761..c74a25bb9a, review clean after 1 fix round; row a2 diagnostics: misses 4626 lang-meth-call / 1947 lang-call / 206 boot-syscall of 6815)
+
+Task 4: a3 misses histogram (cold rakudo-e best run):
+
+      misses 4626 lang-meth-call
+      misses 1947 lang-call
+      misses 206 boot-syscall
