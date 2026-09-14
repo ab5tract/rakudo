@@ -747,3 +747,7 @@ and Phase B inherits three bailing roots instead of one. Phase B inbox: this
 restructure, ranked above the other getattr minors.
 
 Task 8b review (rakudo 157695f982..7787c1c871, ledger only): spec ✅ (frames verbatim from a8b-failure.log, cycle named per method, 3b fork correct: the only cut in our code is the hot sited read), quality approved; one Important: the sentence "exactly one org.raku method anywhere in the chain" contradicts the six org.raku frames listed above it (the supported claim is one org.raku method on the exception-construction path). Fix round 1 dispatched. Ruling: Task 8c (brief in the workspace) implements the fix the block names — one constant handle per branch in getattr/bindattr — before Task 9. Costs if wrong: one implementer run and a rig row.
+Task 8b: fix round 1/5 (3 findings dispatched; rakudo 7787c1c871..b4ff53d361; re-review pending)
+Task 8b: fix round 1/5 (3 addressed, 0 open; rakudo 7787c1c871..b4ff53d361)
+Task 8b: minor (deferred): the condensation parenthetical says "988 lines over :4205-5195" where the repeat region is :4209-5195 = 987 lines; the review record at the end of the ledger says "verbatim" of a block now labelled "condensed from" (a faithful record of the review as given).
+Task 8b: complete (commits rakudo 157695f982..b4ff53d361, ledger only, review clean after 1 fix round; fork 3b; the fix is Task 8c)
