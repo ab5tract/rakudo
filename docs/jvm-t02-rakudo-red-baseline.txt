@@ -24,3 +24,6 @@ t/02-rakudo/native-return-coercion.t
 t/02-rakudo/parse-target-match-tree.t
 t/02-rakudo/regex-interpolation-backtrack.t
 t/02-rakudo/try-statement-backtrace-frame.t
+# 2026-09-14 ruling (milestone 7 Task 1): two tests upstream added 2026-09-10/11, red since the 2026-09-13 rebase (21 and 9 tests, 18 and 7 failing at base).
+t/02-rakudo/regex-interpolation-fold-length.t
+t/02-rakudo/str-raku-prepend.t

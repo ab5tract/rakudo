@@ -59,7 +59,17 @@ sub cold-summary(%r) {
 sub parse-sweep(Str $text, IO() $baseline) {
     my %base = $baseline.lines.grep(*.starts-with('t/')).map(* => True);
     my $warm = $text ~~ / (\d+) ' files in ' (\d+) 's across' / ?? +$1 !! Int;
-    my @red  = $text.lines.map({ / ^ (t\/\S+) \s+ '(Wstat' / ?? ~$0 !! Empty }).unique;
+    # t/harness5's Test Summary Report also lists a file that merely had TODO
+    # passes -- 'Failed: 0' with a '  TODO passed:' line under it. That is not
+    # a red. A 'Failed: 0' under '  Parse errors:' (a file that produced no
+    # TAP) IS one, so the TODO line, not the count, is what disqualifies.
+    my @lines = $text.lines;
+    my @red = gather for @lines.kv -> $i, $line {
+        if $line ~~ / ^ (t\/\S+) \s+ '(Wstat' / {
+            take ~$0 unless (@lines[$i + 1] // '').starts-with('  TODO passed:');
+        }
+    }
+    @red .= unique;
     my @new  = @red.grep({ !%base{$_} });
     %( :$warm, :@red, :@new )
 }
@@ -119,12 +129,20 @@ multi sub MAIN(
 
     my %sweep = :warm(Int), :red([]), :new([]);
     if $warm {
-        my $n = +$ROOT.add('t/02-rakudo').dir(test => *.ends-with('.t'));
-        my ($text, $) = capture(['raku', 'tools/build/evalserver-sweep.raku', "--chunk=$n",
-                                 '--jobs=1', "--heap=$heap", 't/02-rakudo'],
-                                :cwd($ROOT), :env(%base));
+        # --chunk=* is the sweep's own "one chunk, one server" default. Counting
+        # the files here instead would count .t only, while the sweep counts
+        # .t and .rakutest, and one added .rakutest would silently replace a
+        # server mid-sweep -- which the eval-server rules forbid.
+        my ($text, $code) = capture(['raku', 'tools/build/evalserver-sweep.raku', '--chunk=*',
+                                     '--jobs=1', "--heap=$heap", 't/02-rakudo'],
+                                    :cwd($ROOT), :env(%base));
         $dir.add("{$tag}-sweep.log").spurt($text);
         %sweep = parse-sweep($text, $ROOT.add($baseline));
+        # A non-zero exit is normal here (any red file causes it). A sweep that
+        # never ran -- heap budget refused, server never up -- is not, and
+        # without this would read as a clean row: warm=-, new-red=0, DONE.
+        die "m7-rig: sweep produced no 'files in ...s across' line (sweep exit $code)"
+            unless %sweep<warm>.defined;
         say "m7-rig: warm t/02-rakudo {%sweep<warm> // '?'}s new-red={+%sweep<new>} " ~ sweep-summary(%sweep);
     }
 
