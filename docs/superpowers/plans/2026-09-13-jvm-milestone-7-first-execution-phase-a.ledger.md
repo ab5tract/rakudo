@@ -824,3 +824,32 @@ the last 2100 entries" is an inference from the 400/400 queue line.
 Task 8c: complete (commits nqp 9f0417c5d..4736905d0 + rakudo 56e78028bf..015417b972, review clean; row a8 landed (compile shape); inherited item 1's 204-root half CLOSED)
 
 User decision (2026-09-14, during Task 9): **milestone 8 = an Assumption per STable** (the object model on Truffle: method cache / type check / container-spec test fold to constants in compiled code, invalidated on change), or at least a piece of milestone 8, after milestone 7 Phases B and C. Recorded in the plan doc and memory; no plan yet.
+
+Ruling (Task 9, A6 as specified is STRUCK — false premise): the 2026-09-13
+survey looked for `method clone` only under src/core.c; BOOTSTRAP.nqp
+defines `Code.clone` (:3099) and `Block.clone` (:3165), which Routine/
+Sub/Method inherit, so `findmethod($code-obj,'clone') =:= Mu's` is false
+for every closure and the emitted road never fired (misses 4627, not
+-1148). Had it fired, a REPR clone would have aliased `$!do` between
+clones of one site. Replacement A6' (same spec intent, "fewer misses"):
+`p6clonecode` mirrors `Block.clone`'s mandatory half natively — REPR
+clone, clone of the `$!do` CodeRef, `setcodeobj`, rebind — and the three
+optional tails are handled as: phasers hash and `$!why` are static
+properties of the code object, checked by the COMPILER (the static road
+is emitted only when the object has neither, and its `clone` resolves to
+Block's or Code's, and it is not a regex); `@!compstuff` exists only
+while a unit compiles, so the OP checks it at run time and takes the
+method road (`findmethod` + `invokeDirect`) when it is non-null. Task 9
+re-dispatched with this design; the make already taken (823 s, CORE.c
+parse 215.4 s) is repeated once. Costs if wrong: a semantic slip in the
+fast path shows in `begin-clone-wrap.t`, the phaser test, and the two
+suites.
+
+User decision (2026-09-14, during Task 9): the rig's per-lever row is
+revised — warm proxy = t/01-sanity on one server (about 56 s),
+t/02-rakudo per lever = a red-list GATE on three parallel servers
+(about 20 min), the single-server t/02-rakudo CLOCK only at phase
+closes (a6 stays full). Spec Task 0 amended; the rig change is Task 9b
+(brief in the workspace), after Task 9, before Task 10. Costs if wrong:
+a warm regression that only t/02-rakudo's clock would show is caught
+at the phase close instead of per lever.

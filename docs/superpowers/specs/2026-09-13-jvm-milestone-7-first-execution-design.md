@@ -166,6 +166,13 @@ with the lever's commit hashes (both trees):
    count, wall clock and the red list against the milestone-5
    baseline for that directory.
 
+**Revision 2026-09-14 (user, during Phase A, after eight rows):** the
+per-lever warm clock is `t/01-sanity` on one warm server (about 56 s;
+it is what discriminated), `t/02-rakudo` per lever is a GATE only (its
+red list against the baseline, run on three servers in parallel, about
+20 minutes), and the single-server `t/02-rakudo` clock runs only at a
+phase close (Phase A's a6 row, then B and C). A per-lever row is about
+ten minutes instead of fifty-five.
 Whole `t/` runs once, at close. CORE.c compile time is recorded
 whenever a setting recompile happens anyway (A6, Phase B) and never
 measured on purpose. Every benchmark run is a stock runner, never the
