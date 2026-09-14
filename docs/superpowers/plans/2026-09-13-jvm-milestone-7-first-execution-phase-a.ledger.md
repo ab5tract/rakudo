@@ -64,7 +64,7 @@ by the suites, not by a targeted red.
 | a3 | ee460e4775 | 7602b2254 | 2.543 | 1.100 | 6815 | 125055 | 3209 | none | struck (kept) |
 | a4 | e6a29ddc9e | 39688c263 | 2.496 | 1.116 | 6815 | 125055 | 3179 | none | struck (kept) |
 | a5 | 7287e64a60 | 942ff0a5f | 2.516 | 1.145 | 6815 | 125055 | 3153 | none | struck (kept) |
-| a7 | e965a90438 | f36509da7 | 2.611 | 1.151 | 6815 | 125055 | 3165 | none |  |
+| a7 | e965a90438 | f36509da7 | 2.611 | 1.151 | 6815 | 125055 | 3165 | none | struck (kept) |
 
 ## Rulings and deferred minors
 
@@ -371,3 +371,57 @@ constant handle (split the two-entry road into two guarded call sites, or
 bind through a `@Cached` node per entry) — a structural change, out of
 Step 9's ten-minute bound. Costs if wrong: the 204-root bailout persists
 into Phase B, where it is the same three roots to re-measure.
+
+Ruling (row a7): cold rakudo-e 2.611 s (base spread 2.50-2.64, at its
+high end), cold nqp-e 1.151 s, warm 3165 s (a5 3153, base 3204),
+counters identical: inside the spread on every clock, so **struck
+(kept)** — the classlib boundary matches the table road and the
+targeted boundaries stand; no A/B run is taken (forward-only
+directive). The high cold reading stays in the chain: if the a6 row
+repeats it, the findings name the classlib boundary as the suspect and
+Phase B's first rows decide. Costs if wrong: ~0.1 s of cold start
+carried until then.
+
+Ruling (Task 7, nqp runner): `NQP_BOUNDARY_CHECK` prints `false` under
+`nqp-j-gradle` because its runtime jars are on `-Xbootclasspath/a`
+(the boot loader cannot resolve the Truffle annotation type), and
+`true` under `./rakudo-j` (`-cp`). Runtime-tree boundaries therefore
+hold for every rakudo clock and NOT for the nqp cold row. Per the
+plan's Step 1 text a follow-up task, Task 7b, moves the nqp runner's
+runtime jars from `-Xbootclasspath/a` to `-cp`
+(`nqp/buildSrc/src/main/kotlin/GenerateRunnerTask.kt`), verified by the
+marker and measured by the cold nqp row only (`m7-rig --/warm`). It
+runs after Task 8 and before Task 9. Costs if wrong: nqp cold start
+could slow by app-loader class loading, which the row would show.
+
+Ruling (Task 7, Step 9): the 204-root chain is reproduced on a cold -e
+(3 "Too deep inlining" roots; `getSimpleName` x495 under
+`newWrongMethodTypeException` under `NqpOps.getattr`); the catch-arm
+boundary the plan offered was implemented, measured bit-identical and
+reverted (the message construction is inside `invokeExact`, upstream of
+the catch). Real cause: `getter` is a phi of `site.e1.getter` /
+`site.e2.getter`, so the handle is not a PE constant and the exact-type
+check cannot fold. The fix is structural (invoke each entry's handle on
+its own branch so each call site sees one constant handle) and is
+deferred to Phase B's inbox with this note. Costs if wrong: nothing
+now.
+
+Task 7 review (nqp 942ff0a5f..f36509da7, rakudo e965a90438..5361381aba):
+spec ✅ verbatim (the classlib rename is +11/-0, provably
+body-preserving), quality approved; all four named risks cleared against
+the source and the built class (all three dieInternal overloads carry
+the annotation in the jar). ⚠️ checked by the controller: trailers +
+evening stamps on both commits.
+Note for Phase B (from the review): `@TruffleBoundary` on `classlib`
+(and on the table road's `run()`, unchanged) uses the default
+`transferToInterpreterOnException = true`, so every exception leaving a
+classlib op — NQP's control-flow categories included (`EX_CAT_NEXT`,
+`LAST`, `RETURN`...) — deoptimizes the enclosing compiled root instead
+of propagating inside compiled code. Behaviour-preserving, performance-
+relevant, and a plausible reason the lever moved neither clock; the
+`NQP_CLASSLIB_INLINE=1` knob is the A/B if Phase B measures it.
+Task 7: minor (deferred): the `NFGString.of` boundary also hides the
+`isEmpty` short-circuit and the interned-hit read (a miss-path-only
+boundary would keep the hit path PE-visible); the marker uses `any`
+where `all` would be unambiguous (verified all three in the jar).
+Task 7: complete (commits nqp 942ff0a5f..f36509da7 + rakudo e965a90438..5361381aba, review clean; row a7 struck (kept); Task 7b ruled; getattr chain deferred to Phase B with its cause)
