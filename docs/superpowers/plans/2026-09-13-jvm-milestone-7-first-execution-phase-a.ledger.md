@@ -63,6 +63,7 @@ by the suites, not by a targeted red.
 | a2 | b5c559de25 | 793161369 | 2.509 | 1.085 | 6815 | 125055 | 3193 | none | diagnostics |
 | a3 | ee460e4775 | 7602b2254 | 2.543 | 1.100 | 6815 | 125055 | 3209 | none | struck (kept) |
 | a4 | e6a29ddc9e | 39688c263 | 2.496 | 1.116 | 6815 | 125055 | 3179 | none | struck (kept) |
+| a5 | 7287e64a60 | 942ff0a5f | 2.516 | 1.145 | 6815 | 125055 | 3153 | none |  |
 
 ## Rulings and deferred minors
 
@@ -274,3 +275,9 @@ loop the table and assert `unitEntry && argsExpectation == USE_BINDER`
 for every entry (pins the shortcut's precondition; the same deferred
 minor as Task 4, now with two consumers).
 Task 5: complete (commits nqp 7602b2254..39688c263 + rakudo e6a29ddc9e..9c507020f9, review clean; row a4 struck (kept))
+
+Task 6: a5 misses histogram (cold rakudo-e best run):
+
+      misses 4626 lang-meth-call
+      misses 1947 lang-call
+      misses 206 boot-syscall
