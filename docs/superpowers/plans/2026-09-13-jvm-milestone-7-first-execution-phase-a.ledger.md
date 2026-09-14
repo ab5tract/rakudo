@@ -58,7 +58,7 @@ by the suites, not by a targeted red.
 
 | tag | rakudo hash | nqp hash | cold rakudo-e (s) | cold nqp-e (s) | misses | hits | warm t/02-rakudo (s) | new red | verdict |
 |---|---|---|---|---|---|---|---|---|---|
-| base | bc00863fef | c17d93d27 | 2.502 | 1.135 | 6815 | 125055 | 3204 | t/02-rakudo/99-misc.t t/02-rakudo/regex-interpolation-fold-length.t t/02-rakudo/str-raku-prepend.t | base |
+| base | bc00863fef | c17d93d27 | 2.502 | 1.135 | 6815 | 125055 | 3204 | none | base |
 
 ## Rulings and deferred minors
 
@@ -98,3 +98,43 @@ written — a missing `my` on `%*SUB-MAIN-OPTS`, `$*PROGRAM.parent(2)` for
 the repo root (it is `parent(3)`; `parent(N)` goes N levels up), and
 `"$tag-sweep.log"`, where `-` is an identifier character so the whole
 `$tag-sweep` parsed as one variable.
+
+Task 1 review (rakudo 5066de7070..325054757c): spec ❌ on one contract
+point, quality "needs fixes": Important #1 the red parser counts a
+TODO-passed file (`Failed: 0` + `  TODO passed:`) as red (origin: the
+brief's regex); Important #2 the warm phase has no positive-marker check
+and drops the sweep's exit code, so a sweep that never ran records "no
+new red". ⚠️ items checked by the controller: both commits carry the
+trailers and evening stamps (bc00863fef 2026-09-13 19:00, 325054757c
+2026-09-13 22:00); `306 files in 3204s across 1 server(s)` is in
+base-sweep.log.
+
+Ruling (Important #1, plan-mandated origin): the spec's gate is "no red
+outside the baseline file", so the parser is fixed (skip a `Failed: 0`
+summary line followed by `  TODO passed:`) AND the two upstream tests
+that were already red in the 2026-09-13 whole-t/ run
+(`regex-interpolation-fold-length.t`, `str-raku-prepend.t`) join
+`docs/jvm-t02-rakudo-red-baseline.txt` under a dated note; the base row's
+new-red column is re-derived offline from base-sweep.log with
+`--parse-sweep`, no re-run. Costs if wrong: a real regression in one of
+those two files would hide behind the baseline (mitigated: their test
+counts, 21 and 9, are in the sweep log, so a later count change is
+visible).
+
+Ruling (minor promoted): the `.t`-only file count for `--chunk` is a
+latent violation of the never-replace-a-server rule if a `.rakutest`
+lands in t/02-rakudo; it joins fix round 1 as `--chunk=*` (the sweep's own
+one-chunk default), one line. Costs if wrong: nothing.
+
+Task 1: minor (deferred): no unit test for `capture`; `--parse-sweep`'s
+default baseline resolves against cwd, the measuring multi against
+`$ROOT`; `new-red=` printed twice on the warm marker line (brief-inherited
+shape); fixture header line does not match the sweep's real format;
+assertion 8 is a negated `contains` (vacuous in RED).
+
+Ruling (process): the implementer used a python3 heredoc once to splice
+the ledger row (self-disclosed); nothing landed in the tree; the
+tooling-in-Raku rule is restated in the fix dispatch. Costs if wrong:
+nothing.
+
+Task 1: fix round 1 — base row new-red re-derived offline: none.
