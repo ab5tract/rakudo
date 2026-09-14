@@ -822,3 +822,5 @@ narrowed `RakuObject`; the null-read-falls-to-slow policy is in three
 copies (deliberate) and wants a one-line comment; "compiled for roughly
 the last 2100 entries" is an inference from the 400/400 queue line.
 Task 8c: complete (commits nqp 9f0417c5d..4736905d0 + rakudo 56e78028bf..015417b972, review clean; row a8 landed (compile shape); inherited item 1's 204-root half CLOSED)
+
+User decision (2026-09-14, during Task 9): **milestone 8 = an Assumption per STable** (the object model on Truffle: method cache / type check / container-spec test fold to constants in compiled code, invalidated on change), or at least a piece of milestone 8, after milestone 7 Phases B and C. Recorded in the plan doc and memory; no plan yet.
