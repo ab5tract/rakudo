@@ -654,9 +654,17 @@ Reason: ... PermanentBailoutException: Too deep inlining, probably caused by
 recursive inlining`) — so the second road was taken, exactly as the brief
 anticipated: the chain is Java, not guest.
 
-The frames, verbatim from `a8b-failure.log:5196-5207` (the tail of the
-"Complete stack trace of inlined methods" block printed under
-`[engine] opt failed ... id=928 <anon>@perl6:qb_4626[2838]`, `:4188`):
+The frames, condensed from `a8b-failure.log:4205-5207` (the "Complete stack
+trace of inlined methods" block printed under
+`[engine] opt failed ... id=928 <anon>@perl6:qb_4626[2838]`, `:4188`). Three
+things are condensed and nothing else: (i) the block's own first three lines
+above the recursion are dropped (`:4206` `java.lang.ref.SoftReference.get`,
+`:4207` `java.lang.Class.reflectionData`, `:4208`
+`java.lang.Class.getSimpleName(Class.java:1669)` — the entry into it); (ii) the
+`getSimpleName`/`getSimpleName0` pair then repeats to `:5196` (988 lines over
+`:4205-5195`) and is elided to the bracketed `...` line; (iii) the trailing
+`|UTC 2026-09-14T07:20:10.313|Src n/a` the log appends to the `profiledPERoot`
+line is dropped. Lines `:5196-5207` are verbatim below the elision:
 
 ```
 java.lang.Class.getSimpleName(Class.java:1672)
@@ -682,19 +690,31 @@ Step 2 — the cycle. The recursion is **entirely inside the JDK**:
 `java.lang.Class.getSimpleName0()` (`Class.java:1679`) which calls
 `getSimpleName()` again — the array-component arm — and Graal's host inliner,
 having no bound on it, throws the permanent bailout. **No `org.raku.nqp` method
-recurses.** There is exactly one `org.raku` method anywhere in the chain, and
-it is the same one under every bailout in the run: verified by
+recurses.** Six `org.raku` frames appear in the stack above, but exactly one of
+them is on the **exception-construction path** — the frame directly under
+`Invokers.newWrongMethodTypeException`, i.e. the method whose call into the JDK
+drags the cycle into the graph — and it is the same one under every bailout in
+the run: verified by
 `grep -A1 'Invokers.newWrongMethodTypeException' a8b-failure.log | grep org.raku
 | sort | uniq -c` → 6/6 occurrences are
 `org.raku.nqp.truffle.NqpOps.getattr(...)` (3 failing roots x the two printings
-each). The reachability from `raku-invoke`'s program is not a dispatch op at
+each). The other five are the frames *below* it, which carry the cycle but
+cannot cut it and are not annotatable cut points in any case:
+`NqpRootNode$GetAttrOp.doGet` is a Truffle DSL `@Specialization` body and
+`NqpRootNodeGen`'s `handleGetAttrOp_`/`continueAt`/`execute` are
+processor-generated. The reachability from `raku-invoke`'s program is not a dispatch op at
 all: it is the sited `nqp::getattr` in the dispatcher's body —
 `GetAttrOp.doGet` (`nqp/nqp-truffle/src/main/java/org/raku/nqp/truffle/NqpRootNode.java:485`,
 confirmed by `grep -n 'doGet'`) calls
 `NqpOps.getattr` (`.../NqpOps.java:1495`, confirmed by
 `grep -n 'static Object getattr('`), whose only `invokeExact` is at
 `NqpOps.java:1514`, `v = (SixModelObject) getter.invokeExact((SixModelObject) o);`
-(`grep -n 'invokeExact'` → `:966`, `:1514`, `:1550`). `getter` is a local merged
+(`grep -n 'invokeExact'` → `:966`, `:1514`, `:1550`). The log itself attributes
+the throw to `NqpOps.getattr(NqpOps.java:1496)` — the method's `instanceof`
+line, not the call — so pinning it to `:1514` is an inference from the frame
+plus the fact that `:1514` is `getattr`'s *only* `invokeExact` (`:1550` is
+`bindattr`'s, `:966` another op's), not something the printed line number
+states. `getter` is a local merged
 from three assignments (`site.e1.getter`, `site.e2.getter`, `resolveAttr(...)`,
 `:1500-1508`), so it is a phi, not a PE constant; a non-constant
 `MethodHandle` forces `invokeExact`'s exact-type check into the graph, and its
@@ -725,3 +745,5 @@ entries per cold run, 100 % interpreted). Costs if wrong: `raku-invoke`, the
 busiest dispatcher root, keeps running interpreted for the whole cold process,
 and Phase B inherits three bailing roots instead of one. Phase B inbox: this
 restructure, ranked above the other getattr minors.
+
+Task 8b review (rakudo 157695f982..7787c1c871, ledger only): spec ✅ (frames verbatim from a8b-failure.log, cycle named per method, 3b fork correct: the only cut in our code is the hot sited read), quality approved; one Important: the sentence "exactly one org.raku method anywhere in the chain" contradicts the six org.raku frames listed above it (the supported claim is one org.raku method on the exception-construction path). Fix round 1 dispatched. Ruling: Task 8c (brief in the workspace) implements the fix the block names — one constant handle per branch in getattr/bindattr — before Task 9. Costs if wrong: one implementer run and a rig row.
