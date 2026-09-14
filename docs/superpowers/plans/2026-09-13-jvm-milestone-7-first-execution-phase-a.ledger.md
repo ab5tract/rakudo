@@ -66,7 +66,7 @@ by the suites, not by a targeted red.
 | a5 | 7287e64a60 | 942ff0a5f | 2.516 | 1.145 | 6815 | 125055 | 3153 | none | struck (kept) |
 | a7 | e965a90438 | f36509da7 | 2.611 | 1.151 | 6815 | 125055 | 3165 | none | struck (kept) |
 | a7b | b3daa412c1 | 9f0417c5d | 2.604 | 1.165 | 6815 | 125055 | - | none | landed (marker true) |
-| a8 | 56e78028bf | 4736905d0 | 2.597 | 1.148 | 6815 | 125055 | 3202 | t/02-rakudo/compose-added-method-precomp.t (stale .precomp, not the change - see ruling) |  |
+| a8 | 56e78028bf | 4736905d0 | 2.597 | 1.148 | 6815 | 125055 | 3202 | t/02-rakudo/compose-added-method-precomp.t (stale .precomp, not the change - see ruling) | landed (compile shape) |
 
 ## Rulings and deferred minors
 
@@ -791,3 +791,34 @@ will show this class of red for any lever; clearing the test-packages
 `.precomp` before the warm sweep would remove it. Costs if wrong: a red
 attributed to the cache that was really the change -- excluded by the
 revert run above.
+
+Ruling (row a8): cold rakudo-e 2.597 s, cold nqp-e 1.148 s, warm 3202 s,
+counters identical — every clock inside the spread; but the after-log
+is the measurement that matters: failed=3 -> 0, `raku-invoke` compiled
+at its 400th entry instead of interpreted for the process lifetime, and
+the 204-root half of inherited item 1 (the getattr chain) is closed by
+the same change. **Landed (compile shape).** Costs if wrong: nothing;
+the clocks say it is at worst neutral.
+Ruling (a8 new red): `t/02-rakudo/compose-added-method-precomp.t` went
+red because `t/02-rakudo/test-packages/.precomp` was stale after the
+jar rebuild (fails identically on the previous jar, passes 2/2 on the
+new one once cleared) — the rig must clear that cache before the warm
+sweep, since every lever rebuilds the jars. Task 9's implementer adds
+one line to `m7-rig.raku`'s warm phase (rmtree of that directory) before
+its own run; no fixture change. Costs if wrong: nothing.
+
+Task 8c review (nqp 9f0417c5d..4736905d0, rakudo 56e78028bf..015417b972):
+spec ✅ byte-identical to the brief; quality approved; every road's
+behaviour preserved (the one dropped null-handle guard is provably
+unreachable: layoutHandles returns null wholesale or two non-null
+handles); all three log counts reproduce (before failed=3 / after 0;
+raku-invoke, qb_126 and mro:qb_187 all compile). ⚠️ checked by the
+controller: trailers + evening stamps on both commits.
+Task 8c: minor (deferred): the helper doc comments name the handle
+types as `(SixModelObject)Object` / `(SixModelObject,Object)void` where
+the exact descriptors are `(SixModelObject)SixModelObject` /
+`(SixModelObject,SixModelObject)void`; `readSlot` could take the
+narrowed `RakuObject`; the null-read-falls-to-slow policy is in three
+copies (deliberate) and wants a one-line comment; "compiled for roughly
+the last 2100 entries" is an inference from the 400/400 queue line.
+Task 8c: complete (commits nqp 9f0417c5d..4736905d0 + rakudo 56e78028bf..015417b972, review clean; row a8 landed (compile shape); inherited item 1's 204-root half CLOSED)
