@@ -86,6 +86,7 @@ $ops.map_classlib_hll_op('Raku', 'p6typecheckrv', $TYPE_P6OPS, 'p6typecheckrv', 
 $ops.map_classlib_hll_op('Raku', 'p6decontrv_rt', $TYPE_P6OPS, 'p6decontrv_rt', [$RT_OBJ, $RT_OBJ, $RT_INT], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6bindwillresume', $TYPE_OPS, 'bindWillResumeOnFailure', [], $RT_INT, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6capturelex', $TYPE_P6OPS, 'p6capturelex', [$RT_OBJ], $RT_OBJ, :tc, :!inlinable);
+$ops.map_classlib_hll_op('Raku', 'p6clonecode', $TYPE_P6OPS, 'p6clonecode', [$RT_OBJ], $RT_OBJ, :tc);
 $ops.map_classlib_hll_op('Raku', 'p6capturelexwhere', $TYPE_P6OPS, 'p6capturelexwhere', [$RT_OBJ], $RT_OBJ, :tc, :!inlinable);
 $ops.map_classlib_hll_op('nqp', 'p6capturelexwhere', $TYPE_P6OPS, 'p6capturelexwhere', [$RT_OBJ], $RT_OBJ, :tc, :!inlinable);
 $ops.map_classlib_hll_op('Raku', 'p6bindassert', $TYPE_P6OPS, 'p6bindassert', [$RT_OBJ, $RT_OBJ], $RT_OBJ, :tc);
