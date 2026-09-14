@@ -60,6 +60,7 @@ by the suites, not by a targeted red.
 |---|---|---|---|---|---|---|---|---|---|
 | base | bc00863fef | c17d93d27 | 2.502 | 1.135 | 6815 | 125055 | 3204 | none | base |
 | a1 | 76b62a0b4f | cb654e4bf | 2.518 | 1.125 | 6815 | 125055 | 3232 | none | struck (kept: harmless) |
+| a2 | b5c559de25 | 793161369 | 2.509 | 1.085 | 6815 | 125055 | 3193 | none | diagnostics |
 
 ## Rulings and deferred minors
 
@@ -171,3 +172,15 @@ throw is the better failure mode, keep); only `initCodeRefList` has a
 test, the two siblings do not; the rig's warm line prints `new-red=`
 twice (already deferred under Task 1).
 Task 2: complete (commits nqp c17d93d27..cb654e4bf + rakudo 76b62a0b4f..d7530adf3a, review clean; row a1 struck (kept: harmless))
+
+Task 3: a2 misses histogram (cold rakudo-e best run):
+
+      misses 4626 lang-meth-call
+      misses 1947 lang-call
+      misses 206 boot-syscall
+      misses 35 raku-assign
+      misses 1 raku-meth-call-qualified
+
+The dispatcher list is five long, not eight: those five account for all
+6815 misses. `lang-meth-call` alone is 68% of them -- the number A6 must
+move.
