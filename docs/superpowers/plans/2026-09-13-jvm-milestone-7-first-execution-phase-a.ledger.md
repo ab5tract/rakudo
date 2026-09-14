@@ -67,6 +67,7 @@ by the suites, not by a targeted red.
 | a7 | e965a90438 | f36509da7 | 2.611 | 1.151 | 6815 | 125055 | 3165 | none | struck (kept) |
 | a7b | b3daa412c1 | 9f0417c5d | 2.604 | 1.165 | 6815 | 125055 | - | none | landed (marker true) |
 | a8 | 56e78028bf | 4736905d0 | 2.597 | 1.148 | 6815 | 125055 | 3202 | t/02-rakudo/compose-added-method-precomp.t (stale .precomp, not the change - see ruling) | landed (compile shape) |
+| a6 | 96f643b334 | 4736905d0 | 2.504 | 1.192 | 5661 | 100697 | 3735 | none | |
 
 ## Rulings and deferred minors
 
@@ -853,3 +854,17 @@ closes (a6 stays full). Spec Task 0 amended; the rig change is Task 9b
 (brief in the workspace), after Task 9, before Task 10. Costs if wrong:
 a warm regression that only t/02-rakudo's clock would show is caught
 at the phase close instead of per lever.
+
+Task 9: a6 misses histogram (cold rakudo-e best run, run1 2.504 s;
+a8's beside it): `3472 lang-meth-call` (a8 4626, **-1154**) /
+`1947 lang-call` (a8 1947) / `206 boot-syscall` (a8 206). Total misses
+5661 (a8 6815, the same -1154); hits 100697 (a8 125055), the method-road
+clone's own dispatches going with it. Every setting closure that can take
+the road does: the predicted drop was about 1148.
+
+Task 9: CORE.c stagestats: parse 213.806 s / optimize 22.152 s /
+qast 16.977 s / unit 22.619 s (the A6' make, 723 s,
+$CLAUDE_JOB_DIR/tmp/a6p-make.log). The struck-A6 make earlier the same
+day read 215.383 / 22.369 / 16.790 / 22.839, so the guard's three
+tryfindmethods and two getattrs per closure site cost nothing measurable
+on the compile side.
