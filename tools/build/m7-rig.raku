@@ -40,6 +40,11 @@ sub capture(@cmd, IO() :$cwd!, :%env!) {
     ($text, $code)
 }
 
+sub rmtree(IO::Path $d) {
+    for $d.dir { .d ?? rmtree($_) !! .unlink }
+    $d.rmdir
+}
+
 sub parse-cold(Str $text) {
     my %r = :stage-lines(+$text.lines.grep(*.starts-with('unit-load '))), :by{};
     if $text ~~ / 'dispatch stats: hits=' (\d+) ' misses=' (\d+) / {
@@ -133,6 +138,10 @@ multi sub MAIN(
         # the files here instead would count .t only, while the sweep counts
         # .t and .rakutest, and one added .rakutest would silently replace a
         # server mid-sweep -- which the eval-server rules forbid.
+        # A jar rebuild invalidates this precomp cache and one test goes red for
+        # it (row a8); clear it before the sweep.
+        my $stale = $ROOT.add('t/02-rakudo/test-packages/.precomp');
+        rmtree($stale) if $stale.d;
         my ($text, $code) = capture(['raku', 'tools/build/evalserver-sweep.raku', '--chunk=*',
                                      '--jobs=1', "--heap=$heap", 't/02-rakudo'],
                                     :cwd($ROOT), :env(%base));
