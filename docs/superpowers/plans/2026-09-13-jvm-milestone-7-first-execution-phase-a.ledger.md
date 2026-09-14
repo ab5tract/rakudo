@@ -184,3 +184,36 @@ Task 3: a2 misses histogram (cold rakudo-e best run):
 The dispatcher list is five long, not eight: those five account for all
 6815 misses. `lang-meth-call` alone is 68% of them -- the number A6 must
 move.
+
+Ruling (Task 3, root names): the cuid suffix never appears on a
+jar-bound comp-mode block (`UnitRecord.cuid` is null there by design,
+`ProgramUnit.kt:24`), so `<name>@<cuid>[<size>]` leaves every setting
+root — the roots inherited item 7 is about — merged as before. The
+plan's Step 5 is amended: `blockId` = the cuid when present, else
+`<unitId>:<methodName>` (`sci.compUnit.unitId()` + `sci.methodName`,
+"qb_N", unique within a unit), so every root is disambiguated. Goes
+into Task 3's fix round. Costs if wrong: longer root names in traces;
+the trace-summary regex anchors the size on the trailing `[N]`, so
+nothing parses differently.
+
+Task 3 review (nqp cb654e4bf..793161369, rakudo 8d2e795761..c74a25bb9a):
+spec ✅ (one forced deviation: `nqp::shell` is an encoder bail, the test
+spawns through `run-command` + /bin/sh, verified to set the env and read
+stderr), quality approved; all four named risks cleared. ⚠️
+stamps/trailers checked by the controller: nqp 793161369 20:15, rakudo
+b5c559de25 20:30, c74a25bb9a 20:45 (2026-09-14), trailers on all three.
+Ruling (minor promoted): `decont`'s new `else miss(site)` also fires for
+a RakuObject whose `layout` is null (a deserialization stub before its
+finish), spending a miss on a good site and pinning it after four; the
+fix round tightens it to `o.layout != null && o.layout !== layout`
+(a null layout falls to decontSlow with no miss, as before). Costs if
+wrong: a stub-layout site that IS a real mismatch stays unpinned one
+call longer.
+Task 3: minor (deferred): `distinct-ids=` asserted by presence only;
+`count`/`countBy` are boundary calls inside an already-boundary `miss`;
+the decont layout-miss path has no test and did not fire at a2.
+
+Task 3: fix round 1/5 (2 rulings dispatched: root-name fallback unit:qb_N, decont null-layout guard; nqp 793161369..f5be515e3; re-review pending)
+Task 3: fix round 1/5 (2 addressed, 0 open; nqp 793161369..f5be515e3). Root names are now `<name>@<cuid>[N]` or `<name>@<unit-sha>:qb_N[N]`; trace summary parses them (distinct-ids=26 distinct-names=26 on a cold -e).
+Task 3: minor (deferred): `NqpTypeOps.create` still misses unconditionally on a layout/REPRData mismatch (not the stub shape); trace summary reads no size from an OSR name (`[N]<OSR@...>`), pre-existing; `o.layout` read twice in decont (stat-only race).
+Task 3: complete (commits nqp cb654e4bf..f5be515e3 + rakudo 8d2e795761..c74a25bb9a, review clean after 1 fix round; row a2 diagnostics: misses 4626 lang-meth-call / 1947 lang-call / 206 boot-syscall of 6815)
