@@ -61,7 +61,7 @@ by the suites, not by a targeted red.
 | base | bc00863fef | c17d93d27 | 2.502 | 1.135 | 6815 | 125055 | 3204 | none | base |
 | a1 | 76b62a0b4f | cb654e4bf | 2.518 | 1.125 | 6815 | 125055 | 3232 | none | struck (kept: harmless) |
 | a2 | b5c559de25 | 793161369 | 2.509 | 1.085 | 6815 | 125055 | 3193 | none | diagnostics |
-| a3 | ee460e4775 | 7602b2254 | 2.543 | 1.100 | 6815 | 125055 | 3209 | none | |
+| a3 | ee460e4775 | 7602b2254 | 2.543 | 1.100 | 6815 | 125055 | 3209 | none | struck (kept) |
 
 ## Rulings and deferred minors
 
@@ -224,3 +224,23 @@ Task 4: a3 misses histogram (cold rakudo-e best run):
       misses 4626 lang-meth-call
       misses 1947 lang-call
       misses 206 boot-syscall
+
+Ruling (row a3): cold rakudo-e 2.543 s (base spread 2.50-2.64), cold
+nqp-e 1.100 s (a2 already read 1.085 on a diagnostics-only change, so
+the sub-spread nqp reading is variance, not A3), warm 3209 s (base
+3204), counters identical: **struck (kept)** — the callback road is
+simpler than what it replaced and nothing regressed. Costs if wrong:
+nothing. The sweep's `red=21` matches the base row as re-derived in
+Task 1's fix round (the "22" in the base ruling text is history).
+
+Task 4 review (nqp f5be515e3..7602b2254, rakudo ee460e4775..160dd68bf1):
+spec ✅, quality approved; all three named risks cleared (catches are
+invokeDirect's verbatim; enterUnit is call-for-call the bound handle's
+road; the flag is written once and shared by clones). ⚠️ checked by the
+controller: trailers + stamps on both commits (2026-09-14 21:30/21:45);
+the nqp suite's 155th file is `t/nqp/125-dispatch-stats.t` from Task 3
+(nqp 793161369), so the gate count is 155 from here on.
+Task 4: minor (deferred): the flag test asserts slot 0 only and has no
+negative case; `enterUnit` itself has no unit test (covered by the
+suites on every miss).
+Task 4: complete (commits nqp f5be515e3..7602b2254 + rakudo ee460e4775..160dd68bf1, review clean; row a3 struck (kept))
