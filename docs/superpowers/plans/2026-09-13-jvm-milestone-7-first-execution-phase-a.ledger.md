@@ -640,3 +640,88 @@ Task 7b: minor (deferred): stale comments in GenerateRunnerTask.kt
 the emitted comment) and the name `bootEntries`; `build.gradle.kts:236`
 comment now false (the deferred in-build stage tasks).
 Task 7b: complete (commits nqp f36509da7..9f0417c5d + rakudo b3daa412c1..569014921e, review clean; row a7b landed (marker true))
+
+Task 8b: raku-invoke bailout. Runner `./rakudo-j -e 'say 1'`,
+`RAKUDO_RAKUAST=1`, stock runner, nqp `9f0417c5d` / rakudo `157695f982`,
+Oracle GraalVM 25.2.4. Logs under
+`/home/longwalker/.claude/jobs/50ad8d62/tmp/`: `a8b-inlining.log`
+(`TraceCompilation`+`TraceInlining`+`TraceCompilationDetails`, 3402 lines) and
+`a8b-failure.log` (`TraceCompilation`+`CompilationFailureAction=Print`, 6282
+lines). Step 1: TraceInlining prints **no** guest-level inlining tree for the
+root — `a8b-inlining.log:1195/1196/1224` are the whole story (`opt start` at
+Tier 1 with `Count/Thres 400/400`, then `opt failed ... Time 61(61+0)ms |
+Reason: ... PermanentBailoutException: Too deep inlining, probably caused by
+recursive inlining`) — so the second road was taken, exactly as the brief
+anticipated: the chain is Java, not guest.
+
+The frames, verbatim from `a8b-failure.log:5196-5207` (the tail of the
+"Complete stack trace of inlined methods" block printed under
+`[engine] opt failed ... id=928 <anon>@perl6:qb_4626[2838]`, `:4188`):
+
+```
+java.lang.Class.getSimpleName(Class.java:1672)
+java.lang.Class.getSimpleName0(Class.java:1679)
+    ... (the pair repeats; `getSimpleName() [495]` / `getSimpleName0() [494]`
+        in the frequency list at :4190-4191)
+java.lang.Class.getSimpleName(Class.java:1672)
+java.lang.invoke.MethodType.toString(MethodType.java:936)
+java.lang.String.valueOf(String.java:4530)
+java.lang.invoke.Invokers.newWrongMethodTypeException(Invokers.java:522)
+org.raku.nqp.truffle.NqpOps.getattr(NqpOps.java:1496)
+org.raku.nqp.truffle.NqpRootNode$GetAttrOp.doGet(NqpRootNode.java:487)
+org.raku.nqp.truffle.NqpRootNodeGen$CachedBytecodeNode.handleGetAttrOp_(NqpRootNodeGen.java:4856)
+org.raku.nqp.truffle.NqpRootNodeGen$CachedBytecodeNode.continueAt(NqpRootNodeGen.java:3745)
+org.raku.nqp.truffle.NqpRootNodeGen.continueAt(NqpRootNodeGen.java:996)
+org.raku.nqp.truffle.NqpRootNodeGen.execute(NqpRootNodeGen.java:988)
+com.oracle.truffle.runtime.OptimizedCallTarget.executeRootNode(OptimizedCallTarget.java:808)
+com.oracle.truffle.runtime.OptimizedCallTarget.profiledPERoot(OptimizedCallTarget.java:722)
+```
+
+Step 2 — the cycle. The recursion is **entirely inside the JDK**:
+`java.lang.Class.getSimpleName()` (`Class.java:1672`) calls
+`java.lang.Class.getSimpleName0()` (`Class.java:1679`) which calls
+`getSimpleName()` again — the array-component arm — and Graal's host inliner,
+having no bound on it, throws the permanent bailout. **No `org.raku.nqp` method
+recurses.** There is exactly one `org.raku` method anywhere in the chain, and
+it is the same one under every bailout in the run: verified by
+`grep -A1 'Invokers.newWrongMethodTypeException' a8b-failure.log | grep org.raku
+| sort | uniq -c` → 6/6 occurrences are
+`org.raku.nqp.truffle.NqpOps.getattr(...)` (3 failing roots x the two printings
+each). The reachability from `raku-invoke`'s program is not a dispatch op at
+all: it is the sited `nqp::getattr` in the dispatcher's body —
+`GetAttrOp.doGet` (`nqp/nqp-truffle/src/main/java/org/raku/nqp/truffle/NqpRootNode.java:485`,
+confirmed by `grep -n 'doGet'`) calls
+`NqpOps.getattr` (`.../NqpOps.java:1495`, confirmed by
+`grep -n 'static Object getattr('`), whose only `invokeExact` is at
+`NqpOps.java:1514`, `v = (SixModelObject) getter.invokeExact((SixModelObject) o);`
+(`grep -n 'invokeExact'` → `:966`, `:1514`, `:1550`). `getter` is a local merged
+from three assignments (`site.e1.getter`, `site.e2.getter`, `resolveAttr(...)`,
+`:1500-1508`), so it is a phi, not a PE constant; a non-constant
+`MethodHandle` forces `invokeExact`'s exact-type check into the graph, and its
+throw arm builds the message — `newWrongMethodTypeException` ->
+`MethodType.toString()` -> `Class.getSimpleName()` — which is the cycle. This
+is **the same chain Task 7's Step 9 already named on `mro@...:qb_187[204]`**
+(see the two Task 7 Step 9 rulings above), not a separate one: the A8 spike's
+`raku-invoke` bailout and Task 7's 204-root bailout are one bug. All three
+failing roots in this run share it: `<anon>@perl6:qb_4626[2838]` (raku-invoke),
+`<anon>@perl6:qb_126[349]`, `mro@FD5A9459...:qb_187[204]`.
+
+Ruling (Task 8b, Step 3): **3b — no source change.** The cycle's only cut point
+inside our code is `NqpOps.getattr`, and `getattr` is the hot sited
+attribute read itself (it is what the AttrSite cache exists to make a field
+access after PE); a `@TruffleBoundary` there would trade one root's bailout for
+an un-PE'd attribute read everywhere, which the controller's ruling puts on
+this side of the fork. The one slow-path boundary that the chain does offer —
+the `catch (Throwable t)` arm — was already implemented, measured
+**bit-identical** and reverted by Task 7 Step 9, because the message
+construction is upstream of the catch, inside `invokeExact`. No jar was rebuilt
+and no rig row was taken for a8; nqp stays at `9f0417c5d`. What a fix would
+take: a restructure of `NqpOps.getattr`/`bindattr` so each cache entry's handle
+is invoked on its own branch (or through a per-entry `@Cached` node), giving
+every `invokeExact` one constant `MethodHandle` so the exact-type check folds
+and the JDK's exception path leaves the graph — the same structural fix Task 7
+deferred, now with a second, bigger beneficiary attached to it (2546 traced
+entries per cold run, 100 % interpreted). Costs if wrong: `raku-invoke`, the
+busiest dispatcher root, keeps running interpreted for the whole cold process,
+and Phase B inherits three bailing roots instead of one. Phase B inbox: this
+restructure, ranked above the other getattr minors.
