@@ -65,6 +65,7 @@ by the suites, not by a targeted red.
 | a4 | e6a29ddc9e | 39688c263 | 2.496 | 1.116 | 6815 | 125055 | 3179 | none | struck (kept) |
 | a5 | 7287e64a60 | 942ff0a5f | 2.516 | 1.145 | 6815 | 125055 | 3153 | none | struck (kept) |
 | a7 | e965a90438 | f36509da7 | 2.611 | 1.151 | 6815 | 125055 | 3165 | none | struck (kept) |
+| a7b | b3daa412c1 | 9f0417c5d | 2.604 | 1.165 | 6815 | 125055 | - | none | |
 
 ## Rulings and deferred minors
 
@@ -611,3 +612,4 @@ Task 8: fix round 1/5 (5 addressed, 0 open; rakudo 72fa0d191b..4a6bd26cd2). The 
 Task 8: minor (deferred): qb_161's second `opt done` is at traced entry 828, not 827; "single outlier of the 28" should read "of the base column" (round 7's 3788/3988 are larger).
 Ruling (A8): struck — the dispatcher roots that matter compile after 22-42 % of their traced entries and a lower first-tier threshold costs +455 ms (50) / +691 ms (10) of cold start in every round; no Task 8b threshold change. The `raku-invoke` permanent bailout ("Too deep inlining", root perl6:qb_4626[2838], 2546 entries, never compiled) is the milestone's most concrete inherited-pattern finding and gets its own bounded task, 8b (brief in the workspace), before Task 9. Costs if wrong: 45 minutes.
 Task 8: complete (commits rakudo 114175eaa8..4a6bd26cd2, ledger only, review clean after 1 fix round; A8 struck)
+Task 7b: marker nqp-j-gradle=true; cold nqp-e 1.165 s vs a7 1.151 s (flat, inside the base spread 1.13-1.19; the row's warm cell is `-`, only the two cold rows were run). Gates: nqp suite 155 files in 191 s, chunk ok; t/01-sanity 25 files / 303 tests PASS. Collateral worth knowing: editing `nqp/buildSrc` invalidates gradle's whole nqp stage graph, so `generateRunner` rebuilt stage1/stage2 and every share/lib jar; the fresh serialization-context handles broke `./rakudo-j` ("Missing or wrong version of dependency '.../stage2/NQPHLL.nqp'") until a full rakudo `make` (797 s, EXIT=0) re-linked it. Rakudo's own hash is unchanged (b3daa412c1) but its artifacts are a new build, so a7b's cold rakudo-e 2.604 s is a rebuilt-artifact number, not a like-for-like delta against a7's 2.611 s.
