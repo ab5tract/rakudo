@@ -152,6 +152,14 @@ Targets: keep cold `nqp -e` under 1.0 s (0.12 s away); cold `rakudo -e`
 under 2.0 s stays the direction, not the done-criterion of any single
 phase, since the spec's phases alone cannot reach it.
 
+**Milestone 8, decided 2026-09-14 (user):** an `Assumption` per STable — the
+object model giving compiled code constants to fold (method cache, type
+check, container spec) and invalidating them on change — becomes
+milestone 8, or at least a piece of it, after milestone 7's Phases B and
+C. The likely second piece is the hot-op promotion list milestone 7's
+Phase A ledger carries (ops on the classlib road becoming specialized
+nodes). Not started; brainstormed when milestone 7 closes.
+
 ## Position (2026-09-12) -- history
 
 Where each item stands with milestone 4 of the unit-artifact plan closed
