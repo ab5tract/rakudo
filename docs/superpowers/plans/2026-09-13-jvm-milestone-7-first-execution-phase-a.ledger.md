@@ -428,10 +428,12 @@ Task 7: complete (commits nqp 942ff0a5f..f36509da7 + rakudo e965a90438..5361381a
 
 Task 8: A8 spike (no code; recommendation only). Runner `./rakudo-j -e 'say 1'`,
 `RAKUDO_RAKUAST=1`, stock runner (no eval server), nqp `f36509da7` / rakudo
-`114175eaa8`. Logs: `$CLAUDE_JOB_DIR/tmp/a8-trace.log` (`NQP_CODE_TRACE=1`,
-18415 lines), `a8-compile.log` (`RAKUDO_JVM_XOPTS=-Dpolyglot.engine.TraceCompilation=true`,
-3132 lines), `a8-both.log` (both at once, 21547 lines — this is what gives the
-"entry N" column, since trace lines and opt events interleave in one stderr).
+`114175eaa8`. Logs, all under `$CLAUDE_JOB_DIR/tmp/` (= `/home/longwalker/.claude/jobs/50ad8d62/tmp/`):
+`a8-trace.log` (`NQP_CODE_TRACE=1`, 18415 lines), `a8-compile.log`
+(`RAKUDO_JVM_XOPTS=-Dpolyglot.engine.TraceCompilation=true`, 3132 lines),
+`a8-both.log` (both at once, 21547 lines — this is what gives the "entry N"
+column, since trace lines and opt events interleave in one stderr), and
+`a8-thresholds.log` (28 lines, the Step 4 threshold experiment; see (d)).
 **Join key**: `cuid=` prints `?` for every jar-bound block, so the key used
 throughout is `unit=<unit> + method=qb_N`, which is exactly the `@<unit>:qb_N[`
 form the Task 3 root names carry (`<anon>@perl6:qb_4626[2838]`). Not the
@@ -469,32 +471,45 @@ after the six Phase-A levers). Everything below entry 74 is noise for this
 question; the top five are 96% of all dispatcher entries.
 
 (b) Step 2 — whether they ever compile during the cold run. The whole cold run
-produces only **71 Truffle compilation events over 25 distinct roots**
+produces only **71 Truffle compilation events over 25 distinct ids**
 (`truffle-trace-summary.raku`: done=40, failed=3, inval=10, deopt=18,
-distinct-ids=25, unparsed=0). Per dispatcher root (opt events naming it in
-`a8-compile.log`; "first compiled at entry N" from the interleaved
-`a8-both.log`):
+distinct-ids=25, unparsed=0); the 40 `opt done` events fall on **22 distinct
+roots**. Per dispatcher root (opt events naming it in `a8-compile.log`; "first
+compiled at traced entry N" from the interleaved `a8-both.log`):
 
-| key | entries | done | failed | inval | deopt | first `opt done` at entry | reached compiled code? |
+| key | traced entries | done | failed | inval | deopt | first `opt done` at traced entry | reached compiled code? |
 |-----|--------:|-----:|-------:|------:|------:|--------------------------:|------------------------|
 | perl6:qb_4626 `raku-invoke` | 2546 | **0** | **1** | 0 | 0 | never (submitted at 609, bailed) | **NO — permanent bailout** |
-| perl6:qb_4604 `raku-meth-call-resolved` | 2500 | 3 | 0 | 0 | 2 | 626 (25% in) | yes, then 1 inval + 2 deopt, recompiled at 1134 / 1470 |
-| perl6:qb_4597 `raku-meth-call` | 2479 | 4 | 0 | 0 | 3 | 548 (22% in) | yes, then 1 inval + 3 deopt, recompiled at 1459 / 1558 / 2266 |
-| 26A3F645…074C:qb_167 `nqp-call` | 1637 | 2 | 0 | 0 | 1 | 660 (40% in) | yes, 1 inval/deopt at 778, recompiled at 899 |
-| 26A3F645…074C:qb_161 `nqp-meth-call` | 1574 | 2 | 0 | 0 | 1 | 660 (42% in) | yes, 1 inval/deopt at 777, recompiled at 827 |
-| all 40 remaining dispatcher blocks | ≤74 each | 0 | 0 | 0 | 0 | never | no (never reach the 400-entry threshold) |
+| perl6:qb_4604 `raku-meth-call-resolved` | 2500 | 3 | 0 | **1** | 2 | 626 (25% in) | yes; inval@1010, deopt@1010/1292, recompiled 1134 / 1470 |
+| perl6:qb_4597 `raku-meth-call` | 2479 | 4 | 0 | **1** | 3 | 548 (22% in) | yes; inval@1296, deopt@1296/1465/1952, recompiled 1459 / 1558 / 2266 |
+| 26A3F645…074C:qb_167 `nqp-call` | 1637 | 2 | 0 | **1** | 1 | 660 (40% in) | yes; inval/deopt@778, recompiled 899 |
+| 26A3F645…074C:qb_161 `nqp-meth-call` | 1574 | 2 | 0 | **1** | 1 | 660 (42% in) | yes; inval/deopt@777, recompiled 827 |
+| perl6:qb_4062 `pass-decontainerized` (dispatchers.nqp:3799) | 1 | 1 | 0 | 0 | 0 | `a8-compile.log:3113` | yes — compiled despite 1 traced entry |
+| the other 39 dispatcher blocks | ≤74 each | 0 | 0 | 0 | 0 | never | no — never submitted |
 
-The `raku-invoke` failure is deterministic — identical in both independent
-runs, same id, same size, submitted exactly once (a `PermanentBailout` is not
-retried):
+Correction, and it matters for how the percentages read: a *traced block entry*
+(`NQP_CODE_TRACE`) is NOT the counter the first-tier threshold reads. Truffle
+counts invocations plus loop back-edges, and OSR has its own counter, so a root
+can cross 400 with one traced entry (`pass-decontainerized`, above) or run
+thousands of traced entries without crossing it. "22-42% in" therefore means
+"after 22-42% of that root's traced entries", a position in the cold run's
+timeline — not "after N/400ths of the threshold". The earlier phrasing "never
+reach the 400-entry threshold" for the tail was wrong on the mechanism as well
+as falsified by `qb_4062`; the accurate statement is that 39 of the 45
+dispatcher blocks were never submitted for compilation at all.
+
+The `raku-invoke` failure is deterministic — identical in both independent runs,
+same id, same size, submitted exactly once (a `PermanentBailout` is not
+retried). Quoted from `a8-both.log:7584` (the interleaved run); `a8-compile.log:2091`
+is the same event in the other run, differing only in `Time 109( 109+0 )ms`:
 
     [engine] opt failed engine=1 id=928 <anon>@perl6:qb_4626[2838] |Tier 1|Time 80( 80+0 )ms|
       Reason: jdk.graal.compiler.core.common.PermanentBailoutException:
               Too deep inlining, probably caused by recursive inlining.
 
 So the honest answer to "do the dispatcher roots reach compiled code in a cold
-run" is **four of the top five do, at 22-42% of the way through their entries;
-the single busiest one never does, and not for a threshold reason.**
+run" is **four of the top five do, 22-42% of the way through their traced
+entries; the single busiest one never does, and not for a threshold reason.**
 
 (c) Step 3 — what the engine offers per root. There is no public per-root
 "compile now" for a Bytecode DSL root; the levers are engine options. Present in
@@ -526,31 +541,62 @@ this GraalVM (`javap -cp nqp/build/jvm/share/truffle/truffle-runtime-25.2.4.jar
 `engine.WarnVirtualThreadSupport=false`); milestone 6's tier policy was
 build-side only. So every default above is what a cold Rakudo run actually gets.
 
-(d) Recommendation — **shape 1, struck**: *dispatcher roots compile within the
-first ~550-660 entries (22-42% of their cold-run entries) and a lower first-tier
-threshold cannot help at all — it costs 193-452 ms.* Measured directly, 7
-interleaved rounds (each round runs base / 150 / 50 / 10 back to back, so the
-box's upward drift hits all four equally), medians of 7 in ms:
+(d) Recommendation — **shape 1, struck**: *four of the five hot dispatcher roots
+reach compiled code 22-42% of the way through their traced entries, and lowering
+the first-tier threshold cannot help — it costs +455 ms at 50 and +691 ms at 10
+on the median cold run.*
 
-| `FirstTierCompilationThreshold` | median | vs base | round-1 (least-loaded) | vs base |
+Measurement, logged this time: `$CLAUDE_JOB_DIR/tmp/a8-thresholds.log`, 28 lines
+of `round=<r> threshold=<base|150|50|10> ms=<n>`. 7 interleaved rounds; each
+round runs base / 150 / 50 / 10 back to back so the box's drift hits all four
+equally. Wall clock measured identically for all 28 runs: shell `date +%s%N`
+immediately before and after the `./rakudo-j` invocation, `ms = (end-start)/1e6`
+— process wall time including JVM startup, which is the cold clock in question.
+Command per run: `RAKUDO_RAKUAST=1 RAKUDO_JVM_XOPTS="-Dpolyglot.engine.FirstTierCompilationThreshold=<N>"
+./rakudo-j -e 'say 1'` (empty `RAKUDO_JVM_XOPTS` for `base`), stdout+stderr to
+/dev/null. Raw 28 values (ms):
+
+| round | base (400) | 150 | 50 | 10 |
+|------:|-----------:|----:|---:|---:|
+| 1 | 2466 | 2627 | 2882 | 3222 |
+| 2 | 2531 | 2714 | 2986 | 3165 |
+| 3 | 2394 | 2756 | 3171 | 3319 |
+| 4 | 2498 | 2831 | 3058 | 3165 |
+| 5 | 2650 | 2641 | 2917 | 3187 |
+| 6 | 2533 | 2643 | 2941 | 3372 |
+| 7 | 3638 | 3266 | 3788 | 3988 |
+
+True medians (4th of 7 sorted) and deltas from the base median:
+
+| `FirstTierCompilationThreshold` | median | vs base median | min of 7 | vs base min |
 |---|---:|---:|---:|---:|
-| 400 (default) | 2653 | — | 2653 | — |
-| 150 | 3177 | +524 | 2665 | +12 |
-| 50 | 3479 | +826 | 2846 | +193 |
-| 10 | 3739 | +1086 | 3105 | +452 |
+| 400 (default) | 2531 | — | 2394 | — |
+| 150 | 2714 | +183 | 2627 | +233 |
+| 50 | 2986 | +455 | 2882 | +488 |
+| 10 | 3222 | +691 | 3165 | +771 |
 
-The ordering base ≤ 150 < 50 < 10 holds in **all 7 rounds** — lowering the
-threshold is monotonically worse, because the cold run's bottleneck is
-compilation *capacity*, not compilation *latency*: only 40 roots finish
-compiling in 2.5 s, and submitting more of them earlier steals CPU from the
-interpreter that is doing the actual work. `DynamicCompilationThresholds=false`
-alongside 50 was worse again (3519-3761 ms). **No Task 8b; no option goes into
-the runner defaults.**
+What holds round by round, stated exactly:
+* **50 is slower than base in all 7 rounds** (+416 +455 +777 +560 +267 +408 +150 ms).
+* **10 is slower than base in all 7 rounds** (+756 +634 +925 +667 +537 +839 +350 ms).
+* **10 is slower than 50 in all 7 rounds**, and **50 is slower than 150 in all 7 rounds**.
+* 150 is slower than base in **5 of 7** rounds — round 5 it was 9 ms faster (inside
+  the noise) and round 7 it was 372 ms faster, against a base run of 3638 ms that
+  is the single outlier of the 28. 150 is not the claim the ruling rests on.
+
+The claim that carries the ruling is the first two bullets: **every threshold
+below the default is worse than the default in every round measured.** The
+mechanism is that the cold run's bottleneck is compilation *capacity*, not
+compilation *latency* — only 22 roots finish a compilation in the ~2.5 s a cold
+run lasts, and submitting more roots earlier steals CPU from the interpreter that
+is doing the actual work. `DynamicCompilationThresholds=false` alongside 50 was
+worse again in a preliminary unlogged pass (3519-3761 ms); it is not part of the
+logged experiment and is recorded only as a direction, not a number to quote.
+**No Task 8b; no option goes into the runner defaults.**
 
 Task 8: not a recommendation, a finding for the controller / Phase B inbox: the
-busiest root in the whole cold run, `raku-invoke` (2546 entries, AST size 2838),
-is permanently un-compilable in this build ("Too deep inlining, probably caused
-by recursive inlining"). It is the one dispatcher that provably runs 100%
+busiest root in the whole cold run, `raku-invoke` (2546 traced entries, AST size
+2838), is permanently un-compilable in this build ("Too deep inlining, probably
+caused by recursive inlining"). It is the one dispatcher that provably runs 100%
 interpreted, and no engine option addresses it — the lever would be structural
 (shrink the root, or break the recursive inline), which is A-list Phase B work,
 not an A8 runner flag. Recording it here so the A8 "struck" ruling is not read
@@ -558,3 +604,5 @@ as "the dispatchers are fine".
 
 Task 8: complete (ledger only; no source file touched; row a8 struck, Task 8b
 not ruled)
+
+Task 8 review (rakudo 114175eaa8..72fa0d191b, ledger only): tables (a), (b)-entry-N and (c) reproduce exactly from the logs; spec ❌ on traceability: the Step 4 threshold table has no captured log, its "median of 7" is the 3rd of 7 in all four rows (true medians 3044/3280/3547/3874 -> deltas +236/+503/+830), "ordering holds in all 7 rounds" is false (5 of 7; the weaker true claim still carries the struck ruling), table (b) inval column all-zero against the log (4 roots have 1 inval each), the catch-all row is falsified by pass-decontainerized@perl6:qb_4062[373] (1 entry, compiled). Ruling: the struck verdict stands (50 and 10 are worse than base in every round); the numbers are corrected in a fix round with the threshold runs re-taken under a saved log. Fix round 1 dispatched.
