@@ -63,7 +63,7 @@ by the suites, not by a targeted red.
 | a2 | b5c559de25 | 793161369 | 2.509 | 1.085 | 6815 | 125055 | 3193 | none | diagnostics |
 | a3 | ee460e4775 | 7602b2254 | 2.543 | 1.100 | 6815 | 125055 | 3209 | none | struck (kept) |
 | a4 | e6a29ddc9e | 39688c263 | 2.496 | 1.116 | 6815 | 125055 | 3179 | none | struck (kept) |
-| a5 | 7287e64a60 | 942ff0a5f | 2.516 | 1.145 | 6815 | 125055 | 3153 | none |  |
+| a5 | 7287e64a60 | 942ff0a5f | 2.516 | 1.145 | 6815 | 125055 | 3153 | none | struck (kept) |
 
 ## Rulings and deferred minors
 
@@ -281,3 +281,27 @@ Task 6: a5 misses histogram (cold rakudo-e best run):
       misses 4626 lang-meth-call
       misses 1947 lang-call
       misses 206 boot-syscall
+
+Ruling (row a5): cold rakudo-e 2.516 s, cold nqp-e 1.145 s, warm 3153 s
+(base 2.502 / 1.135 / 3204), counters identical: no single clock beyond
+the spread, **struck (kept)**. The warm clock's run of rows (3204, 3232,
+3193, 3209, 3179, 3153) trends down 1.6 % across a2-a5, which no one
+row can claim; the findings report the five runtime levers as one
+cumulative delta, taken from the a6 row against base. Costs if wrong:
+nothing.
+
+Task 6 review (nqp 39688c263..942ff0a5f, rakudo 7287e64a60..ce851a2aae):
+spec ✅ verbatim, quality approved; reset coverage of the new site fields
+and the nested computeIfAbsent both verified against the whole site
+population. ⚠️ checked by the controller: trailers + evening stamps on
+both commits.
+Task 6: minor (deferred): `DispatchCallSite.dispatcher`/`dispatcherEpoch`
+are plain fields (a torn read pairs a fresh epoch with a stale
+Dispatcher; bounded by pre-existing semantics since `register` runs at
+load scope only) — `@Volatile` or an immutable pair if a language ever
+registers mid-run; the identity-keyed inner helper map is unbounded for
+a hypothetical per-call-descriptor caller (all callers pass singletons;
+one KDoc sentence would warn); the `invokeMethodViaDispatch` prose
+comment now sits above `HelperSite`; `dispatchWithDescriptor` still
+`find`s per record (Dispatch.kt:193).
+Task 6: complete (commits nqp 39688c263..942ff0a5f + rakudo 7287e64a60..ce851a2aae, review clean; row a5 struck (kept))
