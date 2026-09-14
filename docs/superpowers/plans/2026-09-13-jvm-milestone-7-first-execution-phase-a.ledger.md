@@ -62,7 +62,7 @@ by the suites, not by a targeted red.
 | a1 | 76b62a0b4f | cb654e4bf | 2.518 | 1.125 | 6815 | 125055 | 3232 | none | struck (kept: harmless) |
 | a2 | b5c559de25 | 793161369 | 2.509 | 1.085 | 6815 | 125055 | 3193 | none | diagnostics |
 | a3 | ee460e4775 | 7602b2254 | 2.543 | 1.100 | 6815 | 125055 | 3209 | none | struck (kept) |
-| a4 | e6a29ddc9e | 39688c263 | 2.496 | 1.116 | 6815 | 125055 | 3179 | none |  |
+| a4 | e6a29ddc9e | 39688c263 | 2.496 | 1.116 | 6815 | 125055 | 3179 | none | struck (kept) |
 
 ## Rulings and deferred minors
 
@@ -251,3 +251,26 @@ Task 5: a4 misses histogram (cold rakudo-e best run):
       misses 4626 lang-meth-call
       misses 1947 lang-call
       misses 206 boot-syscall
+
+Ruling (row a4): cold rakudo-e 2.496 s, cold nqp-e 1.116 s, warm 3179 s
+(base 2.502 / 1.135 / 3204; spreads 2.50-2.64 / 1.13-1.19), counters
+identical: every clock improved by less than the spread, so **struck
+(kept)**; the hunk is three lines and removes a switch on the hot path.
+Costs if wrong: nothing. Four rows in (a1-a4), the cumulative warm
+drift is 3204 -> 3179 s (-0.8 %), below the spread of one row; the
+findings will report the four together, not one by one.
+
+Note (process): the Task 5 implementer made about 1500 tool calls while
+waiting on the rig despite the explicit 90 s rule in its dispatch; the
+rule is restated with a concrete Monitor invocation from Task 6 on.
+
+Task 5 review (nqp 7602b2254..39688c263, rakudo e6a29ddc9e..9c507020f9):
+spec ✅ verbatim, quality approved; the equivalence (unitEntry ⟹
+USE_BINDER by construction, the handle is enter(tc,cr,csd,null,args))
+was verified from the sources. ⚠️ checked by the controller: trailers +
+evening stamps on both commits.
+Task 5: minor (deferred): widen `everyTableCodeRefIsAUnitEntry` to
+loop the table and assert `unitEntry && argsExpectation == USE_BINDER`
+for every entry (pins the shortcut's precondition; the same deferred
+minor as Task 4, now with two consumers).
+Task 5: complete (commits nqp 7602b2254..39688c263 + rakudo e6a29ddc9e..9c507020f9, review clean; row a4 struck (kept))
