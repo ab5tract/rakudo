@@ -900,3 +900,13 @@ method-road Code clone; the twelve-line guard is duplicated at the two
 closure sites; `signature.rakumod:1918` (a Code default value in a
 signature) stays on the method road — recorded here as the brief asked.
 Task 9: complete (commits rakudo fab6f87110..dab1c6caea, review clean; row a6 landed (counters); warm re-taken as a6r on mains)
+
+User rule (2026-09-15, "stop measuring everything to such a low
+granularity"): NO additional gating of any kind. The 2026-09-14 rig
+revision is superseded: a lever's row = cold rakudo-e + cold nqp-e +
+warm t/01-sanity; gates = nqp suite + t/01-sanity; no per-lever
+t/02-rakudo clock or gate; row a6r is CANCELLED (a6's warm number stays
+recorded as unverified and that is the end of it); the whole t/ clock
+runs once at the milestone close. Task 9b's proxy mode drops the
+t/02-rakudo gate. Recorded in the spec (Task 0) and memory
+([[no-fine-grained-gating]]).
