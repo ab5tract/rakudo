@@ -399,6 +399,198 @@ different driver and receives none of them. It is milestone 7's leading
 
 ---
 
+## Milestone 7, Phase A: the runtime levers (2026-09-13 to 2026-09-15)
+
+Spec: `docs/superpowers/specs/2026-09-13-jvm-milestone-7-first-execution-design.md`;
+plan and ledger: `docs/superpowers/plans/2026-09-13-jvm-milestone-7-first-execution-phase-a*.md`.
+Rig: `tools/build/m7-rig.raku`; rows are cold `rakudo-j -e 'say 1'` and
+`nqp-j-gradle -e 'say(1)'` best of 5, the dispatch counters of the best
+rakudo run, and warm `t/02-rakudo` (306 files) on one 8 GB eval server.
+**From row a6 on, the rig's per-lever row is the two cold rows plus warm
+`t/01-sanity`** (Task 9b, user rule 2026-09-15: no fine-grained gating),
+so the warm `t/02-rakudo` column is a series taken base..a8 and closed
+there; the gates are the nqp suite and `t/01-sanity`.
+
+| lever | rakudo / nqp hash | cold rakudo-e | cold nqp-e | misses | warm t/02-rakudo | verdict |
+|---|---|---|---|---|---|---|
+| base | bc00863fef / c17d93d27 | 2.502 s | 1.135 s | 6815 | 3204 s | base |
+| A1 presized SC maps | 76b62a0b4f / cb654e4bf | 2.518 s | 1.125 s | 6815 | 3232 s | struck (kept: harmless) |
+| A2 diagnostics | b5c559de25 / 793161369 | 2.509 s | 1.085 s | 6815 | 3193 s | diagnostics (no claim) |
+| A3 callback via unit road | ee460e4775 / 7602b2254 | 2.543 s | 1.100 s | 6815 | 3209 s | struck (kept) |
+| A4 stub fast path | e6a29ddc9e / 39688c263 | 2.496 s | 1.116 s | 6815 | 3179 s | struck (kept) |
+| A5 record off the maps | 7287e64a60 / 942ff0a5f | 2.516 s | 1.145 s | 6815 | 3153 s | struck (kept) |
+| A7 boundaries | e965a90438 / f36509da7 | 2.611 s | 1.151 s | 6815 | 3165 s | struck (kept) |
+| 7b runners on the class path | b3daa412c1 / 9f0417c5d | 2.604 s | 1.165 s | 6815 | - (cold only) | landed (marker true) |
+| A8 dispatcher compilation (spike) | 114175eaa8 / f36509da7 (ledger only, no rig row) | - | - | - | - | struck: no threshold change |
+| 8b raku-invoke bailout (diagnosis) | 157695f982 / 9f0417c5d (ledger only, no rig row) | - | - | - | - | finding; the fix is 8c |
+| 8c constant handle per branch | 56e78028bf / 4736905d0 | 2.597 s | 1.148 s | 6815 | 3202 s | landed (compile shape) |
+| A6' static clone road | 96f643b334 / 4736905d0 | 2.504 s | 1.192 s | **5661** | 3735 s (not gathered: battery + first post-cache-clear sweep) | landed (counters) |
+
+Hits, the second counter, are 125055 for every row base..a8 and **100697**
+at a6. The cold clocks' own spread over the series is 2.50-2.64 s
+(rakudo) and 1.09-1.19 s (nqp); the warm series runs 3204, 3232, 3193,
+3209, 3179, 3153, 3165, 3202 — a 1.6 % drift across a2..a5 that no single
+row can claim.
+
+**What moved and why.**
+
+**A6' (the static clone road) is the only lever with a counter change.**
+A6 as specified rested on a false premise: the 2026-09-13 survey looked
+for `method clone` under `src/core.c` only, but `BOOTSTRAP.nqp` defines
+`Code.clone` (:3099) and `Block.clone` (:3165), which Routine/Sub/Method
+inherit, so the compile-time test `findmethod($code-obj,'clone') =:= Mu's`
+was false for every closure and the emitted road would never have fired.
+A6' keeps the spec's intent — fewer misses — by having `p6clonecode`
+mirror `Block.clone`'s mandatory half natively (REPR clone, clone of the
+`$!do` CodeRef, `setcodeobj`, rebind); the three optional tails are split
+between a compile-time check (a phasers hash or `$!why` on the code
+object, and a `clone` that resolves to Block's or Code's, and not a
+regex) and a run-time check (`@!compstuff` non-null takes the method
+road). Result: misses 6815 -> 5661 (`lang-meth-call` 4626 -> 3472, the
+1148 setting closure sites plus a few), hits 125055 -> 100697 as the
+per-creation method road goes with them, cold rakudo-e 2.504 s. The
+compile side pays nothing measurable: CORE.c stagestats on the A6' make
+(723 s) read parse 213.806 s / optimize 22.152 s / qast 16.977 s / unit
+22.619 s against 215.383 / 22.369 / 16.790 / 22.839 on the same day's
+struck-A6 make.
+
+**8c (one constant handle per branch) is the only compile-shape change.**
+`NqpOps.getattr`/`bindattr` merged the two cache entries' `MethodHandle`s
+into a phi, so `invokeExact`'s exact-type check could not fold and the
+JDK's `newWrongMethodTypeException` -> `MethodType.toString` ->
+`Class.getSimpleName` recursion entered every graph. Each entry now
+invokes its own handle on its own branch (`readSlot`/`writeSlot`, private
+statics that PE inlines with the branch's constant handle). Over a cold
+`rakudo-j -e 'say 1'`: `opt failed` 3 -> 0, `Too deep inlining` 3 -> 0,
+and `<anon>@perl6:qb_4626[2838]` — `raku-invoke`, the busiest root in the
+whole cold run at 2546 traced entries — now compiles (Tier 1, 202 ms, IR
+3463/8175, CodeSize 41157, queued at `Count/Thres 400/400`) instead of
+running interpreted for the process lifetime. The other two bailing roots
+(`<anon>@perl6:qb_126[349]`, `mro@FD5A9459…:qb_187[204]`) compile with
+it, which closes the 204-root half of inherited item 1. The clocks are
+inside the spread; the log is the measurement.
+
+**7b (runners on the class path) made the runtime-tree boundaries real
+under the nqp runners.** `NQP_BOUNDARY_CHECK` printed
+`dieInternal TruffleBoundary=false` under `nqp-j-gradle` and `true` under
+`./rakudo-j`: the generated runners put the runtime jars on
+`-Xbootclasspath/a`, where the boot loader cannot resolve
+`CompilerDirectives$TruffleBoundary` and silently drops the annotation.
+Moving every former boot entry ahead of `$CP` in
+`nqp/buildSrc/src/main/kotlin/GenerateRunnerTask.kt` flips the marker to
+`true` under all three runners. Cold nqp-e 1.165 s, flat. Collateral
+worth knowing: editing `nqp/buildSrc` invalidates gradle's whole nqp
+stage graph, so `generateRunner` rebuilt stage1/stage2 and every
+share/lib jar, and the fresh serialization-context handles broke
+`./rakudo-j` ("Missing or wrong version of dependency
+`.../stage2/NQPHLL.nqp`") until a full rakudo `make` (797 s) re-linked
+it — which is why a7b's cold rakudo-e is a rebuilt-artifact reading, not
+a like-for-like delta against a7.
+
+**A2 claimed no number and delivered the instrument the phase ran on**:
+the misses-by-dispatcher histogram, `decont` pinning a layout mismatch as
+well as an STable mismatch, `AttrSrc.slow` split in two, and root names
+carrying the block id (`<name>@<cuid>[N]`, or `<name>@<unit-sha>:qb_N[N]`
+for a jar-bound block, whose `cuid` is null by design) so the engine's
+`CompilationStatistics` stops merging distinct targets. The histogram is
+five dispatchers long, not eight, and `lang-meth-call` is 68 % of all
+misses — which is what made A6' the phase's one moving lever.
+
+**Struck.**
+
+- **A1, presized SC maps** (`76b62a0b4f`): every clock inside the base
+  row's own spread, counters bit-identical; kept because it cannot
+  regress. The reader's rehash share is 17 % of the SC read, about 1.7 %
+  of the cold run — below the rig's resolution by construction.
+- **A3, dispatcher callbacks through the unit road** (`ee460e4775`):
+  2.543 / 1.100 / 3209, counters identical; kept, the road is simpler
+  than what it replaced.
+- **A4, stub-road fast path** (`e6a29ddc9e`): 2.496 / 1.116 / 3179, every
+  clock better than base by less than the spread; kept, three lines that
+  remove a switch from the hot path.
+- **A5, record and realize off the hash maps** (`7287e64a60`): 2.516 /
+  1.145 / 3153 (the fastest warm row of the series), counters identical;
+  kept.
+- **A7, the classlib boundary and the targeted ones** (`e965a90438`):
+  2.611 / 1.151 / 3165 — the high end of the cold spread, inside it on
+  both clocks; kept, since it matches the table road, with
+  `NQP_CLASSLIB_INLINE=1` left in as the A/B. The lever the spec expected
+  to move the warm clock moved it neither way.
+- **A8, compiling the dispatcher programs early** (spike, no code): four
+  of the five hot dispatcher roots already reach compiled code 22-42 % of
+  the way through their traced entries, and lowering the first-tier
+  threshold is worse in *every* round measured — medians of 7 interleaved
+  rounds, 2531 ms at the default 400 against 2714 (150), **2986 (50,
+  +455)** and **3222 (10, +691)**. The bottleneck is compilation
+  *capacity*, not latency: only 22 roots finish a compilation in the
+  ~2.5 s a cold run lasts, so submitting more roots earlier steals CPU
+  from the interpreter doing the work. No option goes into the runner
+  defaults. The spike's real output was the `raku-invoke` permanent
+  bailout, diagnosed in 8b and fixed in 8c.
+- **A6 as specified** — struck on the false premise above and replaced by
+  A6', which is what the row measures.
+
+**The promotion list (A7 Step 8): empty.** Its trigger was cold rakudo-e
+above 2.64 s or warm above ~3210 s; a7 read 2.611 s and 3165 s, so Step 8
+never ran and no classlib op was promoted to a sited node. The list stays
+open for Phase B, where `NQP_CLASSLIB_INLINE=1` is the one-command A/B.
+
+**What Phase B starts from:** the a6 row — rakudo `96f643b334` / nqp
+`4736905d0`, cold rakudo-e **2.504 s**, cold nqp-e **1.192 s**, misses
+**5661**, hits **100697**, histogram `3472 lang-meth-call` /
+`1947 lang-call` / `206 boot-syscall`. The warm basis is the comparable
+base..a8 series (3204 -> 3202 s, best 3153 at a5); a6's own warm number
+is not gathered (the box was on battery and it was the first sweep after
+the rig's precomp-cache clear, so 120 modules re-precompiled inside it:
+client CPU rose 12 s while wall rose 531 s). Per the user rule of
+2026-09-15 it is not re-run; the next `t/02-rakudo` clock is the one
+Phase B already plans to take.
+
+**Phase B's inbox** (carried out of Phase A's rulings and deferred
+minors):
+
+1. **The getattr/bindattr road's remaining minors**, ranked here because
+   8c sits on them: the helper doc comments name the handle types as
+   `(SixModelObject)Object` / `(SixModelObject,Object)void` where the
+   exact descriptors are `(SixModelObject)SixModelObject` /
+   `(SixModelObject,SixModelObject)void`; `readSlot` could take the
+   narrowed `RakuObject`; the null-read-falls-to-slow policy exists in
+   three deliberate copies and wants a one-line comment.
+2. **`NqpTypeOps.create` still misses unconditionally** on a
+   layout/REPRData mismatch (not the deserialization-stub shape A2
+   fixed in `decont`) — an uncountable, unpinnable site by construction.
+3. **The in-build stage `JavaExec` tasks are still on the boot class
+   path** (`nqp/build.gradle.kts:232-241`, its comment now stale), so
+   runtime-tree boundaries stay invisible to the JVM that compiles nqp's
+   own stages. Compile-time only; 7b fixed the generated runners, not
+   these.
+4. **The classlib boundary's deopt-on-exception**: `@TruffleBoundary` on
+   `NqpOps.classlib` (and on the table road's `run()`) uses the default
+   `transferToInterpreterOnException = true`, so every exception leaving
+   a classlib op — NQP's control-flow categories included (`EX_CAT_NEXT`,
+   `LAST`, `RETURN`) — deoptimizes the enclosing compiled root instead of
+   propagating inside compiled code. A plausible reason A7 moved neither
+   clock; `NQP_CLASSLIB_INLINE=1` is the A/B.
+5. **The promotion list (A7 Step 8) is empty** and stays open: no
+   classlib op has been promoted to a sited node, and the trigger that
+   would have found one never fired.
+6. **`NFGString.of`'s boundary is coarser than needed** — it also hides
+   the `isEmpty` short-circuit and the interned-hit read; a miss-path-only
+   boundary would keep the hit path PE-visible.
+7. **`dispatchWithDescriptor` still `find`s per record**
+   (`Dispatch.kt:193`) — a linear scan on the record path A5 otherwise
+   took off the hash maps.
+8. **The site fields' memory model**: `DispatchCallSite.dispatcher` and
+   `dispatcherEpoch` (added by A5) are plain fields, so a torn read pairs
+   a fresh epoch with a stale `Dispatcher`. Bounded today because
+   `register` runs at load scope only; `@Volatile` or an immutable pair
+   if a language ever registers mid-run.
+9. **`signature.rakumod:1918` stays on the method road** — a `Code`
+   default value in a signature is the one closure site A6''s static road
+   does not take.
+
+---
+
 ## Things that cost time to learn
 
 **The build graph does not express the nqp dependency.** No rakudo target
