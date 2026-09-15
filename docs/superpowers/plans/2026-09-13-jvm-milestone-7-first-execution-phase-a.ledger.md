@@ -1001,3 +1001,21 @@ into one `#?if jvm` helper in code.rakumod, and `p6clonecode`'s KDoc
 so a runtime `.wrap` of `clone` is bypassed on the JVM). Costs if
 wrong: nothing; every item is a comment, a test or a fence.
 Memory hygiene (#11) done by the controller.
+
+Fix wave: nqp 4736905d0..fdab66706, rakudo 9789a8d7bf..201e766ca3 (8 items; the rig header line was already gone since 3e214b5a18); re-review pending.
+
+Fix wave gates (same shape as the close: one 6 GB server, `--chunk=*`;
+gate clocks, NOT measurements): nqp suite **155 files in 200 s, chunk
+ok, EXIT=0** (close 186 s, Task 7b 191 s); `t/01-sanity` **25 files /
+303 tests PASS in 43 s** (close 43 s, flat). Of the nqp suite's +14 s,
+~1.1-1.2 s is bought on purpose by the new `NQP_CLASSLIB_INLINE=1`
+child in `t/nqp/125-dispatch-stats.t` (that child alone timed at
+1.14 s; the whole file is now 4.08 s), and the sweep was the first run
+after `syncRuntimeJars`. No claim is made from the rest: nothing in the
+wave touches a hot path (one `CachedDispatcher` per site per epoch on
+the already-slow miss road; one empty `IdentityHashMap` per
+`SerializationReader`). A number here needs a measured re-run.
+Fix wave re-review: all 8 addressed, no new breakage (nqp fdab66706, rakudo 201e766ca3). Out-of-scope minors recorded for Phase B: the ProgramUnitTest KDoc credits the two readers with checking USE_BINDER (they branch on unitEntry alone; the pair is the invariant, not the check); the restated classlib text is slightly too narrow (a non-:cont classlib op can still throw a plain Java exception from its own body); NqpOps.java:1507 is a 130-column comment line.
+Phase B inbox items 1 and 8 struck in the findings (closed by the wave).
+Task 10: complete (rakudo 832beeccd0..201e766ca3 incl. the fix wave; nqp 4736905d0..fdab66706; final review "with fixes", fixes landed and re-reviewed clean)
+PHASE A CLOSED 2026-09-15. Phase B's plan is written from the a6 row (spec Phase B: lazy-loading tasks 1.1-1.6 by reference, site identity, the empty unit.dispatch entry; first build also carries the buildSrc/gradle/setting hygiene the fix wave deferred).
