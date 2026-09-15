@@ -1,0 +1,4 @@
+rakudo: 25 files, 1 chunk(s) of 25, 1 server(s) x 8g heap + 3g off-heap
+[56s] chunk 1/1: ok
+
+25 files in 56s across 1 server(s)
