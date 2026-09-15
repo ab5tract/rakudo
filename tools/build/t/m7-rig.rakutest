@@ -3,7 +3,7 @@ use Test;
 my $tool = $*PROGRAM.parent(2).add('m7-rig.raku');
 my $fix  = $*PROGRAM.parent.add('fixtures');
 
-plan 10;
+plan 12;
 
 my $cold = run($*EXECUTABLE, $tool, '--parse-cold=' ~ $fix.add('m7-cold.err'), :out).out.slurp(:close);
 ok $cold.contains('misses=6815'),               'misses parsed from the stats line';
@@ -19,3 +19,10 @@ ok $sweep.contains('new-red=t/02-rakudo/brand-new-red.t'), 'the file outside the
 ok !$sweep.contains('03-cmp-ok'),                'a baseline red is not new';
 ok !$sweep.contains('todo-pass'),                'a TODO-passed summary entry is not red';
 ok $sweep.contains('no-tap'),                    'a Failed: 0 entry with parse errors stays red';
+
+# The proxy warm phase (--warm=proxy) sweeps t/01-sanity on one server; its
+# line shape is the same, and this pins that the generic parser reads it.
+my $san = run($*EXECUTABLE, $tool, '--parse-sweep=' ~ $fix.add('m7-sanity.log'),
+              '--baseline=' ~ $fix.add('m7-red-baseline.txt'), :out).out.slurp(:close);
+ok $san.contains('warm=56'),  'the proxy sweep parses to its seconds';
+ok $san.contains('red=0'),    'a green chunk has no red entries';
