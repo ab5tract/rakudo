@@ -179,13 +179,35 @@ reference one by index.
   N nested)`. It also gates the line that reports static lexical rows
   dropped for a gap qbid.
 - `NQP_SITE_CHECK=1` prints, per compiled program,
-  `site-check <namespace>#<index> ordinals=N` from the engine, and per
-  loaded unit `unit-check <namespace> programs=N slots=N` from the
-  runtime. Both name the unit by `identityNamespace()`, so the two join
-  by prefix even where several loaded artifacts share one unit id.
+  `site-check <namespace>#<index> ordinals=N` from the engine, and from
+  the runtime both `unit-check <namespace> programs=N slots=N` per
+  loaded unit and `unit-check-prog <namespace>#<index> slots=N` per live
+  program. All three name the unit by `identityNamespace()`, so the two
+  streams join -- by prefix per unit, and exactly per program -- even
+  where several loaded artifacts share one unit id.
+  `tools/build/site-check.raku <stderr capture>` does that join and
+  reports any program whose ordinals exceed its slots (exit 1 if any).
+  The per-program line is the one that matters: `UnitStore.dispatchSlot`
+  bounds the ordinal by the program's own slot count and returns null
+  past it, so an undercount is silent, and the per-unit aggregate cannot
+  see it.
 - `NQP_DISPATCH_STATS=1` adds `sites=` and `anon=` to the shutdown
-  `dispatch stats:` line: how many dispatch sites carried an identity
-  and how many did not. Cold `rakudo-j -e 'say 1'`: `sites=7427 anon=6`.
+  `dispatch stats:` line. **They count WIRE dispatch sites only.** Both
+  are incremented in `NqpDispatch.Cache`'s constructor, and a `Cache` is
+  built in exactly one place -- `NqpOps.EngineSite`, i.e. once per
+  `DISPATCH` instruction of a parsed program -- so the split is "of the
+  dispatch instructions this process parsed, how many belonged to a
+  program that had an identity". Cold `rakudo-j -e 'say 1'`:
+  `sites=7427 anon=6`, and those six are the `-e` script's own: its unit
+  is in-memory, so its programs get no identity.
+
+  Dispatch sites that the runtime makes for itself are **not counted at
+  all**: `Ops.helperDispatchSites`, Rakudo's rv-decont site in
+  `RakOps.kt` and the indy road (`DispatchBootstrap.fromIndy`) each
+  construct a `DispatchCallSite` directly, never a `Cache`. They are
+  identity-less too, but they are outside both counters. Phase C must
+  count them separately if the number is to mean "every site in the
+  process".
 
 ## What phase 2 will do
 
