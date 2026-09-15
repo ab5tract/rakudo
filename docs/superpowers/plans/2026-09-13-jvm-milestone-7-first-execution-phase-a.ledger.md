@@ -914,3 +914,15 @@ t/02-rakudo gate. Recorded in the spec (Task 0) and memory
 User rule amendment (2026-09-15): a failure to gather a benchmark does not mean run it again — a failed, cut-off or throttled run is recorded as not gathered with its reason, and the number is taken at the next point the plan already measures.
 
 Task 9b: rig proxy mode landed (3e214b5a18): cold rows + t/01-sanity warm; no per-lever t/02-rakudo (user rule 2026-09-15); proxy-smoke sanity 51s (unplugged, not a row)
+
+Task 9b review (rakudo de70b1b535..8f182e7f6e): spec ✅ against the
+amended requirements (proxy = cold rows + t/01-sanity, no gate code
+left), quality approved; all five `--warm` spellings probed to the
+intended branch; the `full` road traced unchanged through the helper;
+rig test 12/12; trailers + stamps verified by the reviewer.
+Task 9b: minor (deferred): the precomp clear sits inside `full` only
+(inert: no .precomp under t/01-sanity); a bare `--warm` dies naming
+'True'; the proxy marker prints the seconds twice; `sweep` is slurpy
+for one directory; the baseline file's name under-describes its proxy
+use.
+Task 9b: complete (commits rakudo de70b1b535..8f182e7f6e, review clean)
