@@ -148,6 +148,47 @@ of cold start (they do not move the suite clock); eval-server sharing
 dropped. Cheap and independent: presize the SC reader's maps. The
 findings are Revision 2 of the lazy-loading spec.
 
+**Update, 2026-09-15 (milestone 7 Phase A closed).** Ten levers were
+measured forward-only on the rig (`tools/build/m7-rig.raku`), and the
+honest headline is that only one of them moved a counter: cold
+`rakudo -e` went 2.502 -> 2.504 s from base to the closing row a6 with
+dispatch misses 6815 -> 5661 and hits 125055 -> 100697, cold `nqp -e`
+1.135 -> 1.192 s, and warm `t/02-rakudo` ran 3204 -> 3202 s over the
+comparable base..a8 series (best 3153 at a5; a6's warm number was not
+gathered — the box was on battery and it was the first sweep after the
+rig's precomp-cache clear). Three things landed: **7b**, which moved the
+generated runners' runtime jars off `-Xbootclasspath/a` so the
+runtime-tree `@TruffleBoundary`s are real under every nqp runner; **8c**,
+which gives each attribute-cache entry its own branch with a constant
+`MethodHandle`, so `invokeExact`'s type check folds, the JDK's
+wrong-method-type message construction leaves the graph, and the three
+permanently bailing roots — `raku-invoke` among them, the busiest root of
+the whole cold run at 2546 entries — compile instead of running
+interpreted (`opt failed` 3 -> 0); and **A6'**, the static clone road,
+which is where the -1154 misses and -24k hits come from. Struck, each
+inside the clocks' own spread and each kept in the tree because it cannot
+regress: A1 (presized SC maps), A3 (dispatcher callbacks through the unit
+road), A4 (stub-road fast path), A5 (record and realize off the hash
+maps) and A7 (the classlib and targeted boundaries, with
+`NQP_CLASSLIB_INLINE=1` left as the A/B); A2 claimed no number and
+delivered the misses histogram the phase was steered by; A8 was struck by
+its own spike, which showed four of the five hot dispatcher roots already
+compiling 22-42 % of the way through their traced entries and every
+first-tier threshold below the default 400 costing cold start in every
+round (+455 ms at 50, +691 ms at 10); and A6 as specified was struck on a
+false premise (`BOOTSTRAP.nqp` defines `Code.clone` and `Block.clone`, so
+the compile-time `clone` test never matched) and replaced by A6'. The
+phase also changed how it measures itself: from a6 on, a lever's row is
+the two cold clocks plus warm `t/01-sanity`, the gates are the nqp suite
+and `t/01-sanity`, and the `t/02-rakudo` clock is a phase-close
+measurement — the user's rule of 2026-09-15, "stop measuring everything
+to such a low granularity", with its amendment that a failed or throttled
+benchmark is recorded as not gathered and taken at the next point the
+plan already measures, never re-run for its own sake. Full table and the
+Phase B inbox: `docs/jvm-perf-findings-2026-09.md`, "Milestone 7, Phase A:
+the runtime levers". Phase B (artifact v2 + lazy tables + the empty
+dispatch entry) is next; its plan is written from the a6 row.
+
 Targets: keep cold `nqp -e` under 1.0 s (0.12 s away); cold `rakudo -e`
 under 2.0 s stays the direction, not the done-criterion of any single
 phase, since the spec's phases alone cannot reach it.
