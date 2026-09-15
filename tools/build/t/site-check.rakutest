@@ -1,0 +1,52 @@
+use Test;
+
+my $tool  = $*PROGRAM.parent(2).add('site-check.raku');
+my $clean = $*PROGRAM.parent.add('fixtures/site-check-clean.err');
+my $bad   = $*PROGRAM.parent.add('fixtures/site-check-violation.err');
+
+plan 12;
+
+my $proc = run($*EXECUTABLE, $tool, $clean, :out);
+my $out  = $proc.out.slurp(:close);
+
+ok $out.contains('site-check: 3 programs, 0 violations'),
+   'counts the programs the engine numbered, not the unit-check-prog lines';
+is $proc.exitcode, 0, 'a clean run exits 0';
+nok $out.contains('ordinals=4 slots=4'),
+    'a program that fills its slot table exactly is not a violation';
+nok $out.contains('no unit-check-prog line'),
+    'every numbered program joined a slot line';
+
+# The whole token is the key: a namespace is a file path plus "!" plus the
+# unit id, and two artifacts can share the unit id (Rakudo builds five as
+# "perl6"), so splitting on the id or on '#' would join the wrong rows.
+ok $out.contains('site-check: 3 programs'),
+   'nqp.jar#0, nqp.jar#1 and rakudo.jar#0 stay three distinct programs';
+
+my $proc2 = run($*EXECUTABLE, $tool, $bad, :out);
+my $out2  = $proc2.out.slurp(:close);
+
+is $proc2.exitcode, 1, 'a violation exits 1';
+ok $out2.contains('/tmp/store/nqp.jar!nqp#1 ordinals=3 slots=0'),
+   'names the offending program with both counts';
+ok $out2.contains('site-check: 3 programs, 1 violations'),
+   'counts exactly the one violation';
+nok $out2.contains('/tmp/store/nqp.jar!nqp#0 ordinals'),
+    'the program that fits is not reported';
+
+# A numbered program whose unit never printed a slot line is not a slot
+# undercount -- it is a missing half -- so it must be visible without
+# being counted as a violation.
+ok $out2.contains('/tmp/store/gone.jar!nqp#7 ordinals=2 slots=none'),
+   'a program with no unit-check-prog line is named';
+ok $out2.contains('site-check: 1 programs with no unit-check-prog line'),
+   'and tallied separately from the violations';
+
+my $empty = $*PROGRAM.parent.add('fixtures/site-check-empty.err');
+$empty.spurt("dispatch stats: misses=1 hits=2 sites=3 anon=0\n");
+my $proc3 = run($*EXECUTABLE, $tool, $empty, :out, :err);
+$proc3.out.slurp(:close);
+my $err3 = $proc3.err.slurp(:close);
+ok $err3.contains('NQP_SITE_CHECK'),
+   'a capture with no check lines says the knob was probably off';
+$empty.unlink;

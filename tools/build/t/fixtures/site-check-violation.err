@@ -1,0 +1,6 @@
+unit-check /tmp/store/nqp.jar!nqp programs=2 slots=4
+unit-check-prog /tmp/store/nqp.jar!nqp#0 slots=4
+unit-check-prog /tmp/store/nqp.jar!nqp#1 slots=0
+site-check /tmp/store/nqp.jar!nqp#0 ordinals=4
+site-check /tmp/store/nqp.jar!nqp#1 ordinals=3
+site-check /tmp/store/gone.jar!nqp#7 ordinals=2

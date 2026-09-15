@@ -9,7 +9,14 @@
 # (deserialize-program, load-block) at depth d ran inside it and are
 # subtracted from it. A load-total counts as a child only while a unit's stages
 # are open at that depth: a root load (loadApp at depth 0) charges nobody.
-# decode-total contains the decode leaves printed before it, so it is skipped.
+#
+# The v2 stages are open-store, shells, sc-stub, sc-finish,
+# deserialize-program, static-lex-drain, load-block and load-total. v1's
+# decode stages are gone with the v1 reader: record and program decoding now
+# happens inside the ensureBody fills that run during deserialize-program and
+# load-block, which is where their time is charged. Nothing is skipped -- v1's
+# decode-total was skipped because it contained the decode leaves printed
+# before it, and there is no such aggregate any more.
 
 sub MAIN($file, Int :$top = 12) {
     my constant CONTAINER = set <deserialize-program load-block>;
@@ -31,7 +38,6 @@ sub MAIN($file, Int :$top = 12) {
         }
         %open{$d} = True;
         %acc{$d} += $ms if $st (elem) CHILD;
-        next if $st eq 'decode-total';
         my $x = $ms;
         if $st (elem) CONTAINER {
             $x = $ms - (%acc{$d} // 0);

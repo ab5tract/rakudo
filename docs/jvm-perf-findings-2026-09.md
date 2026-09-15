@@ -638,9 +638,21 @@ neither. Miss histogram, essentially unchanged from a6 (3472 / 1947 /
 206): `lang-meth-call=3473 lang-call=1952 boot-syscall=206
 raku-assign=35 raku-meth-call-qualified=1`; the +6 misses and +14 hits
 over a6 are site-identity bookkeeping, not a behaviour change. New
-counters on the same line: `sites=7427 anon=6` -- of the dispatch sites
-a cold `rakudo -e 'say 1'` builds, six have no identity (helper,
-rv-decont and indy sites; ruling 8).
+counters on the same line: `sites=7427 anon=6`. **These count WIRE
+dispatch sites only**: both are incremented in `NqpDispatch.Cache`'s
+constructor, and a `Cache` is built in exactly one place --
+`NqpOps.EngineSite`, once per `DISPATCH` instruction of a parsed program
+-- so 7427 is the dispatch instructions a cold `rakudo -e 'say 1'`
+parses, and the six without an identity are **the `-e` script's own**,
+whose unit is in-memory and therefore identity-less. The runtime's own
+sites (`Ops.helperDispatchSites`, Rakudo's rv-decont site in `RakOps.kt`,
+the indy road's `DispatchBootstrap.fromIndy`) build a `DispatchCallSite`
+directly, never a `Cache`, so they are identity-less AND uncounted; if
+the number is to mean "every site in the process", Phase C has to count
+them. (Corrected 2026-09-15: the close first read the six as the helper,
+rv-decont and indy sites. Ruling 8's point -- that identity-less sites
+exist and Phase C must tolerate them -- stands; only the attribution of
+the six was wrong.)
 
 **The honest summary: the format change is clock-neutral at the top
 level.** It was not undertaken for the cold clock alone -- it is what
@@ -945,22 +957,33 @@ wrong:
   mapped slice or null. Phase C fills slots; it does not change the
   index, so **stage0 does not have to be regenerated again**.
 - **The descriptor travels inline in the slot** (ruling 3). The v1
-  per-unit call-site table is gone -- `getCallSites()` returns empty and
-  the engine builds its own `CallSiteDescriptor` from the wire -- so a
-  payload cannot name a descriptor by index.
-- **Anonymous sites** (helper, rv-decont, indy) have no identity and no
-  slot: 6 of 7427 in a cold `rakudo -e`. Phase C treats a null identity
-  as "nothing persisted", not as an error.
+  per-unit call-site table is gone -- `getCallSites()`, `callSites` and
+  every index path have left the runtime, and the engine builds its own
+  `CallSiteDescriptor` from the wire -- so a payload cannot name a
+  descriptor by index.
+- **Identity-less sites have no slot.** Two disjoint groups, and the
+  `anon=` counter sees only the first: wire sites of an in-memory unit
+  (6 of the 7427 in a cold `rakudo -e`, all of them the `-e` script's
+  own), and the runtime's own sites (helper, rv-decont, indy), which
+  build a `DispatchCallSite` directly and are counted by neither
+  `sites=` nor `anon=`. Phase C treats a null identity as "nothing
+  persisted", not as an error, and must count the second group itself if
+  it needs a process-wide total.
 - **The identity string is not a cross-process key.** It embeds this
   process's store path. Resolve a slot through the site's own unit +
   program index + ordinal.
 - **`NQP_SITE_CHECK` is the invariant's test.** `site-check` (engine,
-  per program) and `unit-check` (runtime, per unit) both name the unit
-  by `identityNamespace()`, so they join by prefix even where five
-  loaded artifacts share the unit id `perl6`. On a cold
+  per program), `unit-check` (runtime, per unit) and `unit-check-prog`
+  (runtime, per live program) all name the unit by
+  `identityNamespace()`, so they join by prefix even where five loaded
+  artifacts share the unit id `perl6` -- and the per-program pair joins
+  exactly. `tools/build/site-check.raku` does the join and exits 1 on
+  any program whose ordinals exceed its slots; the per-program line is
+  what makes the check real, since `UnitStore.dispatchSlot` returns null
+  past the count and an undercount is otherwise silent. On a cold
   `rakudo-j -e 'say 1'`: 2598 site-check programs numbered, max ordinal
-  1060, 26 unit-check lines, and no unit numbers more ordinals than it
-  stores slots.
+  1060, 26 unit-check lines, and no program numbers more ordinals than
+  it stores slots.
 - **The five Rakudo units still share `--javaclass=perl6`** (the
   Makefile's `J_NQP_FLAGS_EXTRA`). The namespace makes it harmless, but
   it is a latent trap for any future per-unit keying; distinct names per
