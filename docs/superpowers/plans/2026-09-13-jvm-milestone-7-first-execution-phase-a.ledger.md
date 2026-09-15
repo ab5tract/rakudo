@@ -926,3 +926,23 @@ Task 9b: minor (deferred): the precomp clear sits inside `full` only
 for one directory; the baseline file's name under-describes its proxy
 use.
 Task 9b: complete (commits rakudo de70b1b535..8f182e7f6e, review clean)
+
+Task 10: Phase A closed (2026-09-15). Findings section
+`docs/jvm-perf-findings-2026-09.md`, "Milestone 7, Phase A: the runtime
+levers (2026-09-13 to 2026-09-15)" — twelve rows (base, A1, A2, A3, A4,
+A5, A7, 7b, A8, 8b, 8c, A6'), every cell from this ledger, hits and the
+cold spread beside the table, "What moved and why", "Struck", the empty
+promotion list, "What Phase B starts from" (the a6 row: 2.504 s /
+1.192 s / misses 5661 / hits 100697 / histogram 3472 lang-meth-call,
+1947 lang-call, 206 boot-syscall; warm basis base..a8 3204 -> 3202,
+best 3153 at a5, a6's own not gathered) and a nine-item Phase B inbox.
+Plan doc: `docs/jvm-truffle-only-plan.md`, "Update, 2026-09-15
+(milestone 7 Phase A closed)" under Position (2026-09-13). Gates at the
+close, on the final tree (no re-measurement of any kind, user rule
+2026-09-15): nqp suite **155 files in 186 s, chunk ok, EXIT=0**;
+`t/01-sanity` **25 files / 303 tests, All tests successful, PASS** in
+43 s. The nqp tree takes no new commit (its HEAD `4736905d0` is Task
+8c, the last lever); both branches pushed to `ab5tract`.
+Task 10: complete (docs only; Phase A CLOSED — landed 7b, 8c, A6';
+struck A1, A3, A4, A5, A7, A8 and A6-as-specified; A2 diagnostics.
+NEXT = the Phase B plan, written from the a6 row).
