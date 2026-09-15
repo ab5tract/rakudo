@@ -5,9 +5,14 @@
 #
 # Cold rows: best-of-N wall of ./rakudo-j -e 'say 1' (cwd root) and
 # ./nqp-j-gradle -e 'say(1)' (cwd nqp/), stock runners, NQP_UNIT_LOAD_STATS
-# and NQP_DISPATCH_STATS on, each run's merged output saved. Warm row: the
-# whole t/02-rakudo directory on ONE eval server (chunk = file count), the
-# red list diffed against docs/jvm-t02-rakudo-red-baseline.txt. Children get
+# and NQP_DISPATCH_STATS on, each run's merged output saved. Warm phase
+# (--warm, 2026-09-15): 'proxy' (the default) is t/01-sanity warm on ONE eval
+# server and nothing else -- a per-lever row is the two cold rows plus that
+# clock, with no t/02-rakudo in any form (user rule 2026-09-15: eight rows of
+# the 53-minute single-server clock never left the noise). 'full' runs that
+# single-server t/02-rakudo clock, kept for the milestone close; 'none' runs
+# neither (also spelled --/warm). The red list of whichever directory ran is
+# diffed against docs/jvm-t02-rakudo-red-baseline.txt. Children get
 # /dev/null on stdin and merged output (inherited stdin hung under
 # watched-run, 2026-09-13). Refuses to start with NQP_DISPATCH_RECORD set:
 # a training run is never a measured run (spec, Phase C).
@@ -40,8 +45,10 @@ sub capture(@cmd, IO() :$cwd!, :%env!) {
     ($text, $code)
 }
 
+# .d is stat-based and so follows a symlinked directory out of the tree; a
+# symlink is unlinked, never descended into.
 sub rmtree(IO::Path $d) {
-    for $d.dir { .d ?? rmtree($_) !! .unlink }
+    for $d.dir { .d && !.l ?? rmtree($_) !! .unlink }
     $d.rmdir
 }
 
@@ -95,7 +102,10 @@ multi sub MAIN(
     Tag  :$tag!,                #= row name: base, a1, a3 ...
     Str  :$out = 'm7-rig',      #= output directory
     Int  :$runs = 5,            #= cold runs per benchmark; best wall wins
-    Bool :$warm = True,         #= also run warm t/02-rakudo (about 90 min)
+    # Cool, not Str: --/warm hands over Bool::False, and a Str constraint makes
+    # Raku reject that and then swallow the NEXT argument as --warm's value
+    # (--/warm --out=DIR silently became --warm='--out=DIR', losing --out).
+    Cool :$warm = 'proxy',      #= proxy: the t/01-sanity clock and nothing else; full: the single-server t/02-rakudo clock (milestone close); none: neither (--/warm)
     Int  :$heap = 8,            #= eval-server heap in GB
     Str  :$baseline = 'docs/jvm-t02-rakudo-red-baseline.txt',
 ) {
@@ -132,32 +142,56 @@ multi sub MAIN(
                     @runs.map({ sprintf '%.2f', $_[0] }).join(' '), cold-summary(%row{%b<name> ~ '-stats'}));
     }
 
-    my %sweep = :warm(Int), :red([]), :new([]);
-    if $warm {
-        # --chunk=* is the sweep's own "one chunk, one server" default. Counting
-        # the files here instead would count .t only, while the sweep counts
-        # .t and .rakutest, and one added .rakutest would silently replace a
-        # server mid-sweep -- which the eval-server rules forbid.
-        # A jar rebuild invalidates this precomp cache and one test goes red for
-        # it (row a8); clear it before the sweep.
-        my $stale = $ROOT.add('t/02-rakudo/test-packages/.precomp');
-        rmtree($stale) if $stale.d;
+    # One directory on ONE server, saved as <tag>-<suffix>.log and parsed.
+    # --chunk=* is the sweep's own "one chunk, one server" default and the only
+    # chunk that needs no file count: counting the files here would count .t
+    # only, while the sweep counts .t and .rakutest, and one added .rakutest
+    # would silently replace a server mid-sweep -- which the eval-server rules
+    # forbid.
+    sub sweep(*@dirs, :$tag-suffix!) {
         my ($text, $code) = capture(['raku', 'tools/build/evalserver-sweep.raku', '--chunk=*',
-                                     '--jobs=1', "--heap=$heap", 't/02-rakudo'],
+                                     '--jobs=1', "--heap=$heap", |@dirs],
                                     :cwd($ROOT), :env(%base));
-        $dir.add("{$tag}-sweep.log").spurt($text);
-        %sweep = parse-sweep($text, $ROOT.add($baseline));
+        $dir.add("{$tag}-{$tag-suffix}.log").spurt($text);
+        my %s = parse-sweep($text, $ROOT.add($baseline));
         # A non-zero exit is normal here (any red file causes it). A sweep that
         # never ran -- heap budget refused, server never up -- is not, and
         # without this would read as a clean row: warm=-, new-red=0, DONE.
-        die "m7-rig: sweep produced no 'files in ...s across' line (sweep exit $code)"
-            unless %sweep<warm>.defined;
-        say "m7-rig: warm t/02-rakudo {%sweep<warm> // '?'}s new-red={+%sweep<new>} " ~ sweep-summary(%sweep);
+        die "m7-rig: sweep $tag-suffix produced no 'files in ...s across' line (sweep exit $code)"
+            unless %s<warm>.defined;
+        %s
+    }
+
+    my %sweep = :warm(Int), :red([]), :new([]);
+    my $warm-cell = '-';
+    # --/warm hands over a false allomorph, not a string; it means 'none'.
+    my $mode = $warm ?? ~$warm !! 'none';
+    given $mode {
+        when 'full' {
+            # A jar rebuild invalidates this precomp cache and one test goes
+            # red for it (row a8); clear it before the sweep. Only t/02-rakudo
+            # has one, so only this road needs it.
+            my $stale = $ROOT.add('t/02-rakudo/test-packages/.precomp');
+            rmtree($stale) if $stale.d && !$stale.l;
+            %sweep = sweep('t/02-rakudo', :tag-suffix<sweep>);
+            $warm-cell = %sweep<warm>;
+            say "m7-rig: warm t/02-rakudo {%sweep<warm>}s new-red={+%sweep<new>} " ~ sweep-summary(%sweep);
+        }
+        when 'proxy' {
+            # The whole warm phase of a per-lever row: 25 files on one warm
+            # server, about 60s. No t/02-rakudo follows it in any form -- not
+            # as a clock, not as a gate (user rule 2026-09-15).
+            %sweep = sweep('t/01-sanity', :tag-suffix<sanity>);
+            $warm-cell = "{%sweep<warm>}/sanity";
+            say "m7-rig: warm t/01-sanity {%sweep<warm>}s " ~ sweep-summary(%sweep);
+        }
+        when 'none' { }
+        default { die "m7-rig: --warm must be proxy, full or none, not '$warm'" }
     }
 
     my $st = %row<rakudo-e-stats>;
     my $line = "| $tag | %row<hash-r> | %row<hash-n> | {sprintf '%.3f', %row<rakudo-e>} | {sprintf '%.3f', %row<nqp-e>} | "
-             ~ "{$st<misses> // '-'} | {$st<hits> // '-'} | {%sweep<warm> // '-'} | {%sweep<new>.join(' ') || 'none'} | |";
+             ~ "{$st<misses> // '-'} | {$st<hits> // '-'} | $warm-cell | {%sweep<new>.join(' ') || 'none'} | |";
     $dir.add("$tag.md").spurt($line ~ "\n");
     $dir.add('rows.md').spurt($line ~ "\n", :append);
     say $line;
