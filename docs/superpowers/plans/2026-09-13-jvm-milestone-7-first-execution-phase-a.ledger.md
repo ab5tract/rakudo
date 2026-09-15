@@ -67,7 +67,7 @@ by the suites, not by a targeted red.
 | a7 | e965a90438 | f36509da7 | 2.611 | 1.151 | 6815 | 125055 | 3165 | none | struck (kept) |
 | a7b | b3daa412c1 | 9f0417c5d | 2.604 | 1.165 | 6815 | 125055 | - | none | landed (marker true) |
 | a8 | 56e78028bf | 4736905d0 | 2.597 | 1.148 | 6815 | 125055 | 3202 | t/02-rakudo/compose-added-method-precomp.t (stale .precomp, not the change - see ruling) | landed (compile shape) |
-| a6 | 96f643b334 | 4736905d0 | 2.504 | 1.192 | 5661 | 100697 | 3735 | none | |
+| a6 | 96f643b334 | 4736905d0 | 2.504 | 1.192 | 5661 | 100697 | 3735 | none | landed (counters); warm UNVERIFIED, re-taken as a6r |
 
 ## Rulings and deferred minors
 
@@ -868,3 +868,35 @@ $CLAUDE_JOB_DIR/tmp/a6p-make.log). The struck-A6 make earlier the same
 day read 215.383 / 22.369 / 16.790 / 22.839, so the guard's three
 tryfindmethods and two getattrs per closure site cost nothing measurable
 on the compile side.
+
+Ruling (row a6, after the power failure): the lever LANDED on the
+evidence that matters — cold rakudo-e 2.504 s (a8 2.597), misses
+6815 -> 5661 (-1154 lang-meth-call, the 1148 closure sites plus a few),
+hits 125055 -> 100697 (the per-creation method road gone), gates green.
+Its warm 3735 s (a8 3202) is UNVERIFIED, for two independent reasons:
+the session's machine was on battery when it died and is on battery at
+recovery (a laptop's firmware power limits cap sustained clocks
+regardless of the `performance` governor), and this was the first sweep
+after the rig's precomp-cache clear (1f4678a7b2), so 120 modules
+re-precompiled inside it; the client CPU rose only 12 s while wall rose
+531 s, the shape of a throttled machine. The single-server t/02-rakudo
+clock is repeated ONCE on mains as row `a6r` before Phase A closes (an
+invalidated measurement repeated, not a re-measurement for a different
+answer); base..a8 warm numbers remain comparable among themselves, and
+a6r starts the basis that includes the cache clear. Costs if wrong: one
+55-minute sweep.
+
+Task 9 review (rakudo fab6f87110..dab1c6caea, A6'): spec ✅ against the
+ruled design (the op is a line-by-line match for Block.clone's mandatory
+half, setcodeobj order verified, the guard istype-wrapped and timed
+against the point existing consumers read `$!phasers`/`$!why`, regex
+closures keep the method road); quality approved. ⚠️ checked by the
+controller: trailers + evening stamps on all three commits (2026-09-14
+18:15 / 22:30 / 22:45).
+Task 9: minor (deferred): the rig's `rmtree` follows a symlinked
+directory (`.d` is stat-based; `.d && !.l` closes it — folded into Task
+9b); test 6 of closure-static-clone.t no longer pins non-aliasing of a
+method-road Code clone; the twelve-line guard is duplicated at the two
+closure sites; `signature.rakumod:1918` (a Code default value in a
+signature) stays on the method road — recorded here as the brief asked.
+Task 9: complete (commits rakudo fab6f87110..dab1c6caea, review clean; row a6 landed (counters); warm re-taken as a6r on mains)
