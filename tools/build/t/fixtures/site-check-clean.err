@@ -1,0 +1,10 @@
+unit-check /tmp/store/nqp.jar!nqp programs=3 slots=7
+unit-check-prog /tmp/store/nqp.jar!nqp#0 slots=4
+unit-check-prog /tmp/store/nqp.jar!nqp#1 slots=3
+unit-check-prog /tmp/store/nqp.jar!nqp#2 slots=0
+unit-check /tmp/store/rakudo.jar!perl6 programs=1 slots=2
+unit-check-prog /tmp/store/rakudo.jar!perl6#0 slots=2
+site-check /tmp/store/nqp.jar!nqp#0 ordinals=4
+site-check /tmp/store/nqp.jar!nqp#1 ordinals=1
+site-check /tmp/store/rakudo.jar!perl6#0 ordinals=2
+dispatch stats: misses=5667 hits=100711 sites=7427 anon=6
