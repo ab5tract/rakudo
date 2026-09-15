@@ -698,6 +698,11 @@ object RakOps {
      * compiled has (@!compstuff): that case takes the method road, as before.
      * The REPR clone, a clone of the $!do CodeRef re-pointed at the clone, and
      * the code object set on it. Milestone 7, A6'.
+     *
+     * No SC barrier is needed: Ops.clone of the code object nulls its sc,
+     * as Block.clone's REPR clone does. The guard is compile-time only, so
+     * a runtime .wrap of clone is bypassed on the JVM for such code objects
+     * (the method road is taken only for phasers, $!why and @!compstuff).
      */
     @JvmStatic
     fun p6clonecode(obj: SixModelObject?, tc: ThreadContext): SixModelObject? {
