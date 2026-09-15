@@ -551,7 +551,7 @@ Phase B already plans to take.
 **Phase B's inbox** (carried out of Phase A's rulings and deferred
 minors):
 
-1. **The getattr/bindattr road's remaining minors**, ranked here because
+1. **CLOSED by the Phase A fix wave (nqp `fdab66706`): the getattr/bindattr road's remaining minors** (the doc comments and the three-copy note landed; the `RakuObject` narrowing stays deferred), ranked here because
    8c sits on them: the helper doc comments name the handle types as
    `(SixModelObject)Object` / `(SixModelObject,Object)void` where the
    exact descriptors are `(SixModelObject)SixModelObject` /
@@ -594,7 +594,7 @@ minors):
 7. **`dispatchWithDescriptor` still `find`s per record**
    (`Dispatch.kt:193`) — a linear scan on the record path A5 otherwise
    took off the hash maps.
-8. **The site fields' memory model**: `DispatchCallSite.dispatcher` and
+8. **CLOSED by the Phase A fix wave (nqp `fdab66706`): the site fields' memory model** (one volatile immutable `CachedDispatcher` holder): `DispatchCallSite.dispatcher` and
    `dispatcherEpoch` (added by A5) are plain fields, so a torn read pairs
    a fresh epoch with a stale `Dispatcher`. Bounded today because
    `register` runs at load scope only; `@Volatile` or an immutable pair
