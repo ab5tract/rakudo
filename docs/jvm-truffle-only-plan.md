@@ -154,8 +154,8 @@ honest headline is that only one of them moved a counter: cold
 `rakudo -e` went 2.502 -> 2.504 s from base to the closing row a6 with
 dispatch misses 6815 -> 5661 and hits 125055 -> 100697, cold `nqp -e`
 1.135 -> 1.192 s, and warm `t/02-rakudo` ran 3204 -> 3202 s over the
-comparable base..a8 series (best 3153 at a5; a6's warm number was not
-gathered — the box was on battery and it was the first sweep after the
+comparable base..8c (the ledger's row `a8`) series (best 3153 at a5;
+a6's warm number was not gathered — the box was on battery and it was the first sweep after the
 rig's precomp-cache clear). Three things landed: **7b**, which moved the
 generated runners' runtime jars off `-Xbootclasspath/a` so the
 runtime-tree `@TruffleBoundary`s are real under every nqp runner; **8c**,

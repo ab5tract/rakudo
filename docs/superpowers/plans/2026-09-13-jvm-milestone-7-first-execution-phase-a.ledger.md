@@ -423,6 +423,18 @@ classlib op — NQP's control-flow categories included (`EX_CAT_NEXT`,
 of propagating inside compiled code. Behaviour-preserving, performance-
 relevant, and a plausible reason the lever moved neither clock; the
 `NQP_CLASSLIB_INLINE=1` knob is the A/B if Phase B measures it.
+CORRECTION (fix wave, 2026-09-15): the clause above about NQP's
+control-flow categories is wrong and the findings bullet has been
+rewritten. Every throwing op is registered `:cont`
+(`nqp/src/vm/jvm/QAST/Compiler.nqp:511-529`) and the encoder refuses the
+classlib road for a `:cont` op (`nqp/src/vm/jvm/QAST/TruffleEncoder.nqp:2567`,
+`cbail('classlib cont op ...')`), so NQP control flow never leaves
+through `NqpOps.classlib`. The only exception that can cross the
+boundary is one raised inside a classlib op that re-enters guest code
+(the binder's `ACCEPTS`, `p6bindsig` and friends) — a narrow path. The
+item stays in Phase B's inbox as that narrow claim, with
+`NQP_CLASSLIB_INLINE=1` as its A/B on a workload that actually throws
+through a classlib op.
 Task 7: minor (deferred): the `NFGString.of` boundary also hides the
 `isEmpty` short-circuit and the interned-hit read (a miss-path-only
 boundary would keep the hit path PE-visible); the marker uses `any`
@@ -946,3 +958,46 @@ close, on the final tree (no re-measurement of any kind, user rule
 Task 10: complete (docs only; Phase A CLOSED — landed 7b, 8c, A6';
 struck A1, A3, A4, A5, A7, A8 and A6-as-specified; A2 diagnostics.
 NEXT = the Phase B plan, written from the a6 row).
+
+Task 10 review (rakudo 832beeccd0..9789a8d7bf, docs only): spec ✅ —
+every findings cell, the Phase B starting numbers and all nine inbox
+bullets trace to the ledger; both pushes confirmed by the
+remote-tracking refs. One Important: the prose says "base..a8" (the
+ledger's row tag) where the published table labels that row 8c and
+gives the A8 spike its own row — a wording collision. Ruling: fixed in
+the single fix wave after the final whole-branch review, together with
+that review's findings (one dispatch, not two). Minors: "spread over
+the series" mixes bases; "1.6 % across a2..a5" is base..a5;
+"every threshold worse in every round" over-states 150 (5 of 7);
+"ten levers" vs twelve rows; "one 8 GB server" from the template.
+
+Final whole-branch review (rakudo 5066de7070..9789a8d7bf, nqp
+c17d93d27..4736905d0): "ready to build Phase B on: with fixes". No
+correctness defect in the four cross-cutting risks checked to source.
+Important: (1) the classlib-boundary deopt-on-exception claim (findings
+inbox item 4, Task 7 review note) is over-stated — every throwing op is
+`:cont` and the encoder refuses the classlib road for a `:cont` op
+(TruffleEncoder.nqp:2567), so control flow never leaves through
+`NqpOps.classlib`; only an exception raised inside a classlib op that
+re-enters guest code can; (2) the `unitEntry && USE_BINDER` invariant
+has a slot-0 test only and Phase B rewrites the code that maintains it;
+(3) the in-build stage JavaExec tasks still on the boot class path with
+a now-false comment; (4) `dispatcher`/`dispatcherEpoch` an
+unsynchronized pair. Triage of deferred minors recorded in the review.
+Ruling (fix wave, one dispatch): lands now, runtime-jar only —
+(2) the widened table test + a negative case; (4) one `@Volatile`
+immutable (dispatcher, epoch) holder; `lateinit stableIndex` -> a plain
+initialized map re-created in checkAndDisectInput; the `readSlot`/
+`writeSlot` descriptor comments + the three-copy note; a
+`NQP_CLASSLIB_INLINE=1` assertion in t/nqp/125; and in docs/tools: (1)
+restated in the findings and here, the "base..a8" wording (Task 10
+review) -> "base..8c (the ledger's row a8)", m7-rig.raku:9 comment,
+the baseline header "22 files" -> 24. Goes to Phase B's FIRST build
+(a buildSrc/gradle or setting edit would cost a full rebuild now):
+(3) the stage tasks' class path + comment, GenerateRunnerTask's stale
+comments and the `bootEntries` name, the twelve-line guard extracted
+into one `#?if jvm` helper in code.rakumod, and `p6clonecode`'s KDoc
+(no SC barrier because clone nulls sc; the guard is compile-time only,
+so a runtime `.wrap` of `clone` is bypassed on the JVM). Costs if
+wrong: nothing; every item is a comment, a test or a fence.
+Memory hygiene (#11) done by the controller.

@@ -408,8 +408,9 @@ Rig: `tools/build/m7-rig.raku`; rows are cold `rakudo-j -e 'say 1'` and
 rakudo run, and warm `t/02-rakudo` (306 files) on one 8 GB eval server.
 **From row a6 on, the rig's per-lever row is the two cold rows plus warm
 `t/01-sanity`** (Task 9b, user rule 2026-09-15: no fine-grained gating),
-so the warm `t/02-rakudo` column is a series taken base..a8 and closed
-there; the gates are the nqp suite and `t/01-sanity`.
+so the warm `t/02-rakudo` column is a series taken base..8c (the
+ledger's row `a8`) and closed there; the gates are the nqp suite and
+`t/01-sanity`.
 
 | lever | rakudo / nqp hash | cold rakudo-e | cold nqp-e | misses | warm t/02-rakudo | verdict |
 |---|---|---|---|---|---|---|
@@ -426,8 +427,9 @@ there; the gates are the nqp suite and `t/01-sanity`.
 | 8c constant handle per branch | 56e78028bf / 4736905d0 | 2.597 s | 1.148 s | 6815 | 3202 s | landed (compile shape) |
 | A6' static clone road | 96f643b334 / 4736905d0 | 2.504 s | 1.192 s | **5661** | 3735 s (not gathered: battery + first post-cache-clear sweep) | landed (counters) |
 
-Hits, the second counter, are 125055 for every row base..a8 and **100697**
-at a6. The cold clocks' own spread over the series is 2.50-2.64 s
+Hits, the second counter, are 125055 for every row base..8c (the
+ledger's row `a8`) and **100697** at a6. The cold clocks' own spread
+over the series is 2.50-2.64 s
 (rakudo) and 1.09-1.19 s (nqp); the warm series runs 3204, 3232, 3193,
 3209, 3179, 3153, 3165, 3202 — a 1.6 % drift across a2..a5 that no single
 row can claim.
@@ -539,8 +541,8 @@ open for Phase B, where `NQP_CLASSLIB_INLINE=1` is the one-command A/B.
 `4736905d0`, cold rakudo-e **2.504 s**, cold nqp-e **1.192 s**, misses
 **5661**, hits **100697**, histogram `3472 lang-meth-call` /
 `1947 lang-call` / `206 boot-syscall`. The warm basis is the comparable
-base..a8 series (3204 -> 3202 s, best 3153 at a5); a6's own warm number
-is not gathered (the box was on battery and it was the first sweep after
+base..8c (the ledger's row `a8`) series (3204 -> 3202 s, best 3153 at
+a5); a6's own warm number is not gathered (the box was on battery and it was the first sweep after
 the rig's precomp-cache clear, so 120 modules re-precompiled inside it:
 client CPU rose 12 s while wall rose 531 s). Per the user rule of
 2026-09-15 it is not re-run; the next `t/02-rakudo` clock is the one
@@ -564,13 +566,25 @@ minors):
    runtime-tree boundaries stay invisible to the JVM that compiles nqp's
    own stages. Compile-time only; 7b fixed the generated runners, not
    these.
-4. **The classlib boundary's deopt-on-exception**: `@TruffleBoundary` on
-   `NqpOps.classlib` (and on the table road's `run()`) uses the default
-   `transferToInterpreterOnException = true`, so every exception leaving
-   a classlib op — NQP's control-flow categories included (`EX_CAT_NEXT`,
-   `LAST`, `RETURN`) — deoptimizes the enclosing compiled root instead of
-   propagating inside compiled code. A plausible reason A7 moved neither
-   clock; `NQP_CLASSLIB_INLINE=1` is the A/B.
+4. **The classlib boundary's deopt-on-exception, as a narrow claim**:
+   `@TruffleBoundary` on `NqpOps.classlib` (and on the table road's
+   `run()`) uses the default `transferToInterpreterOnException = true`,
+   so an exception leaving a classlib op deoptimizes the enclosing
+   compiled root instead of propagating inside compiled code. The
+   earlier form of this item said NQP's control-flow categories
+   (`EX_CAT_NEXT`, `LAST`, `RETURN`) travel that way, and that is
+   **wrong**: every throwing op is registered `:cont`
+   (`nqp/src/vm/jvm/QAST/Compiler.nqp:511-529`) and the encoder refuses
+   the classlib road for a `:cont` op
+   (`nqp/src/vm/jvm/QAST/TruffleEncoder.nqp:2567`, `cbail('classlib
+   cont op ...')`), so NQP control flow never leaves through
+   `NqpOps.classlib` at all. What is left is the one exception that
+   *can* cross the boundary: one raised inside a classlib op that
+   re-enters guest code — the binder's `ACCEPTS`, `p6bindsig` and
+   friends — a narrow path. The item stays in the inbox as that narrow
+   claim, and its A/B is `NQP_CLASSLIB_INLINE=1` on a workload that
+   actually throws through a classlib op (not a workload that merely
+   uses `next`/`last`/`return`).
 5. **The promotion list (A7 Step 8) is empty** and stays open: no
    classlib op has been promoted to a sited node, and the trigger that
    would have found one never fired.
