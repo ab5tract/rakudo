@@ -1057,6 +1057,64 @@ hard reset) reverts stage0 to v1 and breaks the build.
 
 ---
 
+## Milestone 7, Phase C: the persisted miss (2026-09-15)
+
+### (a) C0, the spike
+
+Instrument: `NQP_DISPATCH_DUMP=<path>` (`DispatchDump.kt`, nqp-runtime), a
+shutdown hook that prints every registered site and each installed program
+in a normalised text form where every reference is `obj:<handle>:<idx>`,
+`code:<handle>:<idx>`, `st:<handle>:<idx>` or `NP(<class>:<type>:<reason>)`.
+Analysis: `tools/build/dispatch-dump-diff.raku`. Two cold
+`RAKUDO_RAKUAST=1 ./rakudo-j -e ''` runs on rakudo `9bfa3fe86c` / nqp
+`b51c1a0db` (the Phase B close):
+
+| dispatcher | sites | programs | persistable | unpersistable | same in run 2 | misses |
+|---|---|---|---|---|---|---|
+| lang-meth-call | 2145 | 2450 | 2440 | 10 | 2448 | 2872 |
+| lang-call | 1910 | 1912 | 1907 | 5 | 1908 | 1909 |
+| boot-syscall | 206 | 206 | 206 | 0 | 206 | 206 |
+| raku-assign | 35 | 35 | 0 | 35 | 35 | 35 |
+| raku-meth-call-qualified | 1 | 1 | 1 | 0 | 1 | 1 |
+| total | 4297 | 4604 | 4554 | 50 | 4598 | 5023 |
+
+- **98.9 % of the programs are persistable** (4554 of 4604); the two runs'
+  dumps are byte-identical (`diff` empty), so the recorded outcome of the
+  trivial program is deterministic and structurally stable.
+- **Misses vs programs**: 5023 misses, 4604 installed programs, 4297 sites
+  that recorded, 2135 sites parsed but never dispatched, 4 anonymous sites
+  with programs (the `-e` unit's own). The 419 misses above the program
+  count are polymorphic sites' interpreted-tail hits (a program past the
+  folded prefix still counts as a miss in `NqpDispatch.miss`) and
+  re-recordings. The persisted share of first-execution work is about 4550
+  of the 5023 misses; what remains after Phase C is the 50 unpersistable
+  programs, the anonymous sites and the tail hits.
+- **Unpersistable causes** (programs carrying each): 40 `CodeRef` with no SC
+  (all 35 `raku-assign` outcomes invoke a runtime-made code ref; 5
+  `lang-meth-call` on the bootstrap KnowHOW's `find_method`/`new_type`/
+  `name`, Kotlin-made methods); 5 `RakuObject4` with no SC (runtime-made
+  Raku objects in `lang-call` bind guards); 4 `VMHashInstance` with no SC (an
+  nqp class's runtime-published method cache as a `lookup` table); 1
+  `VMArrayInstance` owned by an SC object but not in its root set
+  (`@!dispatchees`). None is worth a naming scheme in this phase.
+- **Per artifact** (sites that recorded / programs): CORE.c 1526/1527, nqp's
+  QAST.jar 1111/1113 (the trivial program still runs the QAST compiler), v6c
+  BOOTSTRAP 831/1095, NQPCORE 101/115, NQPHLL 100/109, Metamodel 92/104,
+  Actions 87/91, Ops 78/78, Grammar 59/59, QRegex 39/40, nqpmo 38/38,
+  rakudo.jar 35/35, QASTNode 35/35, ModuleLoader (Perl6) 35/35, Compiler
+  33/33, CORE.d 22/22, Optimizer 20/20, NQPP6QRegex 18/18, SysConfig 16/16,
+  ModuleLoader (nqp) 10/10, v6d 7/7. A third of the sites are in nqp's
+  jars, so Rakudo's training run must write nqp's artifacts too.
+- **Five identity strings are shared by two live sites each** (three in v6c,
+  one each in NQPCORE and NQPHLL): the same program parsed twice. The
+  producer merges programs per identity.
+- Every SC referenced resolves by handle through `tc.gc.scs`, including the
+  bootstrap's `__6MODEL_CORE__` (`KnowHOWBootstrapper.kt:110`).
+
+The instrument stays: `NQP_DISPATCH_DUMP` is the normalisation verify mode
+compares with. Plan and rulings:
+`docs/superpowers/plans/2026-09-15-jvm-milestone-7-first-execution-phase-c.md`.
+
 ## Things that cost time to learn
 
 **The build graph does not express the nqp dependency.** No rakudo target
