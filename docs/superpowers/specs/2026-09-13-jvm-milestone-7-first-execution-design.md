@@ -166,13 +166,13 @@ with the lever's commit hashes (both trees):
    count, wall clock and the red list against the milestone-5
    baseline for that directory.
 
-**Revision 2026-09-14 (user, during Phase A, after eight rows):** the
-per-lever warm clock is `t/01-sanity` on one warm server (about 56 s;
-it is what discriminated), `t/02-rakudo` per lever is a GATE only (its
-red list against the baseline, run on three servers in parallel, about
-20 minutes), and the single-server `t/02-rakudo` clock runs only at a
-phase close (Phase A's a6 row, then B and C). A per-lever row is about
-ten minutes instead of fifty-five.
+**Revision 2026-09-15 (user, during Phase A, supersedes the 2026-09-14
+revision):** a lever's row is the two cold rows and `t/01-sanity` warm
+on one server, nothing else; the correctness gates are the nqp suite and
+`t/01-sanity` as before; there is NO per-lever `t/02-rakudo` (neither as
+a clock nor as a parallel gate) and NO re-take of a suspect row; the
+whole `t/` clock runs once at the milestone close. Sensible benchmarks,
+no additional gating of any kind.
 Whole `t/` runs once, at close. CORE.c compile time is recorded
 whenever a setting recompile happens anyway (A6, Phase B) and never
 measured on purpose. Every benchmark run is a stock runner, never the
