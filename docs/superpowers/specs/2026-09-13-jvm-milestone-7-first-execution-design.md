@@ -287,6 +287,28 @@ Phase B does not do phase 2 (SC demand). Persisted programs address
 SC objects by handle and index, the addressing phase 2 will need, so
 nothing here forecloses it.
 
+**Phase B: closed 2026-09-15** (rakudo `107eca63a3`, nqp `318558c2d`,
+plus nine v2 stage0 jars that stay uncommitted by user rule). Everything
+above landed: the mapped store of stored entries, the kotlinx codec,
+shells with lazy bodies, per-block static lexical values, site identity
+through the compile key, the empty `unit.dispatch` table sized by the
+encoder's per-block count, stage0 regenerated once as v2, and the v1
+reader deleted. Row `b`: cold `rakudo -e` 2.461 s, cold `nqp -e`
+1.160 s, misses 5667, hits 100711, warm `t/01-sanity` 50 s -- all inside
+the Phase A spread, so the format change is clock-neutral at the top
+level while the per-stage rows moved as the spec expected (the decode
+stage is gone; the cost reappears inside `deserialize-program` and the
+SC read). Plan and ledger:
+`docs/superpowers/plans/2026-09-15-jvm-milestone-7-first-execution-phase-b.md`
+and its `.ledger.md`; the format:
+`docs/jvm-unit-lazy-loading.md`; the numbers and the rulings:
+`docs/jvm-perf-findings-2026-09.md`, "Milestone 7, Phase B". One
+correction the phase forced on the letter above: a site's identity is
+**not** (unit id, program index, ordinal) -- a unit id is
+author-supplied and Rakudo builds five artifacts as `perl6`, which put
+one unit's programs in another's place. It is (store name + unit id,
+program index, ordinal), and the string is a live-process key only.
+
 ## Phase C: the persisted miss
 
 **C0, the spike, first.** Two cold `rakudo -e` runs with the recorder
