@@ -212,6 +212,27 @@ class RakuAST::Code
         nqp::bindattr(self, RakuAST::Code, '$!custom-args', True);
     }
 
+#?if jvm
+    # The static clone road (milestone 7 A6'): p6clonecode does what
+    # Block.clone / Code.clone do for a code object with no phasers and
+    # no declarator docs (both static, checked here); a pending
+    # compile-time fixup is checked by the op at run time. tryfindmethod,
+    # not findmethod: the first CORE.c files compile before the setting
+    # installs these methods, and findmethod throws there. A missing
+    # clone means no static road either way.
+    method IMPL-STATIC-CLONE-ROAD(Mu $code-obj, Bool $regex) {
+        return 0 if $regex;
+        my $clone-meth := nqp::tryfindmethod($code-obj, 'clone');
+        return 0 if nqp::isnull($clone-meth);
+        my $block-clone := nqp::tryfindmethod(Block, 'clone');
+        my $code-clone  := nqp::tryfindmethod(Code, 'clone');
+        (nqp::eqaddr($clone-meth, $block-clone) || nqp::eqaddr($clone-meth, $code-clone))
+            && (!nqp::istype($code-obj, Block)
+                || (!nqp::ishash(nqp::getattr($code-obj, Block, '$!phasers'))
+                    && nqp::isnull(nqp::getattr($code-obj, Block, '$!why'))))
+    }
+#?endif
+
     method IMPL-CLOSURE-QAST(RakuAST::IMPL::QASTContext $context, Bool :$regex) {
         my $code-obj := self.meta-object;
         $context.ensure-sc($code-obj);
@@ -219,21 +240,7 @@ class RakuAST::Code
         my $wval := QAST::WVal.new( :value($code-obj) ).annotate_self('past_block', $!qast-block).annotate_self('code_object', $code-obj);
         my int $static-clone := 0;
 #?if jvm
-        # The static clone road (milestone 7 A6'): p6clonecode does what
-        # Block.clone / Code.clone do for a code object with no phasers and
-        # no declarator docs (both static, checked here); a pending
-        # compile-time fixup is checked by the op at run time.
-        # tryfindmethod, not findmethod: the first CORE.c files compile
-        # before the setting installs these methods, and findmethod throws
-        # there. A missing clone means no static road either way.
-        my $clone-meth := nqp::tryfindmethod($code-obj, 'clone');
-        my $block-clone := nqp::tryfindmethod(Block, 'clone');
-        my $code-clone  := nqp::tryfindmethod(Code, 'clone');
-        $static-clone := !$regex && !nqp::isnull($clone-meth)
-            && (nqp::eqaddr($clone-meth, $block-clone) || nqp::eqaddr($clone-meth, $code-clone))
-            && (!nqp::istype($code-obj, Block)
-                || (!nqp::ishash(nqp::getattr($code-obj, Block, '$!phasers'))
-                    && nqp::isnull(nqp::getattr($code-obj, Block, '$!why'))));
+        $static-clone := self.IMPL-STATIC-CLONE-ROAD($code-obj, $regex);
 #?endif
         my $clone := $static-clone
             ?? QAST::Op.new( :op('p6clonecode'), $wval )
@@ -1002,17 +1009,8 @@ class RakuAST::Code
         my $throwaway-wval := QAST::WVal.new( :value($throwaway_block) ).annotate_self('past_block', $throwaway_block_past).annotate_self('code_object', $throwaway_block);
         my int $static-throwaway := 0;
 #?if jvm
-        # The static clone road (milestone 7 A6'), as in IMPL-CLOSURE-QAST:
-        # tryfindmethod because the earliest CORE.c files compile before the
-        # setting installs Block.clone / Code.clone.
-        my $clone-meth := nqp::tryfindmethod($throwaway_block, 'clone');
-        my $block-clone := nqp::tryfindmethod(Block, 'clone');
-        my $code-clone  := nqp::tryfindmethod(Code, 'clone');
-        $static-throwaway := !nqp::isnull($clone-meth)
-            && (nqp::eqaddr($clone-meth, $block-clone) || nqp::eqaddr($clone-meth, $code-clone))
-            && (!nqp::istype($throwaway_block, Block)
-                || (!nqp::ishash(nqp::getattr($throwaway_block, Block, '$!phasers'))
-                    && nqp::isnull(nqp::getattr($throwaway_block, Block, '$!why'))));
+        # Never a regex here: the throwaway block is a plain Block.
+        $static-throwaway := self.IMPL-STATIC-CLONE-ROAD($throwaway_block, False);
 #?endif
         $fixup.push(QAST::Op.new(
                 :op('p6capturelex'),
