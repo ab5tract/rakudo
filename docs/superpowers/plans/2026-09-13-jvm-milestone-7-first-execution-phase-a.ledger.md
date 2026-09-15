@@ -910,3 +910,7 @@ recorded as unverified and that is the end of it); the whole t/ clock
 runs once at the milestone close. Task 9b's proxy mode drops the
 t/02-rakudo gate. Recorded in the spec (Task 0) and memory
 ([[no-fine-grained-gating]]).
+
+User rule amendment (2026-09-15): a failure to gather a benchmark does not mean run it again — a failed, cut-off or throttled run is recorded as not gathered with its reason, and the number is taken at the next point the plan already measures.
+
+Task 9b: rig proxy mode landed (3e214b5a18): cold rows + t/01-sanity warm; no per-lever t/02-rakudo (user rule 2026-09-15); proxy-smoke sanity 51s (unplugged, not a row)
