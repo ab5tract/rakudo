@@ -143,6 +143,24 @@ If you add a cache keyed by or holding run-owned objects (routines,
 STables, SCs, anything reachable from a `GlobalContext`), register its
 clear the same way.
 
+**Unit stores are the exception, and are meant to be shared.** Since the
+artifact v2 work (milestone 7 Phase B, 2026-09-15;
+`docs/jvm-unit-lazy-loading.md`) a unit artifact is opened as one
+read-only memory mapping and kept in `UnitLoader.stores`, keyed by path
+and shared by every run -- `prime(path)` opens one ahead of time. A store
+holds no run-owned object: it is bytes plus an index, so there is nothing
+for `resetAll()` to forget, and nothing to register. What each run does
+pay is building the code-ref shells and running the deserialize program;
+records and program texts are decoded from the mapping on demand, so a
+run never parses an artifact it does not touch.
+
+Two consequences for the server. **A rebuilt jar needs a server
+restart** -- it already did, since the server had the old jar loaded, but
+now the reason is sharper: a file replaced on disk while mapped can fault
+the process. And the mapping means the second and later runs read program
+text out of the page cache rather than out of the heap, so the first run
+after a restart is the one that pays.
+
 ## Post-mortem: the ~180MB-per-run leak (fixed 2026-08-26)
 
 For a while every run retained ~180MB that survived GC, capping a server
