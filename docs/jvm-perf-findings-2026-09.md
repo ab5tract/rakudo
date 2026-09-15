@@ -605,6 +605,435 @@ minors):
 
 ---
 
+## Milestone 7, Phase B: the format, once (2026-09-15)
+
+Spec: `docs/superpowers/specs/2026-09-13-jvm-milestone-7-first-execution-design.md`,
+"Phase B", over
+`docs/superpowers/specs/2026-09-13-jvm-lazy-unit-loading-design.md`
+tasks 1.1-1.6. Plan and ledger:
+`docs/superpowers/plans/2026-09-15-jvm-milestone-7-first-execution-phase-b*.md`.
+The format itself is documented in `docs/jvm-unit-lazy-loading.md`.
+
+What landed: artifact **v2** -- a stored (uncompressed, mappable) zip of
+five entries, one mapping sliced per entry, three fixed-width index
+tables, a `BlockRecord` per block instead of one global blob, lazy
+`StaticCodeInfo` bodies behind `ensureBody()`, one load road for a file
+and for an in-memory unit, **site identity** through the compile key, an
+**empty `unit.dispatch`** table, stage0 regenerated as v2, and the v1
+reader deleted.
+
+### (a) The row
+
+| lever | rakudo / nqp hash | cold rakudo-e | cold nqp-e | misses | hits | warm t/01-sanity |
+|---|---|---|---|---|---|---|
+| a6 (Phase A close) | 96f643b334 / 4736905d0 | 2.504 s | 1.192 s | 5661 | 100697 | 51 s (proxy smoke) |
+| **b (Phase B close)** | 107eca63a3 / 318558c2d | **2.461 s** | **1.160 s** | 5667 | 100711 | **50 s** |
+
+Best of five, stock runners, `NQP_UNIT_LOAD_STATS` and
+`NQP_DISPATCH_STATS` on; the rig itself took 70 s. The b run's five
+rakudo walls were 2.50 2.53 2.46 2.67 2.61 and its five nqp walls 1.23
+1.17 1.16 1.22 1.25, so both clocks are **inside the series' own
+spread** (2.50-2.64 s and 1.09-1.19 s across Phase A) and Phase B claims
+neither. Miss histogram, essentially unchanged from a6 (3472 / 1947 /
+206): `lang-meth-call=3473 lang-call=1952 boot-syscall=206
+raku-assign=35 raku-meth-call-qualified=1`; the +6 misses and +14 hits
+over a6 are site-identity bookkeeping, not a behaviour change. New
+counters on the same line: `sites=7427 anon=6` -- of the dispatch sites
+a cold `rakudo -e 'say 1'` builds, six have no identity (helper,
+rv-decont and indy sites; ruling 8).
+
+**The honest summary: the format change is clock-neutral at the top
+level.** It was not undertaken for the cold clock alone -- it is what
+Phase C's persisted miss addresses through, and what phase 2's demand SC
+read needs -- but the per-stage rows below say where the time went, and
+they did move.
+
+### (b) Per-stage, before and after
+
+From the best cold run's `unit-load` lines (v1 = the a6 rig's
+`a6-rakudo-e-run1.err` / `a6-nqp-e-run1.err`; v2 = this rig's
+`b-rakudo-e-run3.err` / `b-nqp-e-run3.err`). **The stage names do not
+line up one to one**: v2 has no decode stage at all, because record
+decoding moved into the `ensureBody` fills that happen during
+`deserialize-program` and `load-block`. Compare `load-total`, and the
+sum of the stages that are pure load-road work.
+
+`CORE.c.setting.jar`, cold `rakudo-j -e 'say 1'` (ms):
+
+| v1 stage | v1 | v2 stage | v2 |
+|---|---|---|---|
+| `read-file` (5892366 B) | 4.05 | `open-store` (56067270 B) | 2.07 |
+| `inflate` (-> 13104735 B) | 54.74 | - | - |
+| `decode-meta` (19933 blocks, 49963 staticlex) | 27.93 | - | - |
+| `decode-programs` (19933) | 29.60 | - | - |
+| `decompress-sc` (-> 28159756 B) | 18.46 | - | - |
+| `decode-nested` (4) | 0.14 | - | - |
+| **`decode-total`** | **133.77** | (no decode stage) | - |
+| `build-table` (19933 + 4x4 blocks) | 13.74 | `shells` (same) | 22.31 |
+| `sc-stub` (5558 stables, 276103 objects) | 37.82 | `sc-stub` (same) | 83.53 |
+| `sc-finish` | 63.78 | `sc-finish` | 92.89 |
+| `deserialize-program` (+ 4 nested) | 164.02 | `deserialize-program` (+ 4 nested) | 271.17 |
+| `static-lex-values` (49963 rows) | 10.15 | `static-lex-drain` (98 blocks) | 0.20 |
+| `load-block` | 327.63 | `load-block` | 381.64 |
+| **`load-total`** | **653.59** | **`load-total`** | **676.80** |
+| load road only (all but `deserialize-program`/`load-block`) | 263.31 | same | 200.99 |
+
+`nqp.jar`, cold `nqp-j-gradle -e 'say(1)'` (ms):
+
+| v1 stage | v1 | v2 stage | v2 |
+|---|---|---|---|
+| `read-file` (139990 B) | 1.00 | `open-store` (1145720 B) | 22.82 |
+| **`decode-total`** (inflate + meta + programs + sc; 559 blocks, 559 programs) | **19.27** | (no decode stage) | - |
+| `build-table` (559) | 5.19 | `shells` (559) | 1.98 |
+| `sc-stub` (23 stables, 2989 objects) | 0.85 | `sc-stub` | 1.17 |
+| `sc-finish` | 6.18 | `sc-finish` | 2.96 |
+| `deserialize-program` | 628.51 | `deserialize-program` | 581.17 |
+| `static-lex-values` (24 rows) | 0.02 | `static-lex-drain` (0 blocks) | 0.00 |
+| **`load-total`** | **662.37** | **`load-total`** | **612.75** |
+
+What this says:
+
+- **The decode stage is gone, as designed.** 133.8 ms on CORE.c and
+  19.3 ms on nqp.jar of inflate + record decode + program decode + LZ4
+  of the SC blob do not happen. `read-file` -> `open-store` is an
+  `mmap` instead of a 5.9 MB read.
+- **`build-table` -> `shells` is a wash on the big unit and a win on the
+  small one** (13.7 -> 22.3 on CORE.c, 5.2 -> 2.0 on nqp.jar). CORE.c's
+  19933 shells now walk 19933 rows of a mapped index table, which is the
+  first touch of a 1.27 MB entry; nqp.jar's 559 are free.
+- **`static-lex-values` collapses**: 49963 rows applied eagerly at load
+  became 98 blocks drained after deserialization, 10.15 ms -> 0.20 ms.
+  The rest are applied inside the fills of blocks that are entered.
+- **The cost came back inside the stages that execute guest code.**
+  CORE.c's `deserialize-program` 164.0 -> 271.2 and `sc-stub`/`sc-finish`
+  101.6 -> 176.4. Two mechanisms, both expected: the record decode moved
+  there (every block a deserializing program enters fills its body on
+  the spot), and the mapped slices pay page faults on first touch where
+  v1 had already paid one sequential decompress -- the SC blob is 28.2 MB
+  read through a mapping instead of a heap array. Net on CORE.c:
+  **+23 ms on `load-total`, -62 ms on the load road proper**.
+- **nqp.jar is 50 ms faster end to end** (-7.5 %), and that is the unit
+  whose load is nearly all of a cold `nqp -e`. Its `open-store` at
+  22.8 ms is the FIRST store opened in the process and carries the class
+  loading of `UnitStore`, `ZipDirectory` and the kotlinx codec; in the
+  rakudo run, where `rakudo.jar` pays that first (19.5 ms), CORE.c's
+  `open-store` is 2.1 ms.
+
+### (c) Sizes: 8-10x, and the plan's estimate was wrong
+
+Every entry is STORED, so nothing on disk is compressed any more (v1
+deflated `unit.meta` and LZ4'd the SC blob). Bytes:
+
+| artifact | v1 | v2 | v2 breakdown |
+|---|---|---|---|
+| `blib/CORE.c.setting.jar` | 5892366 | **56067438** | index 1267299, records 5426077, programs 21204318, serialized 28159968, dispatch 0, + 4 nested at 1568 |
+| `blib/Perl6/BOOTSTRAP/v6c.jar` | 1299129 | **11269824** | index 404944, records 552603, programs 6117912, serialized 4193837, dispatch 0 |
+| stage2 `nqp.jar` | 139990 | **1145720** | index 41102, records 61969, programs 693906, serialized 348215, dispatch 0 |
+| `rakudo.jar` | 7537 | **22858** | index 921, records 1286, programs 12919, serialized 7204, dispatch 0 |
+| stage0, all 9 jars | 557061 | **4048135** | 7.3x |
+
+**The plan's ruling 1 estimated CORE.c at about 13 MB and was wrong by
+4x.** The error was reading v1's own stage lines as "the uncompressed
+size": `inflate 54.74 bytes=13104735` is the size of the inflated
+`unit.meta`, whose SC member was still LZ4'd inside it; the real
+uncompressed SC is the 28159756 bytes the next line reports. That is
+where the missing 40-odd MB is.
+
+**Compression of stored entries is Phase C's inbox, by user decision
+(2026-09-15).** Compressing an entry costs the mapping, so it is a real
+trade (mmap and demand paging against 8x less disk and page cache), not
+a flag. The same decision put a second rule on the phase: **no jar of
+any type is committed to git until the user says so**, so the nine v2
+stage0 jars exist only in the nqp working tree (see the end of this
+section).
+
+### (d) The build and the gates
+
+CORE.c compile, over the three full makes of the phase, against Phase
+A's makes at about 300 s:
+
+| build | make clean + make | CORE.c |
+|---|---|---|
+| Task 7, the window build (v1 stage0, v2 output) | 854 s | 283 s |
+| Task 8, after stage0 was regenerated as v2 | 861 s | 280 s |
+| Task 9, after the v1 reader was deleted | 863 s | 281 s |
+
+Flat, as expected once stage0 was v2: the window build never actually
+transcoded (`transcode-v1` lines: 0), so deleting the v1 reader could
+not change a clock. **v2 costs the build nothing and the CORE.c compile
+is about 6 % better than Phase A's makes**, which is on the right side
+of noise but is not claimed as a Phase B result.
+
+Every gate clock of the phase (user rule 2026-09-15: gate timings are
+recorded, not just verdicts):
+
+| gate | Task 4 | Task 5 | Task 6 | Task 7 (window) | Task 8 (stage0) | Task 9 (v1 gone) |
+|---|---|---|---|---|---|---|
+| nqp suite, 155 files, one 6 GB server | 189 s | 188 / 193 s | 192 s | 200 s pre-fix, **191 s** post-fix | 192 s | 197 s |
+| `clean buildJvm` | - | - | - | 219 s | 229 s | 255 s |
+| `:nqp-runtime:test` | - | - | 45/45 | 46/46 in 11 s | 46/46 in 25 s | 36/36 in 10 s |
+| `Configure.pl --gen-nqp` | - | - | - | 3 s | 7 s | 7 s |
+| `make clean && make` | - | - | - | 854 s | 861 s | 863 s |
+| CORE.c inside it | - | - | - | 283 s | 280 s | 281 s |
+| `t/01-sanity` (25 files, 303 tests) | - | - | - | 58 s | 59 s | 60 s |
+
+Phase A closed the suite at 186-200 s, so it is flat across the whole
+phase. `:nqp-runtime:test` grows 45 -> 46 with the namespace regression
+test and drops to 36 when `UnitFormatTest`'s ten leave with the v1
+reader. `jBootstrapFiles` (the stage0 regeneration itself) was 216 s.
+Task 6's suite run first read **587 s**; a diagnostic re-run on the same
+jars read 192 s, and the 587 s run had spanned a laptop suspend.
+
+**The correctness gate before stage0 was regenerated** was one warm
+`t/02-rakudo` sweep: 307 files, **red=21, new-red=0** against the
+24-file baseline, and three baseline reds newly green (`15-gh_1202.t`,
+`16-begin-time-eval.t`, `native-argument-snapshot.t`). It took 3455 s,
+but **that clock is not comparable to the single-server 3200 s series**:
+four attempts at the planned one-server `--chunk=307` shape were each
+killed by the harness's low-memory guard seconds after the server
+banner, with MemAvailable at 25-27 GB and nothing else running, so the
+sweep ran as seven sequential servers at `--heap=4 --chunk=50`. The red
+list is what the gate needed and the red list is clean; the launcher
+refusal is an open question (below).
+
+One red was found and fixed during the phase, and it was the phase's
+sharpest lesson. The window build's first `make` died in the CORE.c
+compile with `Lexical '$*STACK-ID' not found in guard-type-concreteness`
+-- inside a sub that reads no lexical, because the frame was running
+**another unit's program**. Site identity had keyed a store-backed
+program by `"<unit id>#<program index>"` on the assumption that a unit
+id identifies an artifact; Rakudo's Makefile passes `--javaclass=perl6`
+to `rakudo.jar`, `v6c.jar`, `v6d.jar`, `v6e.jar` and `rakudo-debug.jar`
+alike, so with two of them in one process, program N of whichever loaded
+first answered for the other's. The key is now the store's name and the
+unit id together (`ProgramUnit.identityNamespace`); see the rulings.
+
+### (e) The rulings that changed the spec's letter
+
+The plan's twelve, written before Task 3 and open to veto until it:
+
+1. **v1 is fully deflated; v2 entries are stored**, sizes recorded not
+   reduced. Wrong -> artifacts 8-10x on disk with no owner (it happened,
+   and is item (c)).
+2. **`unit.serialized` is written raw** and the mapped slice handed to
+   the reader. Wrong -> another copy per load, and phase 2 has no mapped
+   SC to demand-read.
+3. **The call-site table is dead**; v2 drops it and Phase C carries the
+   descriptor inline in the slot. Wrong -> Phase C's payload has no way
+   to name a descriptor and the schema must change after stage0 is
+   frozen.
+4. **Every shell is built eagerly** (the reader needs 97 % of them);
+   bodies are what go lazy. Wrong -> either a wasted lazy layer or a
+   per-lookup cost on the 97 %.
+5. **Static lexical values live per block** and are applied on body
+   fill, queued until the SC is ready. Wrong -> a block's values are
+   applied before its SC exists, or all 49963 are applied at load again.
+6. **Roots have no unit identity today**; the compile key
+   `"<unit>#<index>"` names the Source for store-backed units; in-memory
+   units keep the text key and get no identity. Wrong -> identical
+   `EVAL` texts stop sharing a parsed root (memory growth over a server
+   sweep), never a wrong answer.
+7. **Loop bodies are emitted twice**, so the ordinal is keyed by the
+   `DISPATCH` node's wire offset; the encoder's per-block count sizes
+   the slot table; `NQP_SITE_CHECK` compares the two. Wrong -> one node
+   numbered twice and every later ordinal in the program shifted, so
+   Phase C loads the wrong slot.
+8. **Helper, rv-decont and indy sites have no identity**; the schema
+   tolerates it. Wrong -> a null identity is an error in Phase C instead
+   of "no persisted record for this site". Measured: 6 of 7427 sites in
+   a cold `rakudo -e`.
+9. **In-memory units take the same store road** through a heap image,
+   and v1 is transcoded into that image during the window. Wrong -> two
+   load roads to maintain, which is what v1 had.
+10. **The `mh` identity test becomes a `staticInfo` identity test**
+    before `mh` goes lazy (`CallFrame.kt:40,320`,
+    `Syscalls.kt:396,409`). Wrong -> spinning a body to compare handles,
+    i.e. no laziness where it matters, or a wrong comparison. It
+    narrowed one real case: a frame running a `freshcoderef`'d outer no
+    longer matches by shared `mh`+`compUnit`; `RakOps` already behaved
+    that way.
+11. **kotlinx `AbstractEncoder`/`AbstractDecoder` under
+    `@OptIn(ExperimentalSerializationApi)`** -- a deliberate deviation
+    from the project's "stable API only". Wrong -> a kotlinx upgrade
+    breaks the codec.
+12. **Gates**: the window build gets the nqp suite + make + `t/01-sanity`
+    + one warm `t/02-rakudo` before stage0 is regenerated; the two later
+    steps get the first three. Wrong -> a regression baked into stage0,
+    which is the expensive one to find.
+
+The rulings made while executing, each with what it costs if it is
+wrong:
+
+- **Pre-flight, Task 1**: the stage tasks set `classpath` inside
+  `doFirst`, not at configuration time, because `thirdPartySorted()`
+  resolves a configuration that must stay lazy. Cost: a
+  configuration-cache warning.
+- **Pre-flight, Task 2**: the codec's null-mark test declares its
+  `@Serializable` class as a nested class of the test class -- the
+  kotlinx plugin rejects local serializable classes. Cost: nothing.
+- **Pre-flight, Task 6**: `ProgramIdentity.siteKey(ordinal): String` is
+  what Java calls; `SiteIdentity` stays a Kotlin value class (which is
+  its underlying type in Java, so it has no `getKey()`). Cost: nothing.
+- **UTF-8 replacement stays** (`UTF_8.decode` maps malformed input to
+  U+FFFD rather than throwing): the codec reads what the writer wrote,
+  and the index's (offset, length) tables bound every read, so
+  corruption surfaces as a bounds error or a decode exception, both hard
+  errors naming the unit. Cost if wrong: a corrupt artifact decodes a
+  program text to garbage instead of failing at open, and the engine's
+  wire decoder fails on it instead.
+- **`_sourceLine` keeps its pre-existing default -1**, not the plan's 0
+  (a transcription slip: -1 is guest-visible through
+  `getcodelocation`). Cost: nothing.
+- **Two `internal` raw accessors on `StaticCodeInfo`**
+  (`rawOLexicalIdx`, `rawSetOLexStatic`) exist so that applying static
+  lexical values inside a fill does not re-enter `ensureBody`. Cost if
+  wrong: a `StackOverflowError` at unit load.
+- **A static lexical row naming a gap qbid is dropped**, with an
+  `NQP_CODE_WHY`-gated line, not a hard error: `cuid_to_qbid` allocates
+  a qbid for every cuid in `%*BLOCK_LEX_VALUES` including blocks never
+  compiled into the unit, and v1 dropped those rows silently. Cost:
+  nothing (behaviour-preserving); the plan's `dieInternal` would have
+  broken the build.
+- **`t/nqp/123-unit-artifact.t` subtests 2-3 assert the v2 shape** by
+  walking the zip's local-header chain (the originals asserted
+  `unit.meta` and scanned the whole jar for `.class`, which now hits the
+  string literal `ModuleLoader.class` in a stored program text). Cost:
+  nothing; the rewrite is strictly stronger.
+- **`applyLexValues` throws `IllegalStateException`** (there is no
+  `ThreadContext` inside a fill; `UnitLoader` wraps load-time failures
+  in `dieInternal`), so a fill forced mid-execution surfaces at the
+  block's first invocation rather than at load. Cost: an error message
+  shape.
+- **`UnitImageWriter`'s `require()` checks fire at write time for
+  in-memory units too** (the invariants v1 enforced at read). Cost: an
+  in-memory unit with a corrupt table dies at write instead of later.
+- **`isStoreBacked()` tests the store's NAME**, not `cu is ProgramUnit`
+  (since Task 5 every unit is a `ProgramUnit`): a file path never starts
+  with `<`, and the in-memory makers name theirs `<memory:...>` and
+  `<buffer>`. Cost if wrong: an in-memory unit's programs keyed by
+  identity are parsed per compile instead of shared by text -- memory
+  growth over a long server sweep, never a wrong result.
+- **`$*BREC` is read in the encoder through `nqp::getlexdyn`** (null
+  when unbound) rather than `nqp::defined($*BREC)`, which throws on an
+  unbound dynamic. Cost: nothing.
+- **The identity namespace is store name + `!` + unit id**, after the
+  `perl6` collision above. The store name is a file path, so a site
+  identity is no longer a pure function of the artifact's content across
+  machines. Cost if wrong, and this is the one to carry forward: **Phase
+  C must not key anything cross-process by the identity string** -- it
+  resolves a slot through the site's own unit, program index and
+  ordinal.
+- **The chunked `t/02-rakudo` sweep counts as the gate** (7 sequential
+  servers rather than the planned one), because the gate is the red list
+  and the red list is unaffected by chunking; its wall time is recorded
+  but not comparable. Cost: nothing -- the clock was never a Phase B
+  deliverable.
+- **Task 8 produced no diff, so its review is the controller's check of
+  the gate logs**; no reviewer was dispatched. Cost: nothing.
+- **The `Co-Authored-By: Claude Fable 5.1` trailer names the directing
+  session**, not the implementer (implementers run on Opus by the user's
+  model policy), and is the phase's convention on every commit. Cost: it
+  reads as a model attribution if not stated, which is why it is stated
+  here.
+
+### (f) What Phase C inherits
+
+- **The empty `unit.dispatch` table, already addressable.** A program's
+  slot count is the encoder's per-block `DISPATCH` count (`$!dispatches`
+  on `QAST::BlockRecord` -> `UnitImage.dispatchCounts`), and
+  `ProgramUnit.dispatchSlot(programIndex, ordinal)` returns the slot's
+  mapped slice or null. Phase C fills slots; it does not change the
+  index, so **stage0 does not have to be regenerated again**.
+- **The descriptor travels inline in the slot** (ruling 3). The v1
+  per-unit call-site table is gone -- `getCallSites()` returns empty and
+  the engine builds its own `CallSiteDescriptor` from the wire -- so a
+  payload cannot name a descriptor by index.
+- **Anonymous sites** (helper, rv-decont, indy) have no identity and no
+  slot: 6 of 7427 in a cold `rakudo -e`. Phase C treats a null identity
+  as "nothing persisted", not as an error.
+- **The identity string is not a cross-process key.** It embeds this
+  process's store path. Resolve a slot through the site's own unit +
+  program index + ordinal.
+- **`NQP_SITE_CHECK` is the invariant's test.** `site-check` (engine,
+  per program) and `unit-check` (runtime, per unit) both name the unit
+  by `identityNamespace()`, so they join by prefix even where five
+  loaded artifacts share the unit id `perl6`. On a cold
+  `rakudo-j -e 'say 1'`: 2598 site-check programs numbered, max ordinal
+  1060, 26 unit-check lines, and no unit numbers more ordinals than it
+  stores slots.
+- **The five Rakudo units still share `--javaclass=perl6`** (the
+  Makefile's `J_NQP_FLAGS_EXTRA`). The namespace makes it harmless, but
+  it is a latent trap for any future per-unit keying; distinct names per
+  unit would remove it. Left as is: changing the template churns
+  Configure for no behaviour gain.
+- **Whether stored entries should be compressed** -- the user's decision
+  is that this question belongs to Phase C, with item (c)'s sizes as its
+  input.
+- **The single-server sweep's launcher refusals.** Four
+  `--jobs=1 --chunk=307` attempts (heap 6/5/4/3, with and without
+  `watched-run`) were killed by the harness's low-memory guard seconds
+  after the server banner, at 25-27 GB MemAvailable with nothing else
+  running; a 3-file background sweep survives. The milestone close needs
+  a whole-`t/` run on one server, so this has to be understood first --
+  the guard, or the systemd `MemoryMax` scope the server runs in.
+
+**Deferred minors, collected** (each was ruled harmless where it was
+found; the ledger has the context):
+
+- *Docs and comments*: `nqp/build.gradle.kts` still says "boot
+  classpath" at :108, :273, :287 and the snapshot `classpath` at :231 is
+  uncommented; `NqpDeps.runnerJars`' KDoc says "bootclasspath" and its
+  KDoc still claims to mirror the `Makefile.in`/`nqp-j.in` templates;
+  `ProgramUnit`'s KDoc says "two" in-memory makers where a third
+  (`<nested:...>`) exists on the write side only.
+- *Robustness on hand-corrupted artifacts* (unreachable for
+  writer-produced ones): `dispatchSlot` never checks
+  `firstSlot + slotCount <= dispatchSlotCount`; negative offsets pass
+  the `off + len > remaining` guards; `ZipDirectory`'s cen/loc offsets
+  are unbounded below; `require(b.outerQbid < nb)` has no lower bound;
+  `UnitStore.open(ByteBuffer)` reads from index 0 while `isUnit` honours
+  `position()`; heap-opened stores hand out writable slices where the
+  mapped path hands out read-only ones. Phase C should revisit these
+  when slots become writable.
+- *Test coverage*: no test for a zero-block unit, a gap at qbid 0,
+  `entry()`, `ZipDirectory`'s non-STORED refusal, or
+  `UnitLoader.load(tc, ByteArray)`'s rejection path; the codec tests do
+  not cover present-nullable decode, empty collections or a >64 KB
+  string (Task 3's records exercise them); `123-unit-artifact.t`'s
+  header walk would go vacuous on a deflated entry (a `5 entries`
+  assertion would pin it); `isThunk`/`sourceLineDelta`/`sourceSection*`
+  getters are untested; `SiteIdentity.site()` and the value class are
+  unexercised until Phase C.
+- *Small costs*: `ArgsExpectation`'s invoke road pays one volatile read
+  per invoke (plan-mandated, expected in the noise);
+  `RecordReader.intOr` allocates a `Pair` before the `absent` test;
+  `ProgramUnit.gc` could be `@Volatile` (safe today through
+  `lexValuesReady` and the unit monitor); `ProgramIdentity.parse`
+  accepts a negative index (`foo#-3`); an empty dispatch-slot payload is
+  indistinguishable from an empty slot (Phase C decides).
+- *Elsewhere in the trees*: the runtime still looks the engine up
+  reflectively (`CodeEngine.kt:172`, `GrammarEngine.kt:198`) although
+  nothing is on the boot class path any more; the **legacy Perl
+  configure path** still names the vendored `nqp/3rdparty/lz4` jar
+  (`NQP/Config/NQP.pm:249`, `tools/templates/jvm/Makefile.in`,
+  `nqp-j.in`, `nqp-j.windows`, `install-jvm-runner.pl.in`, the legacy
+  `nqp/Makefile`) -- dead weight now that `NqpDeps` has dropped lz4, and
+  the last lz4 in either tree; `m7-rig.raku --parse-sweep` cannot name
+  red files from a chunked sweep log (no `Wstat` lines).
+
+### The stage0 state at the close
+
+**The nine v2 stage0 jars are UNCOMMITTED working-tree changes in the
+nqp tree** (user rule 2026-09-15: no jar of any type is committed until
+the user says so). The branch pushed to `ab5tract` therefore carries the
+**v1** stage0, which the runtime on that same branch can no longer read:
+a fresh clone of the pushed branch does not build. **The working tree is
+the source of truth until the rule is lifted**, and any destructive
+working-tree operation in the nqp tree (a checkout, a clean, a stash, a
+hard reset) reverts stage0 to v1 and breaks the build.
+
+---
+
 ## Things that cost time to learn
 
 **The build graph does not express the nqp dependency.** No rakudo target

@@ -55,15 +55,44 @@ position table (kept below as history) is unchanged for items 1-3 and
   `NQP_UNIT_LOAD_STATS=1` (nqp `dacbdd4fd`); the profile and exclusive-time
   tools are `tools/build/unit-load-profile.raku` and
   `unit-load-exclusive.raku` (rakudo `4a44ecd6e3`).
+- **Milestone 7, Phase A closed 2026-09-15** (rakudo `9789a8d7bf` / nqp
+  `4736905d0`): eight runtime levers measured one at a time on the rig
+  (`tools/build/m7-rig.raku`); only three had an effect. A6' (a native
+  static clone road) took dispatch misses 6815 -> 5661 and hits 125055 ->
+  100697; 8c (one constant method handle per `getattr`/`bindattr` branch)
+  made `raku-invoke`, the busiest root of a cold run, compile at all; 7b
+  put the generated runners on the class path. Cold `rakudo -e` 2.504 s,
+  cold `nqp -e` 1.192 s. Full table in
+  `docs/jvm-perf-findings-2026-09.md`, "Milestone 7, Phase A".
+- **Milestone 7, Phase B closed 2026-09-15** (rakudo `107eca63a3` / nqp
+  `318558c2d`, plus nine v2 stage0 jars that stay UNCOMMITTED by user
+  rule): the unit artifact is **version 2** -- a stored, mappable zip of
+  five entries with three fixed-width index tables, a `BlockRecord` per
+  block, lazy `StaticCodeInfo` bodies behind `ensureBody()`, one load
+  road for files and in-memory units, site identity through the compile
+  key, and an empty `unit.dispatch` table for Phase C to fill. Row `b`:
+  cold `rakudo -e` **2.461 s**, cold `nqp -e` **1.160 s**, misses 5667,
+  hits 100711, warm `t/01-sanity` 50 s -- all inside the series' spread,
+  so **the format change is clock-neutral at the top level**. Per stage
+  it is not: the whole decode stage is gone (133.8 ms on CORE.c, 19.3 ms
+  on nqp.jar), `static-lex-values` 10.15 -> 0.20 ms, nqp.jar's
+  `load-total` 662 -> 613 ms; the cost reappears inside
+  `deserialize-program` and the SC read, where the record decode moved
+  and where mapped slices now pay page faults. Artifacts are 8-10x on
+  disk (CORE.c 5.9 -> 56.1 MB) because nothing is compressed any more;
+  compression is Phase C's inbox. Build unchanged: make 854/861/863 s,
+  CORE.c 283/280/281 s. Format doc: `docs/jvm-unit-lazy-loading.md`;
+  numbers: `docs/jvm-perf-findings-2026-09.md`, "Milestone 7, Phase B".
+  **Next: the Phase C plan, from C0 the spike.**
 
-| item | state on 2026-09-13 |
+| item | state on 2026-09-13, cold start updated 2026-09-15 |
 |---|---|
 | 1 plain call | unchanged: partial, paused (per-call `Object[]`, mainline OSR shape) |
 | 2 language id | unchanged: partial, paused (slice 2: hllbool, box types, hlllist/hllhash) |
 | 3 calling convention | unchanged: partial, paused (`NQP_CODE_NOFRAME` off, dispatch blocks deferred) |
 | 4 compiler workload | **measured twice, partly landed** (milestone 6 + the 2026-09-12 timings). Tier policy + one compiler thread on every setting compile and on `J_NQP_RR`: CORE.c 434 -> 297 s, clean make 985 -> 922 s. Ceiling found: guest compilation is at most 17.5 % of a CORE.c compile, so this item cannot move CORE.c much further by knobs. Open inside it: the eight items milestone 6 handed to milestone 7 (`docs/jvm-perf-findings-2026-09.md`, "What milestone 7 inherits"), six of them one pattern (slow paths visible to the inliner: `nqp/src/vm/jvm/runtime` still has zero `@TruffleBoundary` against 113 in `nqp/nqp-truffle/src`, re-counted 2026-09-13); v6c unprofiled; setting compilation not idempotent |
 | 5-9 | DONE, unchanged (milestones 1-5) |
-| cold start (outside the nine) | spec written, Phase 0 done, wire fix landed; phases 1-2 (artifact v2, lazy tables, SC demand) **not started and pending a re-rank** (user decision "C", 2026-09-13): the spec's own phases are worth about 535 ms of the 2.68 s that remain, and the two largest remaining rows (CORE.c load block 541 ms, deserialize programs about 446 ms) are unprofiled below the stage |
+| cold start (outside the nine) | **phase 1 DONE 2026-09-15** as milestone 7 Phase B (artifact v2, the mapped store, lazy bodies, site identity, the empty dispatch table; rakudo `107eca63a3` / nqp `318558c2d`). It is clock-neutral at the top level -- cold `rakudo -e` 2.504 -> 2.461 s, cold `nqp -e` 1.192 -> 1.160 s, both inside the spread -- and its real result is per stage and structural: the decode stage is gone, eager static-lexical application is gone, the SC blob is mapped and ready for demand reading, and every dispatch site now has a stable (unit, program, ordinal) address. **Phase 2 (SC demand deserialization) is what remains of the lazy-loading spec**; the SC slice is already handed to the reader as a `ByteBuffer`. Next in milestone 7 is Phase C (the persisted miss), C0 the spike first |
 
 **Against the north star.** `docs/jvm-truffle-migration.md` is at its
 end state except for two entries of its Phase 5 inventory: the calling

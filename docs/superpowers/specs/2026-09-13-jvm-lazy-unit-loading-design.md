@@ -272,6 +272,61 @@ that the format changes once. Phase 2 (SC demand deserialization) is
 what remains of this design after milestone 7. The tasks below are
 unchanged and are the reference text for milestone 7's Phase B.
 
+## Revision 4 -- phase 1 landed (2026-09-15)
+
+**Tasks 1.1 to 1.6 are done**, as milestone 7 Phase B (plan and ledger:
+`docs/superpowers/plans/2026-09-15-jvm-milestone-7-first-execution-phase-b*.md`;
+rakudo `107eca63a3`, nqp `318558c2d`). The format as built is documented
+in `docs/jvm-unit-lazy-loading.md` and its numbers in
+`docs/jvm-perf-findings-2026-09.md`, "Milestone 7, Phase B". 1.1 the
+direct-field survey (verdicts applied in the lazy-body task); 1.2 the
+store -- stored entries, one open, one mapping sliced per entry, the
+`unit.index` tables, nested units sliced from the same mapping when
+claimed; 1.3 the kotlinx codec over `ByteBuffer` slices; 1.4 shells and
+bodies behind `ensureBody()`, with static lexical values applied at fill
+or queued for the SC; 1.5 the eval server's process-wide store
+(`UnitLoader.stores`, `prime`); 1.6 the transition -- window build,
+stage0 regenerated as v2, the v1 reader deleted, a full gate at each
+step.
+
+Where the execution departed from this document's letter:
+
+- **Task 1.4's per-unit `CallSiteDescriptor` table is not built.** The
+  v1 call-site table was never written and the engine builds its own
+  descriptors from the wire, so v2 drops the concept; `getCallSites()`
+  returns empty. Phase C's persisted record therefore carries its
+  descriptor inline rather than by index.
+- **Task 1.4's engine cache is keyed by the program's identity string,
+  not by (unit, index).** `CodeEngine.materialize` hands the engine a
+  Source name `"<store name>!<unit id>#<program index>"`; `NqpLanguage`
+  keys `PARSED` by that when it parses as an identity and by the program
+  text otherwise. An in-memory unit keeps the text key deliberately: its
+  unit id is a fresh sha1 per compile, so identical `EVAL` texts must go
+  on sharing one parsed root.
+- **Static lexical values live per block, not in one unit-level list**
+  (this document's 1.4 left the shape open). A row naming a gap qbid is
+  dropped with an `NQP_CODE_WHY`-gated line rather than being an error:
+  the compiler allocates qbids for `%*BLOCK_LEX_VALUES` cuids it never
+  compiles, and v1 skipped those rows silently.
+- **Task 1.6's transition never transcoded anything.** The window build's
+  v1 reader was in place but the stage0 compiler wrote v2 from the
+  start, so `transcode-v1` lines were 0 throughout and removing the
+  reader changed no clock.
+- **Sizes went the other way from the estimate.** Stored entries make
+  the artifacts 8-10x larger on disk (CORE.c 5.9 -> 56.1 MB), not the
+  ~2x the transition task assumed; the estimate had read v1's inflate
+  size as "uncompressed" when its SC member was still LZ4'd inside it.
+  Whether to compress stored entries is deferred (user decision,
+  2026-09-15) and is an open question for milestone 7 Phase C.
+
+**Phase 2 (SC demand deserialization) is what remains of this design**,
+and v2 has already done its groundwork: `unit.serialized` is written raw
+(no LZ4) and reaches `SerializationReader` as a mapped `ByteBuffer`
+slice (`ProgramUnit.serializedBlob()` -> `UnitStore.serialized`; the
+reader sets its own byte order and never calls `array()`). It is the
+largest entry of a large artifact -- 28.2 MB of CORE.c's 56.1 MB -- and
+the whole of it is still read at load.
+
 ## Goal
 
 Make loading a unit artifact lazy, so that a program pays only for the parts of
