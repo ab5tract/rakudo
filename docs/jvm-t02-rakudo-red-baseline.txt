@@ -1,5 +1,8 @@
 # t/02-rakudo files red at the milestone-5 close (job 4bfdb802 base-red.txt,
-# 22 files, 2026-09-12). The rig reports any red file NOT in this list as new.
+# 22 files, 2026-09-12), plus two added 2026-09-14 (rakudo 76b62a0b4f,
+# m7-rig fix round 1): regex-interpolation-fold-length.t and
+# str-raku-prepend.t -- 24 files listed. The rig reports any red file NOT
+# in this list as new.
 # Ruling 2026-09-12 (engine merge): 15-gh_1202.t and native-argument-snapshot.t
 # went green afterwards; they stay listed so a flicker is not a regression.
 t/02-rakudo/03-cmp-ok.t
