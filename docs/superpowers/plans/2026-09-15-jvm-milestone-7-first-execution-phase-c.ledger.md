@@ -99,11 +99,10 @@ Task 10, the red diff over the 310 files that did run: 20 of the 24 baseline red
 ## Hashes before and after the close's rebase (Task 10, 2026-09-16)
 
 The close was measured on rakudo `6217a89e61` / nqp `a837bf1bb`, and every
-document names those. The close's rebase (rakudo onto `origin/main`
-`67f2e3bcff`, **two** upstream commits, 219 replayed, NO conflict) rewrote
-the rakudo side once more. nqp was not rebased (`upstream/main` had nothing
-new), so **nqp `a837bf1bb` is still the tip and the docs' nqp hashes need no
-mapping**.
+document names those. The close's rebase rewrote **both** trees: rakudo
+onto `origin/main` `67f2e3bcff` (**two** upstream commits, 219 replayed,
+no conflict) and nqp onto `upstream/main` `06f61ec6a` (**one** upstream
+commit, 178 replayed, no conflict).
 
 | rakudo commit | before | after |
 |---|---|---|
@@ -114,6 +113,23 @@ mapping**.
 | **the fix wave (the MEASURED tree)** | **6217a89e61** | **d7a9257d50** |
 | the close's docs | 5c3a4a38d1 | b4cb5c8344 |
 
-Trees are identical across the rewrite; only the two upstream commits are
-new. The nine v2 stage0 jars were never touched (the nqp tree was not
-rebased) and remain uncommitted (user rule).
+| nqp commit | before | after |
+|---|---|---|
+| DispatchDump (C0) | 35e4f734a | fc2dd259d |
+| schema + DispatchSlotCodec | 936e57fae | a237c45c4 |
+| consumer + modes + counters | 3a4082327 | 40dff72a3 |
+| recorder + UnitDispatchWriter | c17218e16 | 32bdf6bed |
+| verify by outcome + log + drop reasons | a1bdba778 | 6cf23ee84 |
+| gradle training | e3c800371 | d9f9ab550 |
+| **the fix wave (the MEASURED tree)** | **a837bf1bb** | **8ea35ba95** |
+
+Trees are identical across the rewrite; only the three upstream commits
+are new. The nine v2 stage0 jars were set aside for the nqp rebase under
+the tag `stage0-v2-close` (entry
+`b81dbeb8dfffe593ecf2f536b9ddbf2309f4c463`), restored by applying that
+entry, verified byte for byte by md5, and the entry was then dropped;
+they remain uncommitted (user rule).
+
+**The branch tips on `ab5tract` at the milestone-7 close are rakudo
+`83fa58e42c` (branch `worktree-jesp-direct-lazy-records`) and nqp
+`8ea35ba95` (branch `jesp-direct-lazy-records`).**
