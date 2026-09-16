@@ -844,3 +844,5 @@ Ruling (hotfix 2): the identity guard becomes a state guard whenever it has a st
 - Parked (pre-existing): DispatchBootstrap.install assigns the isFresh-filtered array only under `current.size < MAX_PROGRAMS`, so a saturated site keeps dead entries -- Ruling: harmless after hotfix 2 (run skips, cacheable excludes); fix in Phase B's first commit; cost if wrong: a saturated site's budget stays spent.
 - Parked (pre-existing): DispatchPersist dedupes by dump text, which omits guard state -- Ruling: benign (isFresh filter + restore-time capture); noted for the SC-stamp hotfix design.
 - PHASE A COMPLETE: final tips rakudo 530dce97bf / nqp 2b627034f (+ the closing docs commit below), all reviews clean; open for the user: the stale-slot cross-build hazard (SC stamp hotfix) and the Makefile runtime-jar prerequisite question.
+
+Both open items closed in Phase B's opening commit (this ledger: 2026-09-16-jvm-milestone-8-phase-b.ledger.md, "B-pre").
