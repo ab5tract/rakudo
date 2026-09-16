@@ -1115,6 +1115,351 @@ The instrument stays: `NQP_DISPATCH_DUMP` is the normalisation verify mode
 compares with. Plan and rulings:
 `docs/superpowers/plans/2026-09-15-jvm-milestone-7-first-execution-phase-c.md`.
 
+### (b) The rulings, as landed
+
+Phase C closed 2026-09-16 on rakudo `79829d402e` / nqp `f5c5bc8fa`
+(schema nqp `e27a795d8`, consumer `5fd74d9b6`, recorder and writer
+`3d0b54fa4`, verify by outcome `d3e602917`, gradle training `f5c5bc8fa`;
+rakudo's Makefile training `79829d402e`). The ledger with every gate
+clock is
+`docs/superpowers/plans/2026-09-15-jvm-milestone-7-first-execution-phase-c.ledger.md`.
+
+The plan's fifteen rulings, written before Task 3 and open to the user's
+veto until it, each with what it costs if it is wrong:
+
+1. **No site identity and no descriptor index in the slot** -- the slot's
+   address is the identity, and the descriptor travels inline per
+   program. Wrong -> a slot cannot be read without a side table, and v2's
+   index would have to change after stage0 was frozen.
+2. **References are `PRef(handle, index, kind)`** (0 object, 1 code, 2
+   STable); the HLL config by name, the syscall by name, a resumption's
+   dispatcher by id; anything unresolvable is not persisted, and is
+   dropped at restore. Wrong -> a realised program names a different
+   object than the one recorded, which replay's own invariant does not
+   catch.
+3. **kotlinx sealed hierarchies with short `@SerialName`s through
+   `UnitCodec`** (plus `Double` as raw long bits). Wrong -> a second
+   codec to maintain beside the unit records'.
+4. **The training process rewrites the artifacts itself at exit**
+   (`UnitDispatchWriter`, tmp file + atomic rename), driven by
+   `NQP_DISPATCH_RECORD=all` or a list of store-name prefixes. Wrong ->
+   the build needs a second process that can resolve the recorded
+   references, which only the training process can do.
+5. **Rakudo's training run rewrites nqp's lib jars too** -- a third of a
+   cold run's sites are in them -- and slots merge (restored + new).
+   Wrong -> nqp's share of the cold miss stays unpersisted, or Rakudo's
+   run truncates what nqp's run wrote.
+6. **Gradle trains a copy** (`build/jvm/stage2-trained`) and `syncLib`
+   takes it; `jBootstrapFiles` keeps the untrained stage2. Wrong ->
+   stage0 acquires filled slots and has to be regenerated and committed,
+   which the no-jar rule forbids.
+7. **Programs merge per slot**, deduplicated by their `DispatchDump`
+   text, capped at `MAX_PROGRAMS`. Wrong -> a polymorphic site's slot
+   grows without bound across training runs.
+8. **Restore happens at the first miss** (in `Dispatch.fallback`, before
+   the record), so `misses` keeps its meaning and the claim is on
+   `recorded=`, with `restored=`/`restoredSites=`/`dropped=` beside it.
+   Wrong -> the phase's headline number measures the wrong thing.
+9. **Verify compares applicable persisted programs only** (same shape,
+   guards pass); an unseen program is not a mismatch; the gate is zero
+   mismatches over the nqp suite and `t/01-sanity`. Wrong -> a gate that
+   is red for shapes that never run.
+10. **The five `perl6` units need nothing** -- the namespace is store
+    name + unit id, which Phase B already made unambiguous. Wrong ->
+    Phase B's collision returns, as one unit's slots answering for
+    another's.
+11. **Compression of records and programs is presented with numbers at
+    the close, not built** (clock-negative by construction; the
+    runtime-first rule). Wrong -> a smaller artifact that loads slower,
+    against the stated priority. The numbers are item (e).
+12. **Bounds hardening lands with the writer** (the absolute slot against
+    `dispatchSlotCount`, negative offsets, per-program windows checked at
+    open). Wrong -> the first writable entry in the format is also the
+    first unchecked one.
+13. **Runtime-made sites are counted** -- `DispatchBootstrap.created`
+    feeds a new `sitesAll=`. Wrong -> the phase cannot say what share of
+    the process's sites a slot can reach.
+14. **The deferred rakudo rebase is Task 2**, gated by `make` +
+    `t/01-sanity`, before any Phase C build. Wrong -> Phase C's numbers
+    are measured on a tree that is about to be rewritten.
+15. **The whole-`t/` close run goes through `watched-run` as a plain
+    background job with a 6 GB heap**; a second kill by the low-memory
+    guard means not gathered, and the user decides. Wrong -> the close
+    burns hours on a run the harness will kill anyway.
+
+The seven made while executing:
+
+16. **HLL guards persist as (name, compiler-side)** and realise through a
+    non-creating `GlobalContext.findHLLConfig`; a null result is
+    `Unpersistable`. Why: a type's `hllOwner` comes from whichever of the
+    two config maps was current at deserialize, and `Guard.OfHll`
+    compares by identity, so the name alone does not name the object.
+    Cost if wrong: a dead or dropped HLL-guarded program -- the site
+    records as before -- never a wrong answer.
+17. **Verify compares by evaluated outcome after text**: the same outcome
+    kind, the same callee object by identity / the same syscall name /
+    the same value, the same evaluated argument capture on the recorded
+    call's own arguments, the same resumption dispatchers and init
+    captures, equal `bindControl`; resuming programs stay text-only.
+    Counted `byOutcome`; the gate is `mismatched=0`. Why: nqp's
+    `lang-meth-call` records a type-guarded form before a class publishes
+    its method cache and a cache-lookup form after, and verify mode, by
+    not installing, makes the site re-record after the cache exists -- so
+    the *form* differs while the target is the same. Cost if wrong: a
+    program whose outcome coincides on the training call but whose guards
+    are too weak passes verify -- which is the invariant replay already
+    rests on.
+18. **`NQP_DISPATCH_VERIFY_LOG=<path>` routes every verify line to a
+    file**, pid-prefixed and flushed per line; stderr otherwise. Why:
+    `t/01-sanity/55-use-trace.t` compares a child process's whole stderr,
+    and TAP swallows per-run `MISMATCH` blocks. Cost if wrong: none
+    (diagnostics routing) -- but without it the verify gate reads 24/25.
+19. **`NQP_DISPATCH_PERSIST_TRACE=1` names each dropped program's
+    reason** (`realise` gains an `onDrop` callback carrying the
+    `Unpersistable` message). Cost if wrong: none; without it the erosion
+    in ruling 20 has no cause.
+20. **A slot rewrite carries restored plus new, minus what did not
+    resolve in the training process.** Measured: training Rakudo after
+    nqp loses about 1.3 % of nqp's slot programs (restored 1677 -> 1656,
+    recorded 87 -> 108). Accepted once ruling 19 gave the cause (item
+    (c)). Cost if wrong: a few nqp-side sites record once more under
+    Rakudo.
+21. **Training is reproduced by any clean build only up to the run's own
+    nondeterminism** -- NQPCORE wrote 103/114/9
+    slots/programs/unpersistable in one clean `buildJvm` and 102/112/8 in
+    another, about 1 % of its slots -- so the plan's "deterministically"
+    is relaxed to that, and the verify gate is the correctness net. Cost
+    if wrong: a cache keyed on jar bytes (the gradle build cache) misses;
+    no behavioural cost.
+22. **The default-mode nqp suite runs on the post-`make` lib jars** as
+    part of Task 8, because Task 7's suite ran on the gradle-trained jars
+    before `make` retrained them. Cost if wrong: an untested lib-jar
+    state ships.
+
+### (c) The numbers
+
+Rig row `c` against Phase B's `b`, both `--warm=proxy`, best of five cold
+runs, stock runners, `NQP_UNIT_LOAD_STATS` and `NQP_DISPATCH_STATS` on:
+
+| lever | rakudo / nqp hash | cold rakudo-e | cold nqp-e | misses | hits | warm t/01-sanity |
+|---|---|---|---|---|---|---|
+| b (Phase B close) | 107eca63a3 / 318558c2d | 2.461 s | 1.160 s | 5667 | 100711 | 50 s |
+| **c (Phase C close)** | 79829d402e / f5c5bc8fa | **2.272 s** | 1.203 s | 4931 | **35512** | 63 s |
+
+The five rakudo walls were 2.27 2.34 2.38 2.31 2.29 and the five nqp
+walls 1.29 1.23 1.20 1.22 1.24. **The number that moved is `hits`:
+100711 -> 35512, -65 %.** That is the mechanism working: a restored site
+installs its programs and replays, instead of running the dispatcher's
+guest code to record, and the dispatcher's own dispatch hits are what
+vanish. `misses` falls only 5667 -> 4931, exactly as ruling 8 predicted
+-- a restored site's first miss is still a miss, because restore happens
+*at* it.
+
+The Phase C counters from the same two runs (the rig's programs are
+`say 1` and `say(1)`):
+
+| counter | cold rakudo-e | cold nqp-e |
+|---|---|---|
+| `sites=` (wire sites parsed) | 7463 | 3012 |
+| `anon=` (of those, no identity) | 6 | 4 |
+| `sitesAll=` (ruling 13: every site the process made) | 7569 | 3059 |
+| `restored=` | 4470 | 1644 |
+| `restoredSites=` | 4188 | 1634 |
+| `dropped=` | 37 | 30 |
+| `recorded=` | 849 | 257 |
+
+What is left, from the same runs' `misses` histogram:
+
+| dispatcher | cold rakudo-e | cold nqp-e |
+|---|---|---|
+| lang-meth-call | 2747 | 1329 |
+| lang-call | 1950 | 448 |
+| boot-syscall | 197 | 52 |
+| raku-assign | 35 | - |
+| raku-coercion | 1 | - |
+| raku-meth-call-qualified | 1 | - |
+
+**The headline claim is on the trivial program, which is what the build
+trains.** On `-e ''`, one run each with stats on (Task 6, reproduced by
+Task 7's post-`make` check at `restored=4475 recorded=195`):
+
+| figure | untrained (Task 4 smoke) | trained (Task 6 / Task 7) |
+|---|---|---|
+| rakudo `recorded=` | 4723 | **193 / 195** |
+| rakudo `hits=` | 80298 | **13292** |
+| rakudo `restored=` / `restoredSites=` | 0 / 0 | 4477 / 4195 |
+| rakudo `dropped=` | 0 | 37 |
+| rakudo `byKind[syscall]` | 38151 | 2179 |
+| nqp `recorded=` | 1766 | **87** |
+
+That is **-96 % on `recorded`**, against C0's prediction of "5023 -> under
+500". The rig's `recorded=849` is higher than 195 because the rig's
+program is `say 1`, not `''`: its extra sites were never trained, and the
+`-e` unit is in-memory, so its own sites have no identity and no slot
+(ruling 8, and Phase B's `anon=`). A cold `say 1` on an untrained build
+was not gathered, so the rig row claims no `recorded` delta of its own.
+
+Wall time on one pair of single `-e ''` runs on the same build: 1.943 s
+with restore on against 2.483 s with it off (the verify run). That is
+single-sample and not a benchmark. The rig row is the measurement, and it
+reads -7.7 % on cold rakudo-e and +3.7 % on cold nqp-e, both inside the
+series' own spread.
+
+**Drops have one cause.** Under `NQP_DISPATCH_PERSIST_TRACE=1` all 37
+rakudo drops and all 30 nqp drops print `no SC <handle>`, over five
+handles that exist in no jar: the program's guard or outcome names an
+object owned by a serialization context created during the run itself
+(the process's own SC, the BOOTSTRAP/EXPORTHOW metaobjects). By unit:
+v6c 18, CORE.c 10, NQPCORE 6, NQPHLL 2, QRegex 1; 20 of the v6c ones are
+one contiguous block of sibling callsites in a single frame
+(`v6c.jar!perl6#4703#20..40`). **0.8 % of installed programs** is the
+floor for this workload, and those sites record as before.
+
+**Verify, per gate** (ruling 17's classification; `mismatched=0`
+everywhere, and zero `MISMATCH` blocks in the logs):
+
+| gate | processes | matched | byOutcome | mismatched | unseen |
+|---|---|---|---|---|---|
+| cold nqp `-e ''` | 1 | 1658 | 8 | 0 | 62 |
+| cold rakudo `-e ''` | 1 | 4475 | 4 | 0 | 127 |
+| `t/01-sanity` (Task 6) | 2 | 117490 | 327 | 0 | 73893 |
+| `t/01-sanity` (Task 8) | 2 | 117441 | 327 | 0 | 73941 |
+| nqp suite, 155 files (Task 8) | 11 | 271378 | 1309 | 0 | 116617 |
+
+Every mismatch the first pass reported (8 nqp cold, 4 rakudo cold, 313
+warm) reclassified to `byOutcome` under ruling 17: they were
+differently-shaped programs with the same target, not wrong ones.
+
+### (d) The gates, with their clocks
+
+User rule 2026-09-15: a gate is reported with its wall time, never as a
+bare verdict.
+
+| gate | Task 2 (rebase) | Task 7 (build hooks) | Task 7 (validation) | Task 8 (modes) |
+|---|---|---|---|---|
+| `make clean && make` | 869 s | 883 s | 880 s | - |
+| CORE.c parse inside it | 220 s | 221 s | 224 s | - |
+| stage sum inside it | - | 282 s | 284 s | - |
+| `t/01-sanity`, default | 62 s (25/25) | 55 s (25/25) | - | - |
+| clean `buildJvm` | - | 218 s | - | - |
+| nqp suite, 155 files, default | - | 196 s (155/155) | - | 206 s (155/155, post-`make` lib jars, ruling 22) |
+| nqp suite, verify | - | - | - | 204 s (155/155) |
+| nqp suite, `off` | - | - | - | 201 s (155/155) |
+| `t/01-sanity`, verify | - | - | - | 51 s (25/25) |
+| `t/01-sanity`, `off` | - | - | - | 49 s (25/25) |
+| `Configure.pl --gen-nqp` | - | - | 5 s | - |
+| second `make` (the no-op check) | - | - | no-op | - |
+
+`off` reproduces the default reference exactly (196 s and 56 s at the
+time those were taken), so switching consumption off costs nothing
+measurable; verify costs about 8 s on the suite and 2 s on sanity.
+Task 6's by-hand runs add `t/01-sanity` 25/25 in 40 s default, 42 s
+default after the rulings, and 43 s under verify. **The whole-`t/` run is
+Task 10's**, at the milestone close, not this phase's.
+
+One build-graph fact the validation pinned down: **removing the training
+stamp does not give an incremental build.** A `make` after `rm` of it is
+a full 880 s build, because `Configure.pl` re-expands
+`gen/jvm/main-version.nqp` and invalidates everything. That is
+pre-existing and not Phase C's, but it is what a "retrain only" attempt
+costs today.
+
+### (e) Sizes, and the compression question
+
+The rewrite is slot-in-place: `unit.index` is the same size before and
+after in every jar (only its crc changes), so the whole cost is the
+`unit.dispatch` blob.
+
+| jar | `unit.dispatch` | jar before | jar after | growth |
+|---|---:|---:|---:|---:|
+| `blib/CORE.c.setting.jar` | 284 060 | 56 077 905 | 56 362 465 | +0.51 % |
+| `nqp/.../QAST.jar` | 489 289 | 750 084 | 1 239 373 | **+65 %** |
+| `blib/Perl6/BOOTSTRAP/v6c.jar` | 386 486 | 11 348 915 | 11 735 401 | +3.4 % |
+| `blib/Raku/Actions.jar` | not measured | 955 667 | 998 281 | +4.5 % |
+| `nqp/.../NQPHLL.jar` | not measured | 572 756 | 627 174 | +9.5 % |
+| `nqp/.../nqpmo.jar` | not measured | 211 969 | 263 205 | +24 % |
+| `rakudo.jar` | not measured | 22 858 | 37 335 | +63 % |
+
+Cost per persisted program: CORE.c 284 060 / 1487 = ~191 B, QAST
+489 289 / 1113 = ~440 B, v6c 386 486 / 1105 = ~350 B. QAST's +65 % is a
+small jar with an outsized number of hot sites (1111 slots), not a loose
+encoding.
+
+**The compression question, for the user to decide** (ruling 11: the
+numbers are presented, nothing was built). CORE.c's jar is 56 MB with
+every entry stored: `unit.index` 1.27 MB, `unit.records` ~5.4 MB,
+`unit.programs` ~21 MB, `unit.serialized` ~28.2 MB, `unit.dispatch`
+0.28 MB. Only records and programs are candidates -- `unit.serialized`
+must stay raw and mappable for lazy-loading phase 2, and the index and
+the dispatch table are read by offset. Deflating those ~26 MB would take
+the jar to roughly half, and would cost an inflate of ~26 MB at open:
+**20-80 ms on every cold start**, against an `open-store` stage that
+costs 2.07 ms today. By construction that is clock-negative and against
+the runtime-first rule, which is why it was not built. Whether disk
+matters more here than 20-80 ms per cold process is the user's call.
+
+### (f) Open items and deferred minors
+
+**The phase's own open items:**
+
+- **The warm proxy clock reads 63 s against row `b`'s 50 s**, while the
+  same directory under `t/harness5 --evalserver` read 55/51/49 s across
+  Tasks 7-8, against Phase B's 58-60 s. Single samples on both sides, not
+  re-run (user rule: a benchmark is not re-taken). Nothing in the phase
+  predicts a warm regression -- the restored programs are the programs
+  the site would have recorded -- so this is an open question for the
+  milestone close, and the whole-`t/` run is where it shows or does not.
+- **Training is not bit-reproducible** (ruling 21): about 1 % of slots
+  vary run to run, from execution-order variation in the training run. A
+  two-dump diff of two gradle trainings was deferred.
+- **The ~1.3 % erosion** (ruling 20): training Rakudo after nqp lets a
+  Raku-flavoured program win an nqp site's slot. The cause is known (`no
+  SC`) and it is accepted.
+- **`Configure.pl` invalidates the whole build** (item (d)), so there is
+  no cheap "retrain only" path.
+- **`evalserver-sweep.raku` silently accepts a non-existent explicit
+  target** -- a typo in a sweep's directory reads as a clean run.
+- **`blib/.dispatch-trained` and `blib/.dispatch-train.log`** are in
+  neither the `make` cleanups nor `.gitignore`.
+
+**Deferred minors, collected** (each was ruled harmless where it was
+found; the SDD ledger has the context):
+
+- *Schema and codec (Task 3)*: no kitchen-sink round-trip test over every
+  P-type; `PLiteral.i` wants a comment on Long normalisation; an unused
+  binding at `DispatchSlotCodec.kt:183`; `!!` after `ref()` in
+  `DispatchDump.kt:60,69`; non-`Unpersistable` throwables escape
+  `persist`/`realise` (ruled hard errors); `g.hll?.name` would persist a
+  non-null config with a null name as a null-HLL guard (unreachable
+  today).
+- *Consumer (Task 4)*: an unrecognised `NQP_DISPATCH_PERSIST` value means
+  on; racing first misses can install duplicates (a plain `restored`
+  field -- harmless, wastes cap slots, double-counts); `restored=` and
+  `restoredSites=` also count in verify mode; the counters are
+  process-wide and are not cleared by `resetAll`, so a figure must name
+  its population; verify's `recorded` parameter shadows the counter; the
+  verify test's same-descriptor instance short-circuits
+  `Captures.sameShape`, and its case (a) does not assert silence;
+  `verifySay` prefixes only the first physical line of a `MISMATCH`
+  block; the drop trace goes to stderr, not to the verify log;
+  `sameOutcome` ignores `resumeLevels`/`bindFailureProgram` (vacuous for
+  non-resuming programs); no test pins that the `NQP_DISPATCH_RECORD`
+  hook is installed -- a whole-file rewrite that dropped `recordAtExit`
+  compiled clean.
+- *Writer (Task 5)*: `patch()` does not check MAGIC/VERSION; an empty
+  named slot writes off/0 silently; the `.tmp` name is fixed (two
+  concurrent trainings on one artifact would race -- none exist in the
+  build) and is left behind on a failed move; `selected()` NPEs if
+  `recordAtExit()` is called without the env var; programs dropped by the
+  `MAX_PROGRAMS` cap are not counted on the marker line; the test's
+  surviving slot stays at offset 0, so a moved unnamed slot is untested;
+  no test for an absent nested prefix or an empty `newSlots`.
+- *Build (Task 7)*: the `touch -r` window is open for a source edited
+  during the build (documented in the recipe); neither training marker
+  asserts a quantity floor; a greedy `sed` range in the log grep; the tee
+  objects are configuration-cache-hostile; `engineJarFile` is an input by
+  classpath snapshot only; the marker file records absolute paths.
+
 ## Things that cost time to learn
 
 **The build graph does not express the nqp dependency.** No rakudo target

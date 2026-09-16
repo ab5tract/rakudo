@@ -366,6 +366,37 @@ never a training run); the dispatch counters must show the miss count
 falling by the persisted share C0 predicted, and the histogram must
 name what is left.
 
+**Phase C: closed 2026-09-16** (rakudo `79829d402e`, nqp `f5c5bc8fa`).
+Everything above landed: the `DispatchSlot` schema and its codec (nqp
+`e27a795d8`), the consumer, the modes and the counters (`5fd74d9b6`),
+the recorder and `UnitDispatchWriter` (`3d0b54fa4`), verify by evaluated
+outcome with a verify log and drop reasons (`d3e602917`), the gradle
+training of a stage2 copy (`f5c5bc8fa`) and the Makefile's training
+stamp (rakudo `79829d402e`). **The headline: on the trivial program the
+build trains, cold rakudo `recorded=` falls 4723 -> 193 (-96 %, C0
+predicted "under 500") with `restored=4477` over 4195 sites and
+`dropped=37`; nqp's falls 1766 -> 87; `hits` falls 80298 -> 13292,
+because the dispatcher's guest code no longer runs to record.** Rig row
+`c`: cold `rakudo -e` 2.461 -> 2.272 s, cold `nqp -e` 1.160 -> 1.203 s,
+misses 5667 -> 4931 (ruling 8: restore happens *at* the miss), hits
+100711 -> 35512, warm `t/01-sanity` 63 s against 50 s (an open item).
+The verify gate is `mismatched=0` on the nqp suite (155/155, 204 s) and
+`t/01-sanity` (25/25, 51 s), and `off` reproduces the default exactly.
+Plan and ledger:
+`docs/superpowers/plans/2026-09-15-jvm-milestone-7-first-execution-phase-c.md`
+and its `.ledger.md`; the numbers, the 22 rulings, the sizes and the
+compression question:
+`docs/jvm-perf-findings-2026-09.md`, "Milestone 7, Phase C"; the
+mechanism: `docs/jvm-unit-lazy-loading.md`, "The dispatch table". One
+correction to the letter above: **verify does not compare structurally
+alone** -- text first, then the evaluated outcome on the recorded call's
+own arguments, counted `byOutcome`, because a `lang-meth-call` site
+legitimately records two shapes around a class publishing its method
+cache. A second, smaller one: the slot carries **programs only**
+(`DispatchSlot(programs)`) -- no site identity, since the slot's address
+is the identity, and no descriptor index, since the descriptor travels
+inline.
+
 ## The close
 
 1. The rig once on the final build; whole `t/` once on one warm

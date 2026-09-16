@@ -57,6 +57,11 @@ sub parse-cold(Str $text) {
     if $text ~~ / 'dispatch stats: hits=' (\d+) ' misses=' (\d+) / {
         %r<hits> = +$0; %r<misses> = +$1;
     }
+    # Phase C's two counters. Optional: a capture from before Phase C has
+    # neither, and the row line must stay comparable across the whole series,
+    # so they are summary-only and never enter the row.
+    %r<restored> = +$0 if $text ~~ / ' restored=' (\d+) /;
+    %r<recorded> = +$0 if $text ~~ / ' recorded=' (\d+) /;
     for $text.lines {
         %r<by>{$1} = +$0 if / ^ '  misses ' (\d+) ' ' (\S+) /;
     }
@@ -65,7 +70,8 @@ sub parse-cold(Str $text) {
 
 sub cold-summary(%r) {
     my @top = %r<by>.sort(-*.value).head(8).map({ .key ~ '=' ~ .value });
-    "hits={%r<hits> // '-'} misses={%r<misses> // '-'} stage-lines={%r<stage-lines>} top: @top.join(' ')"
+    "hits={%r<hits> // '-'} misses={%r<misses> // '-'} restored={%r<restored> // '-'} recorded={%r<recorded> // '-'} "
+      ~ "stage-lines={%r<stage-lines>} top: @top.join(' ')"
 }
 
 sub parse-sweep(Str $text, IO() $baseline) {

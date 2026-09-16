@@ -8,7 +8,12 @@ and its `.ledger.md`. Design:
 (phase 1) plus the Phase B section of
 `docs/superpowers/specs/2026-09-13-jvm-milestone-7-first-execution-design.md`
 (the fifth entry and the site identity). Numbers:
-`docs/jvm-perf-findings-2026-09.md`, "Milestone 7, Phase B".
+`docs/jvm-perf-findings-2026-09.md`, "Milestone 7, Phase B". The
+dispatch table it wrote empty was filled by Phase C (2026-09-16; rakudo
+`79829d402e`, nqp `f5c5bc8fa`) -- see "The dispatch table" below, its
+plan and ledger
+(`docs/superpowers/plans/2026-09-15-jvm-milestone-7-first-execution-phase-c*.md`)
+and "Milestone 7, Phase C" in the findings.
 
 v1 was one deflated `unit.meta` blob plus an LZ4'd `unit.serialized.lz4`:
 opening a unit inflated everything, decoded every block's record and
@@ -151,10 +156,8 @@ unit, program index and ordinal, never through the string.
 `unit.dispatch` is addressed by (program index, site ordinal):
 `UnitStore.dispatchSlot(programIndex, ordinal)` reads the program row's
 first slot, adds the ordinal, and returns that slot's slice, or null for
-an empty slot -- O(1), no decode. `ProgramUnit.dispatchSlot` is Phase
-C's entry point. **Every slot is empty in Phase B**: the table exists so
-that stage0 regenerates once, in Phase B, and never again in this
-milestone, since an empty table is valid under any payload schema.
+an empty slot -- O(1), no decode. `ProgramUnit.dispatchSlot` is the
+runtime's entry point.
 
 The invariant that makes it addressable: **a program's slot count is the
 encoder's per-block `DISPATCH` count**, carried on the compiler's
@@ -163,10 +166,120 @@ encoder's per-block `DISPATCH` count**, carried on the compiler's
 `UnitImageWriter`). `NQP_SITE_CHECK` is how that is checked against a
 real run (below).
 
-Phase C writes the descriptor **inline in the slot**. v1's per-unit
-call-site table is gone (`getCallSites()` returns empty; the engine
-builds its own `CallSiteDescriptor` from the wire), so a slot cannot
-reference one by index.
+**Phase B wrote every slot empty; Phase C fills them** (2026-09-16,
+rakudo `79829d402e`, nqp `f5c5bc8fa`). Phase C changed no index and no
+other entry, so stage0 did not have to be regenerated again. The
+numbers are in `docs/jvm-perf-findings-2026-09.md`, "Milestone 7,
+Phase C".
+
+### The slot schema
+
+A filled slot is a kotlinx-serialized `DispatchSlot(programs:
+List<PProgram>)` in `nqp/src/vm/jvm/runtime/org/raku/nqp/dispatch/DispatchSlot.kt`,
+written and read through `UnitCodec` -- the same codec the unit records
+use -- with short `@SerialName`s (`arg`, `lit`, `attr`, `how`, `unbox`,
+`lookup`, `type`, `conc`, `hll`, `invoke`, `syscall`, ...) and `Double`
+as raw long bits. A `PProgram` is a `DispatchProgram` with every
+reference replaced by a stable name:
+
+- **Objects, code refs and STables** are `PRef(handle, index, kind)` --
+  the serialization context's handle, the object's index in it, and the
+  kind (0 object, 1 code ref, 2 STable).
+- **The HLL config** is (name, `compilerSide`), because a type's
+  `hllOwner` comes from whichever of the two config maps was current at
+  deserialize and `Guard.OfHll` compares by identity; it realises
+  through the non-creating `GlobalContext.findHLLConfig`.
+- **A syscall** is its name, **a resumption's dispatcher** its id.
+- **The descriptor travels inline** (`PDescriptor(flags, names)`), per
+  program and per argument shape. v1's per-unit call-site table is gone
+  -- `getCallSites()` returns empty and the engine builds its own
+  `CallSiteDescriptor` from the wire -- so a slot cannot reference one
+  by index.
+- Native literals are inline (`PLiteral`).
+
+A program whose every reference resolves is persistable; one that names
+an object no serialization context owns is **not written**, and the site
+behaves as it did before. On a cold `rakudo -e ''` that is 50 of 4604
+programs (C0), and the 37 that still drop at restore all say `no SC
+<handle>` -- an object owned by a context the run itself created.
+
+### Training: the build fills the slots
+
+The compiler never executes what it compiles, so the outcomes come from
+running. `NQP_DISPATCH_RECORD=all` (or a comma-separated list of
+store-name prefixes) arms `DispatchPersist.recordAtExit`: at exit every
+site's installed programs are persisted into their unit's slot and
+`UnitDispatchWriter.rewrite` rebuilds each named artifact -- index slot
+rows repointed, `unit.dispatch` rebuilt, every other entry copied byte
+for byte, through a tmp file and an atomic rename. Programs merge per
+slot (restored plus new, deduplicated by their `DispatchDump` text,
+capped at `Dispatch.MAX_PROGRAMS`), so training Rakudo after nqp does
+not truncate what nqp's run wrote. The marker is `dispatch-record: wrote
+<n> slots (<n> programs, <n> unpersistable) to <artifact>`, one line per
+artifact, and both builds fail if it never appears.
+
+Both builds train, with the trivial program (`-e ''`), because loading a
+setting or a module is itself the first execution under attack:
+
+- **nqp** (`nqp/build.gradle.kts`): a `Sync` task copies the nine stage2
+  jars to `build/jvm/stage2-trained`, `trainDispatch` runs the trivial
+  program against the copy with `NQP_DISPATCH_RECORD=all`, and `syncLib`
+  takes the trained copy. `jBootstrapFiles` goes on copying the
+  **untrained** stage2 into `src/vm/jvm/stage0`, so **stage0 stays
+  empty-tabled**.
+- **rakudo** (`tools/templates/jvm/Makefile.in`): a stamp target after
+  `rakudo.jar` and the three settings runs the trivial program the same
+  way, tests the runner's exit status, greps for the marker, and then
+  `touch -r`-normalises the rewritten artifacts' mtimes so that a second
+  `make` is a no-op. The runner depends on the stamp. Rakudo's run
+  rewrites nqp's lib jars too -- about a third of a cold run's sites are
+  in them.
+
+Training is reproduced by any clean build only up to the training run's
+own execution-order nondeterminism (about 1 % of slots); the verify mode
+below is the correctness net, not byte equality.
+
+### The consumer: restore at the first miss
+
+On a site's **first miss**, inside `Dispatch.fallback` and before the
+recorder, the site resolves its slot through its own unit, program index
+and ordinal (never through the identity string, which embeds this
+process's store path), decodes it, realises each persisted program
+against the current process's serialization contexts, **drops** any
+program with an unresolvable reference, **installs** the rest and
+**replays**. If no persisted program's guards pass, the ordinary miss
+follows and the recorder, if it is on, sees a fresh record. This rests
+on the invariant replay already rests on: a program is valid whenever
+its guards pass.
+
+`misses` therefore keeps its meaning -- a restored site's first miss is
+still a miss -- and the claim is on `recorded=`. In the eval server
+`reset()` empties the sites per run and each site re-arms from its slot
+at its next first miss, so the benefit needs no object shared between
+runs.
+
+### Modes and verification
+
+`NQP_DISPATCH_PERSIST` selects the mode: unset or `on` consumes slots,
+`off` ignores them entirely (the artifacts are unchanged; it is the
+control), and `verify` consumes nothing, records fresh at every first
+miss, and compares what the site recorded against what the slot holds.
+
+Verify compares only persisted programs that are applicable (same
+shape, guards pass); an unseen persisted program is not a mismatch. The
+comparison is **first by `DispatchDump` text, then by evaluated
+outcome** on the recorded call's own arguments: the same outcome kind,
+the same callee object by identity / the same syscall name / the same
+value, the same evaluated argument capture, the same resumption
+dispatchers and init captures, equal `bindControl`. A program that
+matches only that way is counted `byOutcome`; only a program that fails
+both is a `MISMATCH`, and the gate is `mismatched=0`.
+
+`byOutcome` is not noise: nqp's `lang-meth-call` records a type-guarded
+form before a class publishes its method cache and a cache-lookup form
+after, and verify mode, by not installing, makes the site re-record
+after the cache exists -- so the form differs while the target is the
+same. Over the nqp suite that is 1309 of 272687 comparisons.
 
 ## Diagnostics
 
@@ -201,13 +314,53 @@ reference one by index.
   `sites=7427 anon=6`, and those six are the `-e` script's own: its unit
   is in-memory, so its programs get no identity.
 
-  Dispatch sites that the runtime makes for itself are **not counted at
-  all**: `Ops.helperDispatchSites`, Rakudo's rv-decont site in
+  Dispatch sites that the runtime makes for itself are **not counted by
+  either**: `Ops.helperDispatchSites`, Rakudo's rv-decont site in
   `RakOps.kt` and the indy road (`DispatchBootstrap.fromIndy`) each
   construct a `DispatchCallSite` directly, never a `Cache`. They are
-  identity-less too, but they are outside both counters. Phase C must
-  count them separately if the number is to mean "every site in the
-  process".
+  identity-less too. Phase C added **`sitesAll=`** for them
+  (`DispatchBootstrap.created`, every `DispatchCallSite` the process
+  makes): cold `rakudo -e 'say 1'` reads `sites=7463 anon=6
+  sitesAll=7569`, so 106 sites are the runtime's own.
+
+- `NQP_DISPATCH_STATS=1` also carries the Phase C counters on the same
+  line: **`restored=`** (persisted programs installed),
+  **`restoredSites=`** (sites that installed at least one),
+  **`dropped=`** (persisted programs whose references did not resolve)
+  and **`recorded=`** (programs the dispatcher had to record itself --
+  the phase's headline number). Cold `rakudo -e ''` on a trained build:
+  `restored=4477 restoredSites=4195 dropped=37 recorded=193`, against
+  `recorded=4723` untrained. `restored=`/`restoredSites=` also count in
+  `verify` mode, and all of these are process-wide: `resetAll` does not
+  clear them, so a figure must name the population it covers.
+
+- `NQP_DISPATCH_PERSIST=on|off|verify` selects the mode (unset means
+  `on`; an unrecognised value also means `on`). `verify` prints
+  `dispatch-verify: on` and a
+  `matched=/byOutcome=/mismatched=/unseen=` summary at exit, plus one
+  `MISMATCH` block per failure naming the site identity, the dispatcher,
+  and both programs' `DispatchDump` text.
+
+- `NQP_DISPATCH_VERIFY_LOG=<path>` sends every verify line to that file
+  instead of stderr, appended and prefixed by the writing process's pid.
+  Without it, a test that compares a child process's whole stderr
+  (`t/01-sanity/55-use-trace.t`) fails under `verify`, and TAP swallows
+  the per-run blocks so only the exit summary survives.
+
+- `NQP_DISPATCH_PERSIST_TRACE=1` prints `dispatch-persist: dropped
+  <identity> <reason>` for every program a restore drops. On a cold
+  `rakudo -e ''` that is 37 lines, all `no SC <handle>`.
+
+- `NQP_DISPATCH_RECORD=all|<prefix>,<prefix>` is the training switch: at
+  exit the process persists its installed programs into the artifacts
+  whose store names match, and prints `dispatch-record: wrote ...` per
+  artifact. **A training run is never a measured run**
+  (`tools/build/m7-rig.raku` refuses to start with it set).
+
+- `NQP_DISPATCH_DUMP=<path>` (from Phase C's C0 spike) prints every
+  registered site and each installed program in the normalised text form
+  that training deduplicates by and verify compares with.
+  `tools/build/dispatch-dump-diff.raku` diffs two dumps.
 
 ## What phase 2 will do
 
