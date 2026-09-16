@@ -36,14 +36,24 @@ same order, and the 3361 s is a truncated run, not a faster one.
 **Per the user rule of 2026-09-15 a failed benchmark run is not re-run.**
 The clock is recorded as not gathered and the next planned point takes it.
 
-## What it was not
+## What it was, and what it was not
 
-- **Not the low-memory guard**, which is what killed four single-server
-  sweeps in Phase B. The server started (it printed its banner and ran
-  310 files), `MemAvailable` fell from 24.4 GB to 15.6 GB and recovered
-  to 24.4 GB, `dmesg` is empty, and neither `Killed` nor
-  `OutOfMemory` appears in the log. The sweep ran to completion and the
-  harness printed its own summary.
+- **It WAS a memory kill -- of the server by its own cgroup cap, not of
+  the host.** Established after the close from `journalctl`; the first
+  write-up ruled it out because `dmesg` is unreadable to the user and the
+  host had 15 GB free. At 04:39:50 the kernel logged `TruffleCompiler
+  invoked oom-killer` and `Memory cgroup out of memory: Killed process
+  326175 (java) ... anon-rss:8985916kB` in the scope that
+  `rakudo-eval-server` creates with `systemd-run --scope -p MemoryMax=`
+  (limit 9437184 kB = heap 6 GB + the runner's off-heap allowance), and
+  systemd marked the scope `Failed with result 'oom-kill'` after 55 min
+  15 s of wall clock and a 9 GB memory peak. KDE's "Memory Shortage
+  Avoided" notification at 04:39 was that event. The server's native
+  memory (Truffle compiled code, metaspace, compiler threads) grew past
+  the allowance over the run; file 310 is simply how far 55 minutes got.
+  `MemAvailable` recovering to 24.4 GB was the freed server. The sweep
+  itself ran to completion and printed its summary because the server
+  process, not the sweep, was what died.
 - **Not any single test file.** The four files around the break —
   `test-assign-metaop-mu.t`, `thread-unhandled-exception.t`,
   `topic-call-bind.t`, `t/03-jvm/01-interop.t` — all pass together on a

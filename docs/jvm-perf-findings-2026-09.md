@@ -1617,12 +1617,20 @@ themselves inside the noise. The training pass itself costs 3 s of the
 482 files, one warm 6 GB server, 3361 s wall — but the server stopped
 producing TAP at file 310 (`t/02-rakudo/thread-unhandled-exception.t`),
 and the remaining 172 each reported `Tests: 0` and `No plan found in TAP
-output`. It was not the low-memory guard (the banner printed, 310 files
-ran, `MemAvailable` fell 24.4 -> 15.6 GB and recovered, no `Killed`, no
-`OutOfMemory`, empty `dmesg`), and it was not any single file (the four
-around the break pass together on a fresh server, 81 tests in 66 s; files
-from the dead stretch pass directly). It is the single-server sweep
-wedging after ~285 files of `t/02-rakudo`. Per the user rule of
+output`. **The cause, established after the close from the system
+journal (the first write-up called it a "wedge" and ruled out a memory
+kill; that was wrong): the kernel's cgroup OOM killer killed the server
+at 04:39:50.** `rakudo-eval-server` starts the JVM under `systemd-run
+--scope -p MemoryMax=` (heap 6 GB + the runner's off-heap allowance =
+9437184 kB); after 55 minutes the process held 8.99 GB of anonymous RSS
+with `TruffleCompiler` as the allocating thread, and systemd marked the
+scope `Failed with result 'oom-kill'`. The host had 15 GB free; the
+server's own cap did not. `dmesg` is unreadable to the user, which is
+why the subagent saw nothing; `journalctl` has it, and KDE's "Memory
+Shortage Avoided" notification at 04:39 was the tell. `MemAvailable`
+recovering to 24.4 GB was the freed server, not a sign of health. It was
+not any single file (the four around the break pass together on a fresh
+server, 81 tests in 66 s). Per the user rule of
 2026-09-15 it is **not re-run**; the evidence is in
 `docs/jvm-full-suite-run-2026-09-16.md` and the next planned suite
 measurement takes the clock.
@@ -1678,9 +1686,12 @@ would meet them:
    does not survive a clone through the method road), reproducibly and
    with `NQP_DISPATCH_PERSIST=off`. Introduced between A6' (rakudo
    `d6d5a2ea7e`, which added the test) and the close; unbisected.
-7. **The single-server sweep wedges after ~285 files of `t/02-rakudo`**,
-   which is what cost the close its suite clock. Whatever measures the
-   suite next has to settle this first.
+7. **A 55-minute single-server run outgrows the eval server's memory
+   cap** (`MemoryMax` = heap 6 GB + off-heap allowance = 9 GiB; anonymous
+   RSS reached 8.99 GB with the Truffle compiler allocating), which is
+   what cost the close its suite clock. Whatever measures the suite next
+   first raises the off-heap allowance or the cap for a long single-server
+   run, or finds why native memory keeps growing over 300 files.
 8. **The warm clock's open question.** Rig row `b` read a warm proxy of
    50 s, `c` 63 s and `close` 59 s, while `t/harness5 --evalserver` on
    the same directory read 49-57 s across Tasks 6-8 and this close.
