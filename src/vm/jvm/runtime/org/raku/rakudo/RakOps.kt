@@ -452,7 +452,7 @@ object RakOps {
 
     @JvmStatic
     fun p6store(cont: SixModelObject?, value: SixModelObject?, tc: ThreadContext): SixModelObject? {
-        val spec = cont!!.st.ContainerSpec
+        val spec = cont!!.st.state.containerSpec
         if (spec != null) {
             spec.store(tc, cont, Ops.decont(value, tc)!!)
         }
@@ -907,7 +907,7 @@ object RakOps {
          * at the sinkee without decontainerizing, so a Scalar an is-rw
          * routine returned keeps its contents unsunk. Scalar itself has no
          * sink method worth calling. */
-        if (obj != null && obj.st.ContainerSpec == null && Ops.isconcrete(obj, tc) != 0L) {
+        if (obj != null && obj.st.state.containerSpec == null && Ops.isconcrete(obj, tc) != 0L) {
             val meth = Ops.findmethodNonFatal(obj, "sink", tc)
             if (Ops.isnull(meth) == 0L)
                 /* Through the dispatcher: sink resolves to a multi's proto. */

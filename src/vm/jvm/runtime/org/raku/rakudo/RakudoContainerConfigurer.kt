@@ -3,18 +3,15 @@ package org.raku.rakudo
 import org.raku.nqp.runtime.ExceptionHandling
 import org.raku.nqp.runtime.ThreadContext
 import org.raku.nqp.sixmodel.ContainerConfigurer
+import org.raku.nqp.sixmodel.ContainerSpec
 import org.raku.nqp.sixmodel.STable
 import org.raku.nqp.sixmodel.SixModelObject
 
 class RakudoContainerConfigurer : ContainerConfigurer() {
-    /* Sets this container spec in place for the specified STable. */
-    override fun setContainerSpec(tc: ThreadContext, st: STable) {
-        st.ContainerSpec = RakudoContainerSpec()
-    }
+    override fun newContainerSpec(tc: ThreadContext, st: STable): ContainerSpec = RakudoContainerSpec()
 
-    /* Configures the container spec with the specified info. */
-    override fun configureContainerSpec(tc: ThreadContext, st: STable, config: SixModelObject) {
-        val cs = st.ContainerSpec as RakudoContainerSpec
+    override fun configureContainerSpec(tc: ThreadContext, cs: ContainerSpec, config: SixModelObject) {
+        cs as RakudoContainerSpec
         cs.store = grabOneValue(tc, config, "store")
         cs.storeUnchecked = grabOneValue(tc, config, "store_unchecked")
         cs.cas = grabOneValue(tc, config, "cas")
