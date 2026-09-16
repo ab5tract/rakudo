@@ -530,6 +530,18 @@ Following the stage0 rule in the worktree's `CLAUDE.md`:
 
 ## Phase 2: SC demand deserialization
 
+**Revision 5 (2026-09-16): superseded in part by milestone 8's Phase C,
+Revision 2** (`docs/superpowers/specs/2026-09-16-jvm-milestone-8-type-state-design.md`,
+section 5), after the MoarVM startup analysis (`docs/moarvm-startup-analysis.md`).
+Two "stays eager" items below are dropped there: the up-front stub pass
+(root arrays start empty, stub on demand, no `stableIndex` map) and the
+string heap (offset table, decode on first use). Added there: lazy HOW at
+the STable level, a `working` guard during a drain, and a C0 measurement
+of the 28.17 MB vs 7.83 MB blob gap with the writer fix first if confirmed.
+"No format change" below therefore no longer holds unconditionally. The
+locking paragraph, the barrier, the engine `WvalSite` and the diagnostic
+stand. Phase C's brainstorm reads the milestone 8 text as the authority.
+
 No format change and no stage0 step; the SC reader and runtime only.
 
 **Stays eager** in `SerializationReader.deserialize()`: header and string heap;

@@ -374,6 +374,43 @@ promotion bought.
   "Phase 2"), planned with its own brainstorm after Phase B closes; the
   rig row is `c`; the format may change once (stage0 regenerates once,
   still uncommitted under the jar rule).
+- **Revision 2 (2026-09-16, user instruction): Phase C integrates the
+  MoarVM startup analysis** (`docs/moarvm-startup-analysis.md`, a
+  read-only investigation the user asked for the same day). Its findings
+  bind Phase C's brainstorm and plan:
+  1. **No up-front stubbing.** The lazy spec's "stays eager: stubbing
+     every STable and object" is dropped. As MoarVM does
+     (`serialization.c`, `MVM_serialization_deserialize` then
+     `demand_object`), the root arrays are allocated empty and an entry
+     is stubbed on first demand; the `stableIndex` map goes with it (the
+     index lives on the object, as MoarVM's `idx_in_sc`).
+  2. **Lazy string heap.** The lazy spec's "stays eager: string heap" is
+     dropped: an offset table at load, a string decoded on first use
+     (MoarVM's `MVM_cu_obtain_string`).
+  3. **Lazy HOW at the STable level**: a type touched by `istype` must
+     not pull its metaclass and method tables (MoarVM's
+     `deserialize_how_lazy`).
+  4. **A `working` guard during a drain** (MoarVM's `sc_working`) so no
+     stub escapes mid-worklist; this is what the lazy spec's "user code
+     never sees a stub" rests on.
+  5. **Locking** stays one global lock (lazy spec); MoarVM's per-SC
+     reentrant mutex is noted as the alternative, not adopted.
+  6. **C0 also measures the blob gap**: CORE.c's serialized SC is
+     28.17 MB here against MoarVM's 7.83 MB for the same objects (3.6x;
+     likely reference packing, MoarVM packs SC id and index in one
+     varint). The writer fix comes BEFORE the demand reader if C0
+     confirms it, since the format is not frozen by stage0 (one regen,
+     uncommitted).
+  7. **The bodies row is not Phase C's.** MoarVM executes the same 1207
+     package bodies, capturelex prologues, 1148 clones and ~4600 cold
+     dispatcher runs at load, in 0.08 s total; ours is per-unit cost.
+     Phase C's expected share is the SC-read row only (~10 % of
+     main-thread samples), and the close says so. A static-clone road and
+     a non-dispatching capturelex fast path are recorded as the bodies
+     row's own levers, ranked at the milestone close against M9.
+  8. **Persisted dispatch slots keep priority** over Phase C if the two
+     clocks disagree: MoarVM cannot persist dispatch programs, we can.
+  The analysis doc holds the file:line evidence for each point.
 
 **Rig:** `tools/build/m7-rig.raku` as it stands (cold rakudo-e, cold
 nqp-e, dispatch counters, warm `t/01-sanity` proxy), with the publish
