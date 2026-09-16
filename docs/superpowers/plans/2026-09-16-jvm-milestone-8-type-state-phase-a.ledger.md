@@ -788,3 +788,49 @@ because of the reader's new republish per deserialized STable; still 4
 invalidations of installed code, still 0 of them a type state), with an
 "after the fix wave" line added to `docs/jvm-perf-findings-2026-09.md` and
 `docs/jvm-truffle-only-plan.md`.
+
+### Hotfix 2 (2026-09-16, after the scoped re-review of hotfix 1)
+
+The re-review confirmed hotfix 1's six elements (and that stale-at-head,
+stale-in-middle and stale-beyond-`MAX_CACHED` converge) and found **two open
+holes, both in `Guard.Literal`'s state handling**:
+
+* **(d) the restore route.** A persisted-slot program restored with an
+  OBJ-literal guard had `Guard.Literal.state == null` (the codec never assigns
+  it), so `DispatchProgram.isFresh` said TRUE while the engine `Folder` had
+  folded it under the CURRENT `st.state`. When that type republished, the
+  folded `Program`'s assumption went invalid (`hasStale()` true) but
+  `cacheable` still admitted the program, `refresh` reused the very same
+  `Program` object (identity matched) and published on every miss -- hotfix 1's
+  storm, on the restore route.
+* **(e) the runtime road.** With the folded prefix truncated at a stale
+  program, `Dispatch.fallback` / `Dispatch.run` re-ran that program: a stale
+  OBJ-literal guard's `check` was identity-only, so the guards matched, the
+  pre-republish outcome ran, and the program was never evicted.
+
+**The fix: the identity guard is a state guard whenever it has a state, exactly
+like the type guard.** `Guard.Literal.state` now defaults to the expected
+object's state at construction (the restore-time capture; `emitGuards` still
+overwrites it with the recorded one), `check` additionally requires
+`got.st.state === state`, `DispatchCompiler.testLiteralIdArg` takes the state
+and tests it (so `TEST_LITERAL_ID_ARG` binds over `(Int, Object, TypeState?)`)
+as does `testGuard`'s Literal OBJ branch, `Dispatch.run` skips a `!isFresh`
+program before checking guards (belt and braces), and `Cache.refresh` reuses a
+folded `Program` only when its program identity matches AND all its
+assumptions are still valid -- otherwise it refolds, so `hasStale()` is false
+after one publish even if the two staleness notions ever diverge again.
+`GuardStateTest` gained three tests (construction capture + `check` +
+`testLiteralIdArg`; the miss on every road after a republish; a non-OBJ literal
+keeping no state): 65 runtime tests, 0 failures.
+
+Gate: runtime tests 65/65 (15 s), t/jvm 19/17/18 = 4/4, 50/50, 14/14 (2/4/2 s),
+nqp suite 156 files green (195 s), `t/01-sanity` 25 files / 303 tests PASS
+(43 s), `t/02-rakudo/type-state.t` 4/4 (7 s), verify
+`matched=4511 byOutcome=5 mismatched=0 unseen=6933` -- **unchanged** from before
+the hotfix -- and a cold `-e ''` whose dispatch stats line is byte-identical to
+the pre-hotfix-2 one (`restored=4465 dropped=26 staleSchema=0 recorded=206
+publishes=14858`), so no literal guard misses where it should not. (`recorded=`
+is 206 against Task 5's 195; that +11 came with the fix wave, not with this
+hotfix.) No `make`: no Rakudo runtime source changed.
+
+Ruling (hotfix 2): the identity guard becomes a state guard whenever it has a state, like the type guard: Guard.Literal captures `state` at construction for OBJ values (restore-time capture for slots, like OfType's default), `check` additionally requires `got.st.state === state` when state != null, DispatchCompiler.testLiteralIdArg does the same, Dispatch.run skips !isFresh programs (belt and braces), and Cache.refresh never reuses a folded Program with an invalid assumption. GuardStateTest covers the literal's construction capture and its check. Cost if wrong: an OBJ-identity guard on an object whose type republished now misses where it used to match with stale constants -- which is the correct behaviour the spec asks for.
