@@ -405,3 +405,144 @@ Artifacts (untracked, in the rakudo worktree, `m7-rig/` is not a tracked directo
 runtime JUnit 69/69 (up to date), nqp suite Result: PASS, Files=153, Tests=13216 (two more than the
 B0 gate: the census test's two child-status asserts), prove 506 s / gradle 735 s; warm t/01-sanity
 knob off 25 files in 57 s on one server, no reds.
+
+## B1: batch 1 (the sites)
+
+Commits: nqp **dbf219374** (`IsContSite`), nqp **cbc10aa3d** (`IsTrueSite`: istrue/isfalse and the
+`Truthy` object arm; boolification mode 7 ITER folded too), nqp **b514835cb** (`FindMethodSite`:
+findmethod/tryfindmethod/can), nqp **24bfcccac** (the decont / isconcrete / create arms; a
+source-level `nqp::defined` also reaches `IsConcreteSite`, since it maps onto `Ops.isconcrete`).
+
+Gate: retrain `dispatch-record: done 21 paths, **4191 slots**, 4490 programs, 14 unpersistable,
+**0 failed**` (2 s); nqp suite **Result: FAIL** on the first run, Files=154 Tests=13235, **693 s**
+-- one red, see below -- and **Result: PASS**, Files=154 Tests=13246, **486 s** on an immediate
+re-run of the same tree and the same jars; `t/01-sanity` 25/25 in **41 s** (wall 43 s), one 8 GB
+server, no reds; verify `matched=4337 byOutcome=4 **mismatched=0** unseen=884` (2 s). Rig wall
+**130 s**, all markers present, `m7-rig: DONE tag=b1`.
+
+**The one red, and why it is recorded as non-reproducing, not as green.** On the first suite run
+`t/nqp/023-named-args.t` died before its plan:
+`Cannot find method 'ann' on object of type BOOTInt` at `NQP::src/NQP/Actions.nqp` `statementlist`
+(the `my $sunk := $ast.ann('sink');` line), i.e. a statement's `.ast` handed back an integer where
+a QAST node belongs -- the method lookup itself was right to fail. Files 001-022 and 024-onwards
+passed in that same run. It does **not** reproduce: 6/6 standalone passes on
+`./nqp-j-gradle t/nqp/023-named-args.t` after the failure, and the whole suite green on the re-run
+(the 13246 - 13235 = 11 test difference is exactly this file's eleven tests). Nothing was rebuilt
+or changed between the two suite runs. So batch 1's gate is **PASS with one non-reproducing red**,
+and the red is left as an open item rather than attributed: the shape (a wrong *value*, not a wrong
+method) points at the standing persisted-slot misbind hazard (M7 Phase C, carried in M8's status)
+rather than at any of the four site classes, none of which can hand a caller an Int in place of a
+node. Cost if wrong: an intermittent mis-execution in the compiler, which would resurface on the
+next whole-suite run.
+
+Rig row b1: `| b1 | e3a9f48ab6 | 24bfcccac | 2.249 | 1.186 | 4933 | 37077 | 50/sanity | none | |`.
+Against b0 (2.460 / 1.334 / misses 4933 / hits 37077 / 64 s): rakudo-e **-8.6 %**, nqp-e
+**-11.1 %**, warm sanity **-22 %**, with `misses` and `hits` bit-identical to b0 (4933 / 37077).
+**Outside the spread on both cold clocks, on the fast side**: the five walls behind b1 were
+rakudo-e 2.40 2.32 2.46 2.25 2.38 against b0's 2.53 2.57 2.46 2.49 2.56 (b1's *worst* equals b0's
+best), and nqp-e 1.19 1.29 1.26 1.29 1.30 against b0's 1.33 1.34 1.36 1.60 1.52 (no overlap at
+all). b1 lands back on the M7 close (2.247 / 1.198, so +0.1 % / -1.0 %) and just under row a /
+`m8a` (2.290 / 1.190, -1.8 % / -0.3 %).
+
+That does **not** close B0's open item, and should not be read as "batch 1 bought 8.6 %". Two
+readings fit equally: the machine-state reading (b0 was measured on a loaded box, b1 on a quiet one
+-- the b0 bisect's own numbers drifted with time, not with commit order) and the promotion reading
+(batch 1 removed 35.6 k classlib calls from a cold rakudo start). The census below can separate
+them for *traffic* but not for *time*; the only clean discriminator left is a same-session
+reference row on the B-pre jars, which remains the controller's call.
+
+Per op, B0 -> B1 (rakudo-e / nqp-e / sanity census; CORE.c: b0 bound only, no CORE.c compile was
+run in this task). B0 counts are the uncut re-takes (`b0-*-census2.*`); B1 counts are
+`m7-rig/b1-rakudo-e-census.err`, `m7-rig/b1-nqp-e-census.err`, `m7-rig/b1-sanity-census.log`.
+
+| op | road before | B0 count | B1 site calls | misses | pins | slow paths | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| iscont | classlib `Ops.iscont` | 402 / 0 / 46,713 | `IsContSite` 402 / 0 / 46,645 | 12 / 0 / 363 | 3 / 0 / 84 | `[pinned=365 generic=9]` / `[]` / `[pinned=43636 generic=283]` | **promoted**; `Ops.iscont` is 0 on all three roads |
+| istrue (+isfalse, +Truthy obj) | classlib `Ops.istrue` / `Ops.isfalse`; `Truthy` unsited (on neither road) | 2,628 / 147 / 328,821 (+isfalse 1 / 0 / 228) | `IsTrueSite` 19,329 / 6,722 / 2,400,527 | 68 / 24 / 4,959 | 8 / 4 / 803 | `[pinned=2820 method=77 generic=60 mode6=4]` / `[pinned=2276 generic=20 method=7]` / `[pinned=226203 method=24184 mode6=19485 generic=4156]` | **promoted**; `method=` is the mode-0 share: 77 / 7 / 24,184. Site calls far exceed the B0 classlib count because the `Truthy` object arm was counted on neither road before |
+| findmethod / tryfindmethod / can | classlib `Ops.findmethod`, `Ops.can`; table `tryfindmethod` | 42+2,613+29 = 2,684 / 19+87+30 = 136 / 7,212+367,103+30,686 = 405,001 | `FindMethodSite` 2,701 / 136 / 405,344 | 26 / 23 / 1,815 | 3 / 3 / 332 | `[nonauth=878 pinned=29 generic=23]` / `[pinned=32 generic=20]` / `[nonauth=102175 pinned=88602 generic=1536]` | **promoted**; `nonauth=` decides the multi-state question (below). The three B0 counts sum to within 0.6 % of the site's calls on every workload, so nothing leaked |
+| decont / isconcrete / create (by name) | classlib | `Ops.decont` 25,717 / 4,991 / 6,577,103; `Ops.isconcrete` 5,263 / 1,170 / 1,124,305; `Ops.create` 640 / 143 / 211,227 | `DecontSite` 37,584 -> 89,750, 10,107 -> 22,524, 6,892,935 -> 17,202,035; `IsConcreteSite` 175 -> 5,719, 30 -> 1,127, 97,685 -> 1,229,682; `CreateSite` 4,252 -> 4,904, 1,989 -> 2,133, 531,440 -> 743,174 | 8 / 0 / 2,322 (Decont); 0 / 0 / 0 (IsConcrete); 15 / 5 / 786 (Create) | 1 / 0 / 434; 0; 2 / 1 / 157 | `[]` on all three | **reachable**; all three names are 0 on the classlib road now. `Ops.isconcrete_nd` (567) and `Ops.createsc` (22) are unchanged between b0 and b1 -- different ops, not batch 1's |
+
+Road totals, B0 -> B1:
+
+| workload | table | classlib | siteCalls | siteMisses |
+| --- | --- | --- | --- | --- |
+| rakudo-e | 33,283 -> 33,340 (+0.2 %, noise; `tryfindmethod`'s 29 left) | 159,612 -> **124,036 (-22.3 %, -35,576)** | 49,032 -> 129,910 | 619 -> 744 |
+| nqp-e | 22,200 -> 22,156 | 26,655 -> **19,870 (-25.5 %, -6,785)** | 12,703 -> 33,204 | 66 -> 117 |
+| sanity | 3,256,099 -> 3,231,214 | 22,490,277 -> **13,880,310 (-38.3 %, -8,609,967)** | 9,553,355 -> 24,073,100 | 25,585 -> 34,760 |
+| CORE.c | *b0 bound only* | *b0 bound only* | *b0 bound only* | *b0 bound only* |
+
+On each workload the classlib drop matches the sum of the eight moved ops to within run-to-run
+variance (rakudo-e: 37,306 accounted against 35,576 measured; nqp-e 6,557 against 6,785; sanity
+8,662,712 against 8,609,967). `siteCalls` rises by much more than the classlib road loses -- that
+is `DecontSite`'s by-design double-count of inner sites plus the `Truthy` and ITER traffic that
+used to be on neither road, not new work.
+
+### JFR `--ops`: "entry from interpreter", b0 next to b1
+
+Both cold rows sample in the low hundreds (Ruling 11: the 1 % line is under the sampling noise
+there), so these tables are read for *shape*, not for deltas. Every container's entry table is
+shorter than 12 rows; these are complete, not truncated.
+
+**rakudo-e** (`m7-rig/b0-rakudo-e-jfr.txt` 144 samples -> `m7-rig/b1-rakudo-e-jfr.txt` 115 samples;
+the run is 8.6 % shorter, so the sample count falls with it).
+
+| container | b0 | b1 |
+| --- | --- | --- |
+| table | 6 = 4.2 % (`RunOp.doOp` 100 %) | 2 = 1.7 % (`RunOp.doOp` 100 %) |
+| **classlib** | 41 = **28.5 %** (`ClassLibOp.doCall` 100 %) | 39 = **33.9 %** (`ClassLibOp.doCall` 100 %) |
+| sites | 2 = 1.4 % (`CreateOp.doCreate` 1, `P6SinkOp.doSink` 1) | 5 = 4.3 % (**`Truthy.doTruthy` 3 = 60 %**, `IsTrueOp.doIsTrue` 1, `DecontOp.doDecont` 1) |
+| dispatch | 34 = 23.6 % (`DispatchOp.doDispatch` 31, `NqpLanguage.lambda$parse$0` 1) | 21 = 18.3 % (`DispatchOp.doDispatch` 100 %) |
+| interpreter self | 33 = 22.9 % | 33 = 28.7 % |
+| outside all | 28 = 19.4 % | 15 = 13.0 % |
+
+**nqp-e** (`m7-rig/b0-nqp-e-jfr.txt` 68 samples -> `m7-rig/b1-nqp-e-jfr.txt` 48 samples).
+
+| container | b0 | b1 |
+| --- | --- | --- |
+| table | 4 = 5.9 % (`RunOp.doOp` 100 %) | 3 = 6.3 % (`RunOp.doOp` 100 %) |
+| **classlib** | 11 = **16.2 %** (`ClassLibOp.doCall` 100 %) | 8 = **16.7 %** (`ClassLibOp.doCall` 100 %) |
+| sites | 0 = 0.0 % | 0 = 0.0 % |
+| dispatch | 20 = 29.4 % (`DispatchOp.doDispatch` 19, `GetAttrOp.doGet` 1) | 17 = 35.4 % (`DispatchOp.doDispatch` 100 %) |
+| interpreter self | 17 = 25.0 % | 10 = 20.8 % |
+| outside all | 16 = 23.5 % | 10 = 20.8 % |
+
+**The classlib share before and after: it did not fall.** 28.5 % -> 33.9 % on rakudo-e, 16.2 % ->
+16.7 % on nqp-e, on 41 -> 39 and 11 -> 8 absolute samples. A road whose *call count* dropped 22-26 %
+holds the same share of a shorter run, which says the calls batch 1 removed were among the road's
+cheapest -- consistent with B0's own reading that the classlib road's cost is dominated by
+`classlibInline` on the whole road, not by the eight names moved here. On these sample counts a
+5-point move is within noise either way; **CORE.c, at 12,956 samples, is the only workload where
+the classlib share can actually be measured, and it was not re-run in this task.** That is the
+honest limit on what batch 1's JFR shows.
+
+Rulings made during batch 1:
+1. The child-process helper is copied from `20-op-census.t`; there is no shared-library convention
+   for it in the test tree.
+2. The in-process fold/refold tests pass before each site exists; the RED half of the TDD cycle is
+   the routing and counter asserts, not the folding itself.
+3. The user's part-1 execution choice was carried into part 2 unchanged.
+4. Refold tests use a second 200-iteration loop after the writer op.
+5. The DSL refuses a null constant operand, so native conditions carry the `NqpTypeOps.NO_SITE`
+   sentinel instead.
+6. `MODE_ITER` is folded -- it was the largest single slow path on cold start (5,284 of 19,329
+   IsTrueSite calls before the fold; `mode7` does not appear in b1's slow list at all).
+7. A method-cache **hit** folds under any authority; a **miss** folds only under an authoritative
+   cache.
+8. `20-op-census.t`'s example ops were repointed to `sha1` / `reprname`.
+9. `NqpOps.str` is private, so `findmethodSlow` uses `if (name is String) name else name.toString()`.
+
+The multi-state findmethod question: nonauth=**878** on rakudo-e (32.5 % of that site's 2,701
+calls), **102,175** on sanity (25.2 % of 405,344), **0** on nqp-e -> **NOT designed.** The 878 cold
+calls come from about five *monomorphic* sites probing names that are absent from ADVISORY caches
+(`WRAPPERS` x3, `CALL-ME` x2, `REQUIRED-REVISION`, `default`, `body`), not from polymorphism, so a
+multi-state guard -- which only helps a site that sees several receiver types -- would not remove
+one of them. The only lever that would is a memo of the HOW walk's answer, and Ruling 7's fold rule
+forbids exactly that (a miss under a non-authoritative cache must stay unmemoised, or a later
+`add_method` goes unseen). Recorded, not designed: the census batch (B2) decides whether these
+probe sites are hot enough to deserve a different remedy.
+
+Artifacts (untracked): `m7-rig/b1.md`, `m7-rig/b1-{rakudo-e,nqp-e}-{run1..5,census,jfr}.err`,
+`m7-rig/b1-{rakudo-e,nqp-e}.jfr`, `m7-rig/b1-{rakudo-e,nqp-e}-jfr.txt`, `m7-rig/b1-sanity.log`,
+`m7-rig/b1-sanity-census.log`, and the row appended to `m7-rig/rows.md`; logs
+`nqp-suite-b1.log` (the FAIL), `nqp-suite-b1-rerun.log` (the PASS), `sanity-b1.log`, `rig-b1.log`
+under `/home/longwalker/.claude/jobs/455b5a91/tmp/`.
