@@ -83,7 +83,18 @@ position table (kept below as history) is unchanged for items 1-3 and
   compression is Phase C's inbox. Build unchanged: make 854/861/863 s,
   CORE.c 283/280/281 s. Format doc: `docs/jvm-unit-lazy-loading.md`;
   numbers: `docs/jvm-perf-findings-2026-09.md`, "Milestone 7, Phase B".
-  **Next: the Phase C plan, from C0 the spike.**
+
+**Cold start, the persisted miss (2026-09-16).** Milestone 7 Phase C
+filled the `unit.dispatch` table Phase B wrote empty (rakudo
+`79829d402e` / nqp `f5c5bc8fa`): both builds run one training pass of
+the trivial program, and every site now restores its recorded dispatch
+programs at its first miss instead of running the dispatcher's guest
+code. On the trivial program `recorded=` falls 4723 -> 193 and `hits=`
+80298 -> 13292; rig row `c` reads cold `rakudo -e` 2.272 s (from
+2.461 s), cold `nqp -e` 1.203 s, misses 4931, hits 35512, with the
+verify gate at zero mismatches. **Next: the milestone 7 close -- whole
+`t/` once on one warm server -- and then the compression decision and
+lazy-loading phase 2 (SC demand deserialization).**
 
 | item | state on 2026-09-13, cold start updated 2026-09-15 |
 |---|---|
@@ -92,7 +103,7 @@ position table (kept below as history) is unchanged for items 1-3 and
 | 3 calling convention | unchanged: partial, paused (`NQP_CODE_NOFRAME` off, dispatch blocks deferred) |
 | 4 compiler workload | **measured twice, partly landed** (milestone 6 + the 2026-09-12 timings). Tier policy + one compiler thread on every setting compile and on `J_NQP_RR`: CORE.c 434 -> 297 s, clean make 985 -> 922 s. Ceiling found: guest compilation is at most 17.5 % of a CORE.c compile, so this item cannot move CORE.c much further by knobs. Open inside it: the eight items milestone 6 handed to milestone 7 (`docs/jvm-perf-findings-2026-09.md`, "What milestone 7 inherits"), six of them one pattern (slow paths visible to the inliner: `nqp/src/vm/jvm/runtime` still has zero `@TruffleBoundary` against 113 in `nqp/nqp-truffle/src`, re-counted 2026-09-13); v6c unprofiled; setting compilation not idempotent |
 | 5-9 | DONE, unchanged (milestones 1-5) |
-| cold start (outside the nine) | **phase 1 DONE 2026-09-15** as milestone 7 Phase B (artifact v2, the mapped store, lazy bodies, site identity, the empty dispatch table; rakudo `107eca63a3` / nqp `318558c2d`). It is clock-neutral at the top level -- cold `rakudo -e` 2.504 -> 2.461 s, cold `nqp -e` 1.192 -> 1.160 s, both inside the spread -- and its real result is per stage and structural: the decode stage is gone, eager static-lexical application is gone, the SC blob is mapped and ready for demand reading, and every dispatch site now has a stable (unit, program, ordinal) address. **Phase 2 (SC demand deserialization) is what remains of the lazy-loading spec**; the SC slice is already handed to the reader as a `ByteBuffer`. Next in milestone 7 is Phase C (the persisted miss), C0 the spike first |
+| cold start (outside the nine) | **phase 1 DONE 2026-09-15** as milestone 7 Phase B (artifact v2, the mapped store, lazy bodies, site identity, the empty dispatch table; rakudo `107eca63a3` / nqp `318558c2d`). It is clock-neutral at the top level -- cold `rakudo -e` 2.504 -> 2.461 s, cold `nqp -e` 1.192 -> 1.160 s, both inside the spread -- and its real result is per stage and structural: the decode stage is gone, eager static-lexical application is gone, the SC blob is mapped and ready for demand reading, and every dispatch site now has a stable (unit, program, ordinal) address. **Phase 2 (SC demand deserialization) is what remains of the lazy-loading spec**; the SC slice is already handed to the reader as a `ByteBuffer`. **Phase C (the persisted miss) is DONE 2026-09-16** (rakudo `79829d402e` / nqp `f5c5bc8fa`): the dispatch table is filled by a training run in both builds, `recorded=` 4723 -> 193 on the trivial program, row `c` cold `rakudo -e` 2.272 s. What remains of milestone 7 is its close (whole `t/` once) |
 
 **Against the north star.** `docs/jvm-truffle-migration.md` is at its
 end state except for two entries of its Phase 5 inventory: the calling
