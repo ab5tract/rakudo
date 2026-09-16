@@ -5,9 +5,19 @@ Plan (opening + B0): docs/superpowers/plans/2026-09-16-jvm-milestone-8-phase-b-o
 
 ## B-pre: the opening commit
 
-Commits: nqp ef18fd750 (stamp plumbing), nqp 299be6d0f (slot schema 2), nqp 334c1d3bc (parkings),
-nqp 122408ad7 (the op census), rakudo 05edf68871 (spec Revision 1), rakudo a796c94a48 (Makefile
-order-only runtime jar), rakudo 4506c7d939 (rig `--census`, `jfr-attribute --ops`, sweep census).
+Commits: nqp ef18fd750 (stamp plumbing), nqp 299be6d0f (slot schema 2), nqp **da88da8e6**
+(parkings), nqp **0619e6a03** (the op census), rakudo 05edf68871 (spec Revision 1), rakudo
+a796c94a48 (Makefile order-only runtime jar), rakudo 4506c7d939 (rig `--census`,
+`jfr-attribute --ops`, sweep census), plus the final-review fix wave: nqp **cceb673bb** and the
+rakudo commit that carries this ledger update.
+
+**SHA note.** The fix wave rewrote nqp 334c1d3bc's subject (it claimed the shed of a parking that
+Ruling 2 had already voided) and rebased the two commits above it, so three nqp SHAs moved:
+`334c1d3bc -> da88da8e6` (tree-identical, dates and trailer preserved) and
+`122408ad7 -> 0619e6a03` (tree-identical replay). Numbers and rows recorded elsewhere in this
+ledger under the OLD SHAs -- the rig row b0's nqp column, the bisect points below -- refer to the
+same trees and were not re-measured.
+
 Also on the branch, user-requested and not part of this plan: rakudo b1084467f5
 (docs/moarvm-startup-analysis.md), rakudo 1560817ab6 (M8 spec Revision 2 / lazy spec Revision 5).
 
@@ -23,11 +33,51 @@ server, `evalserver-sweep --chunk='*' --jobs=1`); first cold run after the build
 restoredSites=4169 dropped=15 recorded=870 publishes=14858). `lib/.precomp` removed after the make.
 `java` is Oracle GraalVM 25.2.4+7.1 (25.0.4+7-LTS-jvmci-25.2-b20) on all of it.
 
+Gate additions from the final-review fix wave (2026-09-16), all three asked for by the reviewer:
+
+(i) **The in-build CORE.c number, knob off and unprofiled.** From the B-pre `make` log
+(`/home/longwalker/.claude/jobs/455b5a91/tmp/make-b0.log`, the `blib/CORE.c.setting.jar`
+stagestats): parse 238.044 + optimize 21.499 + qast 19.656 + unit 25.203 = **304.4 s**, against the
+M7 close's 296 s: **+2.8 %**. This is the point of record the census (356 s) and JFR (319 s) rows
+below could not supply, and it is FLAT. A per-op or per-site cost paid by the B-pre commits would
+show up here first and largest -- 257 M table ops and 692 M sited calls in one compile -- so this
+number is what excludes that whole cost class from row b0's +0.17 s cold-start question.
+
+(ii) **The stamps are live in the shipped artifacts, not merely implemented.**
+`unzip -v blib/CORE.c.setting.jar` reports `unit.serialized` CRC-32 = **`485c5fee`** (28,167,619
+bytes, Stored). In that same jar's `unit.dispatch`, the handle
+`6DDBA3D53BF6003AAC5A4C4904CCCCC0E610ECAB` occurs 497 times, and **137 of those occurrences are
+immediately followed by the four little-endian bytes `ee 5f 5c 48`** -- i.e. `PStamp.stamp`
+(an `Int`, DispatchSlot.kt:19) = `0x485c5fee`, the CRC of that jar's own `unit.serialized`. The
+remaining 360 are `PRef`s, whose next int is an object index (`f0000000`, `d8010000`, ... in the
+tail histogram). So the recorded slots really do carry the artifact's CRC under its SC handle.
+
+(iii) **The order-only prerequisite, observed -- with a FINDING about how to observe it.** The
+brief's literal check (`touch rakudo-runtime.jar && make -n`) lists `blib/Raku/Grammar.jar`,
+`blib/Perl6/Compiler.jar`, `rakudo.jar`, CORE.c/d/e, BOOTSTRAP v6d/v6e, the training stamp and the
+runners -- i.e. rakudo.jar and the settings WOULD rebuild, which by the brief's rule is recorded
+here as a finding and the Makefile was not touched. But that reading is confounded, and an A/B on
+the one variable settles it: with `rakudo-runtime.jar` dated 20:02 and then `touch`ed to now, and
+nothing else changed, `make -n` emits **byte-identical** target lists (`diff` empty). The touch
+costs zero rebuilds; the order-only `|` in `J_RAKUDO_DEPS_EXTRA` holds.
+
+  What makes the tree stale independently is a pre-existing sub-second timestamp inversion inside
+  `blib/` left by the b0 bisect session's jar restore at 21:01:34 -- `make -n --debug=b` says
+  `Prerequisite 'blib/Raku/Actions.jar' is newer than target 'blib/Raku/Grammar.jar'`, and their
+  mtimes are 21:01:34.195 vs 21:01:33.946 (0.25 s apart). That cascades Grammar -> rakudo.jar ->
+  the settings and has nothing to do with either runtime jar. **The lesson for the next
+  verification: an order-only claim can only be read off a tree that is otherwise up to date, or
+  off an A/B like the one above; a bare `make -n` on a dirty tree proves nothing either way.**
+
 Rulings:
 1. stamp 0 for in-process SCs is recorded and compared, not unpersistable (spec Revision 1). An
    in-process SC has no zip entry to CRC, so it gets stamp 0; 0 is a value like any other, so a
-   slot that referenced it is restored only against another stamp-0 SC. Cost if wrong: slots over
-   in-process SCs are dropped (a miss), never mis-restored.
+   slot that referenced it is restored only against another stamp-0 SC. Cost if wrong (corrected
+   by the final review; the first wording had it backwards): an in-process SC's stamp 0 MATCHES any
+   other stamp-0 SC under the same handle, so the residual hazard is a mis-restore across two
+   in-process SCs sharing a deterministic handle, not a dropped slot. The only stamp-0 handle in
+   the trained artifacts is `__6MODEL_CORE__`, covered by the training stamp's dependency on both
+   runtime jars.
 2. Task 3's saturated-site test is an invariant guard, not red-first: Phase A parking 2 is VOID by
    the cap invariant (install/reset are the only writers; the add only grows while
    size < MAX_PROGRAMS; a filtered array always fits). The redundant store was removed and the
@@ -66,6 +116,13 @@ Rulings:
    Consequence for batch 1: `iscont`, `isfalse` and `findmethod` appear on NO workload's printed
    lists and are therefore bounded, not measured. Cost if wrong: a batch-1 op whose true count sits
    just under the cut is ranked lower than it deserves; raising the cut is a one-character change.
+   **RESOLVED in the final-review fix wave (nqp cceb673bb): both `take(30)` cuts are gone.** The
+   block now prints every table op with a non-zero count and every classlib name, sorted
+   descending, and each reader takes its own top N (the rig's parser 8, the sweep's `census-block`
+   all of them). The three bounded ops were re-measured on re-taken censuses -- see "The three
+   bounded ops, measured" below -- on the two `-e` rows and the sanity sweep. **CORE.c's entries
+   stay bounds** and are marked as such: that compile was not re-run (~6 min under the knob), and
+   the standing rule is that a benchmark row is recorded, not re-run.
 10. **The JFR `--ops` "entry from interpreter" table resolves to the op CLASS, not the op**: every
     row is an `NqpRootNode$XxxOp` node method (`RunOp.doOp`, `ClassLibOp.doCall`,
     `DispatchOp.doDispatch`, `IsTypeOp.doIsType`, ...), because that is the outermost project frame
@@ -80,6 +137,19 @@ Rulings:
 12. **`NqpCensus.slow` has no callers yet**, so `slow=[]` on every site of every workload is by
     construction, not a finding. Batch 1 adds the named slow paths (istrue.method,
     findmethod.nonauth) the spec's section 2 describes.
+13. **Removing the `take(30)` cuts exposed a latent deadlock in `evalserver-sweep.raku`, fixed in
+    the same wave.** `run-rakudo-chunk` slurped the chunk's stdout to EOF and only then its stderr.
+    With an uncut census (~713 lines on a sanity sweep) the eval server's stderr buffer fills, the
+    server blocks in `write(2)` -- inside its census SHUTDOWN HOOK, so it can never exit -- the
+    harness waits on the server, and stdout therefore never reaches EOF, so the sweep never reaches
+    the stderr slurp that would unblock everything. Measured: the sweep hung for 20 minutes, jstack
+    showing `Thread-9` in `FileOutputStream.writeBytes` under `NqpCensus.print:107` (the classlib
+    loop) for 741 s while `main` sat in `accept()`. Both handles are now drained concurrently
+    (`start { $proc.err.slurp(:close) }`), in `run-rakudo-chunk` and in `run-nqp-chunk`'s `prove`
+    helper, which had the identical shape. After the fix the same sweep ran in **51 s**. The
+    defect was always there; only a writer big enough to fill the buffer made it reachable. Cost
+    if wrong: none foreseen -- a concurrent drain is what every other `run(:out, :err)` in this
+    tree should be doing.
 
 Phase A's two open items are closed here: the cross-build stale-slot hazard (the SC stamp, nqp
 ef18fd750 + 299be6d0f, exercised by the 966 s cross-build `make` above with `staleStamp=0` after
@@ -105,6 +175,34 @@ hits per cold start, which is what the schema-2 slot rewrite and the fresh train
 the standing rule a benchmark row is recorded, not re-run; the controller decides whether the
 +0.17 s is worth a bisect before batch 1.
 
+**OPEN ITEM -- the b0 bisect was run and is INCONCLUSIVE** (controller, 2026-09-16): the machine
+was loaded (the final review agent and its checks ran concurrently) and the clocks drifted with
+TIME, not with commit order: A=2b627034f 2.345 s (runs 2.35-2.51), D=122408ad7 2.579 s (2.58-3.63),
+B=299be6d0f 2.814 s (2.81-3.10), C=334c1d3bc 2.954 s (2.95-3.44); nqp-e 1.251 / 1.392 / 1.321 /
+1.393. B and C predate D yet measured slower, and single runs reached 3.6 s, so no commit is
+implicated by this data. Point A (the quietest slot) at 2.345 vs row a's 2.290 says today's machine
+state is itself ~2-3 % slower. Ruling: **the slowdown of row b0 is NOT attributed**; it is recorded
+as an open item for the user (re-run the bisect on an idle machine, or take b0 as the Phase B
+baseline with this caveat). Cost if wrong: a real 5-10 % cold-start regression carried into
+batch 1's rows -- which batch 1's row b1 against b0 will show again if it is real. The nqp tree was
+restored to the branch tip afterwards, jars rebuilt, retrained (4190 slots, 0 failed).
+
+The final review adds two counter-points against reading b0 as a real regression:
+
+(a) **The same build's CORE.c compile was flat** -- 304.4 s against the M7 close's 296 s, +2.8 %
+    (gate addition (i) above). A per-op or per-site cost introduced by the B-pre commits would be
+    magnified enormously by a compile that runs 257 M table ops and 692 M sited calls, so a flat
+    CORE.c **excludes that whole cost class**. Whatever moved the cold row is not paid per op.
+
+(b) **`hits` is not a build invariant.** The controller's own first cold run on the *same jars*
+    measured 2.382 s with `hits=35843`, against the rig's 2.460 s / 37,077 in the same session. The
+    ~1.5 k hit difference that row b0 was partly explained by is therefore run-to-run, not a
+    property of the schema-2 slot rewrite.
+
+Next step (not taken here): a same-session reference row on the base jars, plus the one-line
+experiment on `DispatchRecord`'s literal-guard capture (revert it, rebuild the jars, retrain, take
+cold rows). Both are the controller's call before batch 1.
+
 Warm proxy: `t/01-sanity` 25/25 in 64 s inside the rig, 73 s standalone (both knob-off, one 8 GB
 server). Red list unchanged (`new-red=none`).
 
@@ -119,7 +217,8 @@ server). Red list unchanged (`new-red=none`).
 
 Sources: `m7-rig/b0-rakudo-e-census.err`, `m7-rig/b0-nqp-e-census.err`,
 `m7-rig/b0-sanity-census.log`, `m7-rig/b0-corec-census.err`. All four lists are truncated at 30
-rows (Ruling 9).
+rows (Ruling 9) -- these four are the ORIGINAL, cut censuses; the uncut re-takes are the
+`*-census2.*` files used by "The three bounded ops, measured" below.
 
 CORE.c clocks, one standalone compile each on `rakudo-j-build` (Ruling 7), output redirected to the
 job dir so the build's jar was untouched:
@@ -239,25 +338,47 @@ Batch 1 is fixed by design (iscont, istrue/isfalse/Truthy, findmethod/tryfindmet
 arms); their B0 "before" column, as census share of their own road (the JFR cannot separate them
 from their road, Ruling 10):
 
+#### The three bounded ops, measured (fix wave, 2026-09-16)
+
+With the `take(30)` cuts gone (Ruling 9) the censuses were re-taken on the three cheap workloads,
+untimed, knob on, on the fix-wave jars: `m7-rig/b0-rakudo-e-census2.err` (wall 2.49 s),
+`m7-rig/b0-nqp-e-census2.err` (1.45 s), `m7-rig/b0-sanity-census2.log` (sweep wall **51 s**,
+`chunk 1/1: FAIL` = Ruling 8's `55-use-trace.t` again, Files=25 Tests=303 Failed 1/3 subtests).
+CORE.c was NOT re-run (a ~6 min compile under the knob; a benchmark row is recorded, not re-run),
+so its column stays as **bounds**, marked. Shares are of the op's own road total on that workload
+(rakudo-e table 33,283 / classlib 159,612; nqp-e 22,200 / 26,655; sanity 3,256,099 / 22,490,277);
+these re-takes differ from the first censuses by under 1.5 % on every total, which is cold-start
+run-to-run variance, not a change.
+
 | op | road | rakudo-e | nqp-e | sanity | CORE.c |
 | --- | --- | --- | --- | --- | --- |
-| `Ops.istrue` | classlib (26.7 % of CORE.c) | 2,634 = 1.63 % | 147 = 0.56 % | 328,987 = 1.47 % | 9,350,543 = 0.86 % |
-| `Ops.can` | classlib | 2,630 = 1.62 % | below the cut | 367,562 = 1.64 % | 5,066,814 = 0.47 % |
-| `tryfindmethod` | table (15.4 % of CORE.c) | 29 = 0.09 % | 30 = 0.14 % | 29,706 = 0.92 % | 3,056,057 = 1.19 % |
-| `iscont` | -- | below the cut on every workload (Ruling 9) | | | |
-| `isfalse` | -- | below the cut on every workload | | | |
-| `findmethod` | -- | below the cut on every workload; `Ops.findmethodNonFatal` appears once as a CORE.c sites leaf (0.3 % of that container, 0.008 % global) | | | |
+| `Ops.istrue` | classlib (26.7 % of CORE.c) | 2,628 = 1.65 % | 147 = 0.55 % | 328,821 = 1.46 % | 9,350,543 = 0.86 % |
+| `Ops.can` | classlib | 2,613 = 1.64 % | 87 = 0.33 % | 367,103 = 1.63 % | 5,066,814 = 0.47 % |
+| `tryfindmethod` | table (15.4 % of CORE.c) | 29 = 0.09 % | 30 = 0.14 % | 30,686 = 0.94 % | 3,056,057 = 1.19 % |
+| `Ops.iscont` | classlib | **402 = 0.25 %** | **0 (a true zero, not a bound)** | **46,713 = 0.21 %** | *bound: < 4,700,751* |
+| `Ops.findmethod` | classlib | **42 = 0.03 %** | **19 = 0.07 %** | **7,212 = 0.03 %** | *bound: < 4,700,751* |
+| `Ops.isfalse` | classlib | **1 = 0.00 %** | **0 (a true zero)** | **228 = 0.00 %** | *bound: < 4,700,751* |
 
-So batch 1's measurable head is `istrue` and `can` on the classlib road and `tryfindmethod` on the
-table road; `iscont`, `isfalse` and `findmethod` enter the campaign as design symmetry, with counts
-bounded rather than measured. Multiplying road share by census share puts each of the three
-measurable ops at a few tenths of a per cent of CORE.c time apiece -- which is the honest size of
-batch 1's ceiling on this workload, and the reason the road-level numbers above are the ones to
-watch across the batches.
+(`Ops.iscont_i` 4, `Ops.iscont_u` 4, `Ops.iscont_n` 2 on rakudo-e are the sized arms, listed
+separately by the census and not folded into `Ops.iscont` above. `Ops.findmethodNonFatal` appears
+once as a CORE.c sites leaf, 0.3 % of that container, 0.008 % global.)
+
+What the measurement changes: the three formerly-bounded ops are **smaller than the cut allowed
+them to be**, not larger. `iscont` is the biggest of them at a quarter of a per cent of its road;
+`isfalse` is one call on a cold rakudo start and 228 on a whole sanity sweep, i.e. effectively
+absent; `findmethod` (the fatal arm) is two orders of magnitude below `can`. So batch 1's ranking
+is unchanged and now rests on measurement rather than on bounds: the head is `istrue` and `can` on
+the classlib road and `tryfindmethod` on the table road, and `iscont`/`isfalse`/`findmethod` enter
+the campaign as design symmetry -- which the numbers now justify calling cheap rather than unknown.
+Multiplying road share by census share still puts each measurable op at a few tenths of a per cent
+of CORE.c time apiece, which is the honest size of batch 1's ceiling on this workload, and the
+reason the road-level numbers above are the ones to watch across the batches.
 
 Artifacts (untracked, in the rakudo worktree, `m7-rig/` is not a tracked directory):
 `m7-rig/b0.md`, `m7-rig/rows.md`, `m7-rig/b0-{rakudo-e,nqp-e}-{run1..5,census,jfr}.err`,
 `m7-rig/b0-{rakudo-e,nqp-e}.jfr`, `m7-rig/b0-{rakudo-e,nqp-e}-jfr.txt`,
 `m7-rig/b0-sanity.log`, `m7-rig/b0-sanity-census.log`, `m7-rig/b0-corec-census.err`,
-`m7-rig/b0-corec-jfr.txt`; logs and the 252 MB `corec-b0.jfr` under
-`/home/longwalker/.claude/jobs/455b5a91/tmp/`.
+`m7-rig/b0-corec-jfr.txt`; from the fix wave, the uncut re-takes
+`m7-rig/b0-{rakudo-e,nqp-e}-census2.err` and `m7-rig/b0-sanity-census2.log`; logs, the 252 MB
+`corec-b0.jfr`, `make-b0.log` and the `make -n` A/B captures (`make-n-old.txt`,
+`make-n-touched.txt`) under `/home/longwalker/.claude/jobs/455b5a91/tmp/`.

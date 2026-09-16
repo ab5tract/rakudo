@@ -141,13 +141,19 @@ sub MAIN(
 # output -- and the sweep only ever prints a chunk's output when the chunk
 # FAILED, so a green sweep dropped the block on the floor and m7-rig's
 # --census found nothing to parse. Lift the block out for every chunk instead.
+#
+# Selected by PREFIX over the whole text, not as a contiguous run: the census
+# and the dispatch stats are printed by two shutdown hooks, which the JVM runs
+# CONCURRENTLY, so a `dispatch stats:` line (or anything else a dying server
+# says) can land in the middle of the census and cut a run short. The census
+# lines are self-identifying, so order of appearance is all that is needed.
 sub census-block(Str $text --> Str) {
-    my @lines = $text.lines;
-    my $i = @lines.first(*.starts-with('op census:'), :k);
-    return '' without $i;
-    my $j = $i;
-    $j++ while (@lines[$j + 1] // '') ~~ / ^ [ 'op census:' | '  ' [ 'table ' | 'classlib ' | 'site ' ] ] /;
-    @lines[$i .. $j].join("\n")
+    $text.lines.grep({
+           .starts-with('op census:')
+        || .starts-with('  table ')
+        || .starts-with('  classlib ')
+        || .starts-with('  site ')
+    }).join("\n")
 }
 
 # t/harness5 starts and stops its own server.
@@ -161,7 +167,17 @@ sub run-rakudo-chunk($harness, $token, $h, @batch) {
                                # forgot the export must not silently sweep
                                # the legacy frontend instead.
                                RAKUDO_RAKUAST          => '1');
-    my $out = $proc.out.slurp(:close) ~ $proc.err.slurp(:close);
+    # BOTH handles drained CONCURRENTLY. Slurping stdout to EOF first and
+    # stderr afterwards deadlocks the moment a chunk writes more to stderr
+    # than the pipe buffer holds: the writer blocks in write(2), so it never
+    # exits, so stdout never reaches EOF, so this process never gets to the
+    # stderr slurp that would unblock it. The eval server's uncut op census
+    # block (NQP_OP_CENSUS, ~1000 lines on a sanity sweep) is exactly that
+    # size, and it is printed from a shutdown hook, which wedges the server's
+    # exit and with it the harness that is waiting on it. Measured 2026-09-16:
+    # a three-way hang, server stuck in FileOutputStream.writeBytes for 12 min.
+    my $errored = start { $proc.err.slurp(:close) };
+    my $out = $proc.out.slurp(:close) ~ await $errored;
     unlink $token if $token.IO.e;
     $proc.exitcode, $out
 }
@@ -207,7 +223,9 @@ sub run-nqp-chunk(IO::Path $root, $token, $h, @batch) {
     # above all before the server is told to stop.
     sub prove(*@args) {
         my $proc = run 'prove', '--merge', |@args, :cwd($root), :out, :err;
-        my $out = $proc.out.slurp(:close) ~ $proc.err.slurp(:close);
+        # Concurrently, for the reason run-rakudo-chunk spells out above.
+        my $errored = start { $proc.err.slurp(:close) };
+        my $out = $proc.out.slurp(:close) ~ await $errored;
         $proc.exitcode, $out
     }
 

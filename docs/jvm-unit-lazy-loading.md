@@ -181,16 +181,22 @@ use -- with short `@SerialName`s (`arg`, `lit`, `attr`, `how`, `unbox`,
 `lookup`, `type`, `conc`, `hll`, `invoke`, `syscall`, ...) and `Double`
 as raw long bits.
 
-`schema` is `DispatchSlot.SCHEMA` (1 today) and comes first precisely so
+`schema` is `DispatchSlot.SCHEMA` (2 today) and comes first precisely so
 that it is the slot's first four little-endian bytes: `UnitCodec` is
 untagged and fixed-width, so a slot of an older layout would not fail to
 decode but decode into a plausible program, and `DispatchPersist.restore`
 therefore reads that int by hand and treats any other value as an **empty
 slot** (`staleSchema=` on the `dispatch stats:` line, named per site under
-`NQP_DISPATCH_PERSIST_TRACE`). Nothing migrates: the build that reads a
-slot is the build that wrote it, so bumping `SCHEMA` -- required for any
-change to the `P`-types, including the declaration order of `ArgKind` or
-`ResumeKind`, which persist by index -- costs one retraining run.
+`NQP_DISPATCH_PERSIST_TRACE`). `staleStamp=` on that same line counts the
+slots dropped one step later, after the decode: a slot names the stamp --
+the CRC32 of that artifact's `unit.serialized` entry -- of every SC it
+references, and if a handle this process has loaded carries a different
+stamp, the whole slot is dropped, because the same handle under another
+build of the artifact indexes other objects entirely (schema 2, milestone
+8 Phase B). Nothing migrates: the build that reads a slot is the build
+that wrote it, so bumping `SCHEMA` -- required for any change to the
+`P`-types, including the declaration order of `ArgKind` or `ResumeKind`,
+which persist by index -- costs one retraining run.
 
 A `PProgram` is a `DispatchProgram` with every reference replaced by a
 stable name:
