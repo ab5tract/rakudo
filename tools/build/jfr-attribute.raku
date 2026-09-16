@@ -20,6 +20,9 @@ sub MAIN(
     Bool :$ops = False,               #= per-op exclusive view: containers = the generic op entries, the sites, dispatch; implies --innermost
     *@container,                      #= name=frame-substring pairs; default: the unit load stages
 ) {
+    # --ops overwrites @container wholesale, so given both, one of them is
+    # silently ignored. Check before the default fills @container in.
+    die "--ops and --container are mutually exclusive" if $ops && @container;
     @container ||= <load-block=runLoadIfAvailable deserialize=runDeserializeIfAvailable
                     build-table=ProgramUnit.buildTable sc=SerializationReader.deserialize
                     decode=UnitLoader.readRecord parse-program=NqpWire.decode>;
