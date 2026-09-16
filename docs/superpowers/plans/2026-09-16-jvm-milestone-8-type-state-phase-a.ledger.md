@@ -765,4 +765,26 @@ Ruling: test-shape deviations accepted -- (a) nqp: setmethcache is inert for nqp
 Ruling: Important 1 (Guard.OfType captures its state at emitGuards, AFTER the dispatcher read the facts -- a TOCTOU window the "captured state" rule exists to close) is FIXED in fix round 1, not parked: DispatchRecord records the tracked value's st.state at guardType()/guardLiteral(OBJ) time (before the facts read), emitGuards hands it to Guard.OfType.state and to a new transient Guard.Literal.state (OBJ only), the Folder prefers the guard-recorded state over st.state, and DispatchProgram.isFresh covers both guard kinds (also resolves minor 3's asymmetry). The spec's letter ("captured at recording time") is kept; the point of capture moves earlier within the recording. Cost if wrong: a wider change to DispatchRecord than the brief had; the runtime tests + both .t files + verify mode gate it.
 Ruling: ONE fix wave lands Important 1 (DispatchPersist.recordAtExit persists only p.isFresh), Important 2 (STable.publish @Synchronized + a closure `update(f)` computing the successor under the lock; EVERY writer goes through update so no writer builds a successor from a state it no longer owns -- this touches the two Rakudo-tree writers, so the wave pays one full make), Important 3 (hoist the three double reads: findmethodNonFatal, istype_nd, SerializationWriter.writeSTable), and the cheap hardenings: Minor 4 (Folder OfType branch `g.state ?: t.state`), 5 (emitGuards writes only a non-null recorded state), 6 (refresh's short-circuit also requires !hasStale()), 7 (muSinkCache joins the per-run reset), 8 (the reader publishes a COPY of the deserialized method-cache hash), 9 (st.republish() after deserialize_repr_data -- ruling 1 amended: create/bigint now trust the state for REPR data), 10 (composedType KDoc "the last type composed"), 11 (dead MONKEY-TYPING, qualified PUBLISHES, install's double-walk comment), 12 (plan-position one-liner aligned with the findings table). Cost if wrong: a wider wave than "three small fixes"; every item is one to three lines and the gate (nqp suite + sanity) covers them.
 Ruling (design, for Phase B -- from the resolveSink triage): a site may fold only a fact that some state it holds actually published; a method resolution that walks the HOW/MRO (non-authoritative cache) is NOT such a fact, so Phase B's findmethod/can/tryfindmethod sites fold the authoritative-cache case only (or design a multi-state guard first). Recorded for the Phase B plan.
+FINDING (serious, M7 Phase C hazard, NOT Phase A's): at Phase A's close tree a make that rebuilds CORE.c DIES ("Too few positionals passed; expected 2 arguments but got 1" in AT-POS/Complex.new at BEGIN time) -- bisected: HEAD with zero wave code FAILS, HEAD with NQP_DISPATCH_PERSIST=off PASSES. Cause: persisted dispatch slots trained against the PREVIOUS rakudo.jar are restored while compiling the settings with a REBUILT rakudo.jar; the SC handles are stable across rebuilds and an index shifted, so a slot's baked callee resolved to a different code object. Task 2's 855 s make passed the same way by luck (no index shift that mattered). The wave "healed" it only by re-training under the current rakudo.jar (a PERSIST=off build first); fresh-only persistence does NOT address cross-build index shifts. Ruling: recorded as an OPEN ITEM for the user -- the slot needs an SC content stamp (drop on mismatch), or the Makefile must retrain/clear slots before any settings compile that follows a rakudo.jar rebuild; proposed as a hotfix before Phase B. Cost if wrong: the next rakudo.jar rebuild can die the same way.
 ```
+
+### Hotfix (2026-09-16, after the wave's re-review)
+
+The re-review confirmed all thirteen items and found **one regression that
+item 6 introduced**: with `if (same && !hasStale())`, `Cache.refresh`'s stale
+path fell through to a rebuild that reuses every stale `Program` (program
+identity still matches for all `i`), so the "fresh" array was
+content-identical, `publish` minted a new site assumption and deoptimized the
+node, and `hasStale()` was still true at the next miss -- a deopt on every
+miss, for ever, at a site whose `site.programs` exceed `MAX_CACHED` and whose
+`Dispatch.fallback` matches an uncached program without installing (so
+`install`'s eviction never runs). **Fix:** `cacheable(p)` also requires
+`p.isFresh`, so the fold SKIPS a stale program and the one publish drops it;
+the `!hasStale()` short-circuit stays and now fires once. Landed with it:
+`Ops.settypehll` computes the HLL config before `st.update`, so the
+GlobalContext monitor is never taken while the STable's is held; and the storm
+baseline was retaken on the post-wave build (`publishes=14858`, up from 7460
+because of the reader's new republish per deserialized STable; still 4
+invalidations of installed code, still 0 of them a type state), with an
+"after the fix wave" line added to `docs/jvm-perf-findings-2026-09.md` and
+`docs/jvm-truffle-only-plan.md`.
