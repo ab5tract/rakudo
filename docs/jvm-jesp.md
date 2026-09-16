@@ -146,10 +146,17 @@ speculating monomorphically on STable identity; a miss re-speculates up to
 - **isnull**: a pointer compare, no site.
 - **isconcrete**: the decont fast path plus the type-object test.
 - **istype** (`IsTypeSite`): decont sites on both operands, then the pair
-  of STables and the answer -- cached only when `STable.TypeCheckCache`
+  of STables and the answer -- cached only when the type-check cache
   answered definitively (a hit; or a miss of an authoritative cache with
-  a type that needs no `accepts_type`). A metamodel-answered check pins
-  generic. Same trust in the type-check cache as spesh's `optimize_istype`.
+  a type that needs no `accepts_type`), **under both operands' type-state
+  assumptions**: the site holds the value's `TypeState` and the type's,
+  reads `typeCheckCache`, `typeCheckMode` and `NEEDS_ACCEPTS` out of
+  them, and a republish of either re-resolves without spending a miss
+  (milestone 8 Phase A). A metamodel-answered check pins generic. Same
+  trust in the type-check cache as spesh's `optimize_istype`. The site is
+  reached because `NqpProgramBuilder.dedicatedClasslib` maps
+  `Ops.istype/2` to the dedicated operation: `nqp::istype` is a classlib
+  op with no encoder row, so before that line nothing entered it.
 - **assertparamcheck**: the flag test inline, `BindFailure.failed` behind
   a boundary.
 - **p6typecheckrv** (`RvCheckSite`): per routine identity, the accepted
@@ -801,7 +808,14 @@ and the diamond-3 decont and create sites exploit.
 Milestone 5 settled the rest of the question, and neither of the two
 options this section used to float is the answer: there is no
 `DynamicObject`/`Shape` migration, and the per-STable `Assumption` is
-still only an idea. A P6opaque instance is a `RakuObject` — one of six
+**no longer an idea but the object model's shape**: an STable's mutable
+facts live in an immutable `TypeState`
+(`nqp/src/vm/jvm/runtime/org/raku/nqp/sixmodel/TypeState.kt`) carrying one
+Truffle `Assumption`; writers publish a complete successor state and
+every sited op, dispatch guard and folded dispatch program that trusted a
+fact tests that assumption first (milestone 8 Phase A, spec
+`docs/superpowers/specs/2026-09-16-jvm-milestone-8-type-state-design.md`,
+measured in `docs/jvm-perf-findings-2026-09.md`, "Milestone 8, Phase A"). A P6opaque instance is a `RakuObject` — one of six
 static storage classes (`RakuObject4`, `4L`, `8`, `8L`, `16`, `16L`:
 plain reference and `long` fields up to the class's capacity, an
 overflow array after it) — carrying a per-STable

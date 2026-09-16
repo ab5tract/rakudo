@@ -1728,6 +1728,173 @@ The collected deferred minors — schema, consumer, writer, build — are in
 Phase C's item (f) and Phase B's item (f) above; none was ruled a
 defect.
 
+## Milestone 8, Phase A (2026-09-16)
+
+Spec: `docs/superpowers/specs/2026-09-16-jvm-milestone-8-type-state-design.md`
+(sections 1-3 and 5); plan and ledger:
+`docs/superpowers/plans/2026-09-16-jvm-milestone-8-type-state-phase-a.md`
+and `…ledger.md`. The measured tree is **rakudo `dd60f647e0` / nqp
+`055e14ae9`**; six commits, no jar committed (stage0 stays the nine
+uncommitted v2 jars, user rule).
+
+### What landed
+
+**A1, the state.** Every mutable fact of an STable — method cache and
+its authority flags, v-table, type-check cache and mode, container,
+invocation and boolification specs, HLL owner and role, debug name —
+moved out of the STable's fields into an immutable `TypeState` object
+carrying one Truffle `Assumption` (nqp `c1b73c43b`). A writer no longer
+assigns a field: it builds the complete successor state and publishes it
+(`STable.republish()`), which invalidates the old assumption and bumps
+`STable.PUBLISHES`. Readers read `st.state` and the transitional field
+views are gone (nqp `fa59ca7fe`); Rakudo's container configurer, its
+Java-interop bootstrap and `RakOps` follow the same rule (rakudo
+`e19a613f68`).
+
+**A2, the consumers.** Every sited op in `NqpTypeOps` now captures the
+`TypeState` it resolved on and reads its constants from that object,
+testing the assumption before its identity guards — which partial
+evaluation folds away (nqp `6e318320b`). `create` drops its per-call
+REPR-data re-read, `istype` checks both operands' states, and a
+`SinkSite` that ruled "trivial" because the type's `sink` **is** Mu's
+carries Mu's state too. On the dispatch side a type guard became a
+*state* guard on all three roads — the interpreted check, the
+`MethodHandle` chain and the engine's folded replay — and the engine's
+folded `Program` carries the assumptions of every state it read, refolds
+at once when one dies (without spending a miss) and is evicted from the
+runtime site at the next install (nqp `055e14ae9`). The stats line
+prints `publishes=`.
+
+**One finding that changes Phase B's map.** `IsTypeSite` was **dead code
+before this phase**: `nqp::istype` is a classlib op with no encoder row,
+so nothing reached the site. It is on the road now because
+`NqpProgramBuilder.dedicatedClasslib` maps `Ops.istype/2` to the
+dedicated operation beside `hllize`. That is a **third promotion road**:
+a classlib op whose dedicated node already exists can be promoted by
+name, engine-only, without the encoder row Phase B's recipe assumed —
+and without a `clean buildJvm`. It also means **row `a` below carries
+that routing as well as the type state**, so its cold clocks are not a
+clean reading of the dependent load alone.
+
+### The gates, with wall times
+
+| gate | result | wall |
+|---|---|---|
+| `make` (rakudo `dd60f647e0`, nqp `055e14ae9`) | exit 0, no `Compiling` marker, one `+++ Training dispatch slots`; `dispatch-record: done 21 paths, 4240 slots, 4540 programs, 49 unpersistable, 0 failed` | **2 s** (an up-to-date tree; the phase's real build cost was Task 2's full recompile, **855 s**) |
+| nqp suite (`evalserver-sweep --suite=nqp --chunk=*`, one server) | **156/156 files, `chunk 1/1: ok`**, no reds | **195 s** |
+| `t/01-sanity` (`t/harness5 --jvm --evalserver`) | **Files=25, Tests=303, Result: PASS** | **45 s** |
+| `t/02-rakudo/type-state.t` (`./rakudo-j -Ilib`) | **4/4** | 7 s cold |
+| `t/jvm/19-type-state.t` (inside the nqp suite) | 4/4 | — |
+| `:nqp-runtime:test` (Task 4) | 61 tests / 0 failures (56 before the phase: `TypeStateTest` 6, `GuardStateTest` 5) | 4 s |
+| verify mode on the Rakudo test (Task 4) | `matched=4520 byOutcome=10 **mismatched=0** unseen=6919` | — |
+
+**State at the close, not gates:** `t/02-rakudo/03-corekeys.t` is the
+pre-existing NFC/NFD/NFKC/NFKD/Uni red of
+`docs/jvm-t02-rakudo-red-baseline.txt` (2/3), and
+`t/02-rakudo/closure-static-clone.t` is milestone 7's inherited red —
+re-run here at **7/8**, failing test 5 (`expected 'documented', got ''`)
+exactly as at the milestone-7 close. Neither moved.
+
+### Row `a` against milestone 7's close
+
+| row | rakudo / nqp | cold rakudo-e | cold nqp-e | misses | hits | warm proxy | new red |
+|---|---|---|---|---|---|---|---|
+| `close` (M7) | `6217a89e61` / `a837bf1bb` | 2.247 s | 1.198 s | 4931 | 35512 | 59 s | — |
+| **`a` (M8 Phase A)** | **`dd60f647e0` / `055e14ae9`** | **2.290 s** | **1.190 s** | **4933** | **35541** | **51 s** | **none** |
+
+Five cold runs each, best wall, stock runners, `NQP_UNIT_LOAD_STATS` and
+`NQP_DISPATCH_STATS` on, no eval server, `NQP_DISPATCH_RECORD` unset
+(the rig refuses to run with it). Rakudo runs: 2.44 2.36 2.29 2.41 2.31;
+nqp runs: 1.23 1.28 1.19 1.26 1.24. Row `a` also reads
+`restored=4470 recorded=851 publishes=7460` on its best rakudo run and
+`restored=1644 recorded=257 publishes=328` on its best nqp run. Rig wall
+70 s; files under `m7-rig/m8a*`.
+
+**Read honestly: nothing moved.** +0.043 s on the cold rakudo clock is
+inside the series' own spread (±0.05 s around 2.25 s), the nqp clock is
+flat (-0.008 s), and the dispatch counters are identical to within two
+misses and twenty-nine hits — i.e. the same program, run the same way.
+**Risk 2 of the spec (the dependent load: an assumption check on every
+sited fast path and every guard) did not show up as a clock.** Nor did
+the phase buy anything on these two programs, which is the expected
+result: they publish 7460 states at startup and then execute almost
+nothing, so there is no compiled code for a folded fact to help. The
+warm proxy moved 59 -> 51 s, a single sample on each side against a
+49-57 s history — no claim.
+
+### The storm baseline
+
+The instrument is `-Dpolyglot.engine.TraceAssumptions=true` through
+`RAKUDO_JVM_XOPTS` (the runner already passes `-Dpolyglot.engine.*`
+properties; `engine.TraceAssumptions` is an option of
+`truffle-runtime-25.2.4.jar`, confirmed by `strings`). It prints one
+`[engine] assumption '<name>' invalidated installed code '<nmethod>'`
+line per invalidation that killed compiled code; a `TypeState`'s
+assumption is named `type` (or the STable's debug name).
+
+| program | `publishes=` | invalidations of installed code, all names | of those, `type` |
+|---|---|---|---|
+| `./rakudo-j -e ''` | **7460** | **4** (2 `validRootAssumption`, 2 `nodeRewritingAssumption` — Truffle's own) | **0** |
+| `./rakudo-j -Ilib t/02-rakudo/type-state.t` | — | 63 (22 `dispatch site`, 16+16 Truffle's own, 3 `Profiled Argument Types`) | **6** |
+
+(The brief's coarse `grep -ci assumption` reads 12 and 175 on the two
+runs; those counts include stack-trace lines, which is why the table
+counts invalidation events instead.)
+
+**There is no storm.** Of 7460 publishes on a cold `-e ''`, **zero**
+invalidated compiled code: the publishes all happen while the STables
+are being read, before anything is compiled, and the ones that matter
+later are counted in the tens (six on a test written expressly to
+republish twice). The per-facet split of the spec's approach B — A2'
+before Phase B — is **not** indicated by this number. Recorded, not
+acted on.
+
+`publishes=` itself is a coarse number and moves with the training pass:
+Task 4 measured 7765 on the same program against the jars Task 2 trained,
+and this build's training (4240 slots) reads 7460. Single samples,
+neither re-run.
+
+### The rulings, and what each would have cost
+
+| # | ruling | cost if wrong |
+|---|---|---|
+| 1 | the serialization reader publishes **once**, after the HLL facts and before parametricity and `deserialize_repr_data` (the spec said "at the end") | a stale layout fold on a lazily read STable; the nqp suite would show it — 156/156 says it does not |
+| 2 | `setdebugtypename` republishes, so the assumption carries the name | one extra publish per type at creation, before anything folds |
+| 3 | Task 1 kept read-only aliases of the old field names (readers compile, writers break); Task 2 deleted them | a missed writer assigning a dead field — the compiler proved there was none |
+| 4 | `KnowHOWREPRInstance.composedType` is an in-process back-reference, not serialized | matches the in-process aliasing it replaced |
+| 5 | a stale program is evicted at the next install and refolds without counting toward `REFOLD_AFTER` | a republish would otherwise spend the site's miss budget and pin it generic |
+| 6 | `Guard.OfType.state` is transient: outside data-class equality, outside `DispatchDump`, never persisted | persisted text would change; `mismatched=0` in verify mode says it did not |
+| 7 | `Truffle.getRuntime().createAssumption` runs in nqp-runtime, with truffle-api on the runtime's **test compile** path | the unit tests could not read `assumption.isValid` (Task 1 deviation 1) |
+| 8 | **CORRECTED.** The plan said a Rakudo-side `make` rebuilds only `rakudo-runtime.jar` and the training stamp. It does not: the settings recompile | measured, not guessed — Task 2's `make` took **855 s**. `Makefile:320` has `J_RAKUDO_DEPS_EXTRA = $(RUNTIME_JAR) \| $(NQP_RUNTIME_JAR)`: only *nqp's* runtime jar is order-only, Rakudo's own is a hard prerequisite of `rakudo.jar`, so any edit under `src/vm/jvm/runtime/` costs a full setting recompile; and a moved rakudo HEAD re-expands `gen/jvm/main-version.nqp`, which every frontend jar depends on. **The Makefile was deliberately not changed** — moving `$(RUNTIME_JAR)` after the `\|` would make the ruling true, and whether the settings may be compiled on a runtime they do not depend on is the user's semantic call. **Open question for the user.** |
+
+### What Phase A leaves
+
+1. **The `dedicatedClasslib` road** (above) is a promotion mechanism
+   Phase B's plan does not yet account for; it also means every
+   `nqp::istype` in nqp *and* Rakudo now compiles to `IsTypeOp`, whose
+   slow road is `Ops.istype_nd`. Green everywhere it was run, but this
+   phase is its first production traffic.
+2. **`SinkSite`'s Mu state is untested**: `p6sink` is a Rakudo op, and no
+   Rakudo test drives a sink site across a `Mu.sink` republish.
+3. **Test shapes are load-bearing and fragile.** Both tests need ONE site
+   per half (two source-level call sites and the second resolves afresh,
+   proving nothing) and a RUNTIME republish (`augment` is BEGIN-time, so
+   the Rakudo test uses `.^add_method` + `.^compose`; `nqp::setmethcache`
+   is inert for `nqp-meth-call`, which resolves through `$how.find_method`,
+   so the nqp test uses `Foo.HOW.add_method` on a subclass). Both are
+   written into the files' headers.
+4. **Three capture bugs the reviews caught**, all of the same shape — a
+   fact read before the state it is attributed to: Task 1's four double
+   `st.state` reads; Task 3's `resolveBigInt` capturing *after* the
+   REPR-data read (a compose in between handed the site a valid
+   assumption over a stale layout); and Task 4's guard window, where the
+   state was captured at `emitGuards`, after the dispatcher had already
+   read the facts — now captured at `guardType`/`guardLiteral` time, with
+   `GuardStateTest` driving the TOCTOU sequence (the bite check: deleting
+   the two `emitGuards` writes fails exactly those two tests).
+5. **Phase B (the promotion campaign) is next**, and it inherits
+   milestone 7's empty A7 promotion list plus the third road above.
+
 ## Things that cost time to learn
 
 **The build graph does not express the nqp dependency.** No rakudo target
