@@ -138,7 +138,11 @@ invalidate installed code four times -- two `validRootAssumption`, two
 `nodeRewritingAssumption` -- and **none of the four is a `TypeState`**, the
 type states all publishing before anything they touch is compiled; a test
 written expressly to republish twice produces six type-state
-invalidations out of 63. Two findings carried forward: a Rakudo-side runtime edit
+invalidations out of 63. **After the fix wave** (rakudo `77ec6d01b3` / nqp
+`93851fbce`) the same cold run reads `publishes=14858` -- the reader's new
+republish per deserialized STable, roughly doubling the count -- with the
+same **4** invalidations of installed code and still **none** of them a type
+state. Two findings carried forward: a Rakudo-side runtime edit
 costs a full setting recompile (`Makefile:320` makes `$(RUNTIME_JAR)` a
 hard prerequisite of `rakudo.jar`; the Makefile was deliberately not
 changed -- the user's call), and `dedicatedClasslib` is a third promotion

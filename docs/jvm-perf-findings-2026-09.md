@@ -1854,6 +1854,16 @@ Task 4 measured 7765 on the same program against the jars Task 2 trained,
 and this build's training (4240 slots) reads 7460. Single samples,
 neither re-run.
 
+**After the fix wave** (rakudo `77ec6d01b3` / nqp `93851fbce`, the numbers
+above being the pre-wave tree `dd60f647e0` / `055e14ae9`): a cold
+`./rakudo-j -e ''` reads **`publishes=14858`**, roughly double, because the
+wave gave the deserialization reader a `republish()` of its own after
+`deserialize_repr_data` (one more publish per deserialized STable). The
+verdict is unchanged: **4** invalidations of installed code (2
+`nodeRewritingAssumption`, 2 `validRootAssumption`, both Truffle's own on
+`search_path`), of which **0** name a type state. Log:
+`$CLAUDE_JOB_DIR/tmp/m8-trace-postwave.log`.
+
 ### The rulings, and what each would have cost
 
 | # | ruling | cost if wrong |
