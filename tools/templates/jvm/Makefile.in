@@ -109,7 +109,9 @@ NQP_RUNTIME_JAR = @nfp(nqp/build/jvm/share/runtime/nqp-runtime.jar)@
   perl6-jdb-server \
   eval-client.pl \
   perl6-j \
-  perl6-debug-j
+  perl6-debug-j \
+  @nfp(@bpm(BLIB)@/.dispatch-trained)@ \
+  @nfp(@bpm(BLIB)@/.dispatch-train.log)@
 
 @bpv(ML_EXTRA)@ = @nfp(src/vm/jvm/Raku/JavaModuleLoader.nqp)@
 # NQP_RUNTIME_JAR sits after the | : order-only, GNU make syntax. The jar
@@ -158,13 +160,24 @@ $(RUNTIME_JAR): $(RUNTIME_SOURCES) @nfp(rakudo-runtime/build.gradle.kts)@ | $(NQ
 
 # Milestone 7 Phase C: one training run of the trivial program fills the
 # dispatch slots of every artifact it loads (blib/*.jar, rakudo.jar and
-# nqp's lib jars). The stamp keeps make's graph honest; the grep is the
-# positive marker (a run that wrote nothing fails the build). The run writes
-# to the log and the log is shown afterwards, rather than piped through tee:
-# make gives each recipe line a plain sh with no pipefail, so a pipeline
-# would report tee's status and a trainer that died PART WAY -- after some
-# artifacts were rewritten, which the grep cannot tell apart from a whole
-# run -- would leave a half-trained build behind, green.
+# nqp's lib jars). The stamp keeps make's graph honest; the two greps are
+# the positive marker. The run writes to the log and the log is shown
+# afterwards, rather than piped through tee: make gives each recipe line a
+# plain sh with no pipefail, so a pipeline would report tee's status.
+#
+# The recorder contains its own failures rather than dying (a shutdown hook's
+# throwable leaves the exit status at 0), so the exit test alone cannot see a
+# trainer that died PART WAY, after some artifacts were rewritten: it ends
+# every run with one `dispatch-record: done` line and names each contained
+# failure `dispatch-record: FAILED`. Both are tested here -- the done line
+# must be there and no FAILED line may be -- so a half-trained build cannot
+# come out green.
+#
+# The stamp also depends on the two runtime jars: they carry the recorder,
+# the codec and the slot schema, so a runtime-only rebuild (seconds, no
+# setting recompile) must retrain. That is exactly the cascade the order-only
+# `|` above avoids for the compiled artifacts, and exactly what is wanted
+# here -- retraining is one `rakudo -e ''`.
 #
 # The run rewrites those artifacts in its own order, which is not make's:
 # blib/Raku/Actions.jar landing a moment after blib/Raku/Grammar.jar would
@@ -177,11 +190,12 @@ $(RUNTIME_JAR): $(RUNTIME_SOURCES) @nfp(rakudo-runtime/build.gradle.kts)@ | $(NQ
 # step, and everything the build produced is current as of it.
 @bpv(TRAIN_STAMP)@ = @nfp(@bpm(BLIB)@/.dispatch-trained)@
 
-@bpm(TRAIN_STAMP)@: @bsm(RAKUDO)@@for_specs( @bsm(SETTING_@ucspec@)@)@
+@bpm(TRAIN_STAMP)@: @bsm(RAKUDO)@@for_specs( @bsm(SETTING_@ucspec@)@)@ $(RUNTIME_JAR) $(NQP_RUNTIME_JAR)
 	@echo(+++ Training	dispatch slots)@
 	$(NOECHO)NQP_DISPATCH_RECORD=all @bpm(RUN_RAKUDO)@ -e '' > @nfpq(@bpm(BLIB)@/.dispatch-train.log)@ 2>&1 || { cat @nfpq(@bpm(BLIB)@/.dispatch-train.log)@; exit 1; }
 	$(NOECHO)cat @nfpq(@bpm(BLIB)@/.dispatch-train.log)@
-	$(NOECHO)grep -q 'dispatch-record: wrote' @nfpq(@bpm(BLIB)@/.dispatch-train.log)@
+	$(NOECHO)grep -q 'dispatch-record: done' @nfpq(@bpm(BLIB)@/.dispatch-train.log)@
+	$(NOECHO)if grep -q 'dispatch-record: FAILED' @nfpq(@bpm(BLIB)@/.dispatch-train.log)@; then exit 1; fi
 	$(NOECHO)sed -n 's|^dispatch-record: wrote .* to ||p' @nfpq(@bpm(BLIB)@/.dispatch-train.log)@ | xargs touch -r @nfpq(@bpm(BLIB)@/.dispatch-train.log)@
 	$(NOECHO)touch -r @nfpq(@bpm(BLIB)@/.dispatch-train.log)@ @bsm(RAKUDO)@@for_specs( @bsm(SETTING_@ucspec@)@)@ @bpm(RAKUDO_BOOTSTRAP_PRECOMPS)@
 	$(NOECHO)touch $@

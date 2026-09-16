@@ -174,13 +174,26 @@ Phase C".
 
 ### The slot schema
 
-A filled slot is a kotlinx-serialized `DispatchSlot(programs:
-List<PProgram>)` in `nqp/src/vm/jvm/runtime/org/raku/nqp/dispatch/DispatchSlot.kt`,
+A filled slot is a kotlinx-serialized `DispatchSlot(schema: Int,
+programs: List<PProgram>)` in `nqp/src/vm/jvm/runtime/org/raku/nqp/dispatch/DispatchSlot.kt`,
 written and read through `UnitCodec` -- the same codec the unit records
 use -- with short `@SerialName`s (`arg`, `lit`, `attr`, `how`, `unbox`,
 `lookup`, `type`, `conc`, `hll`, `invoke`, `syscall`, ...) and `Double`
-as raw long bits. A `PProgram` is a `DispatchProgram` with every
-reference replaced by a stable name:
+as raw long bits.
+
+`schema` is `DispatchSlot.SCHEMA` (1 today) and comes first precisely so
+that it is the slot's first four little-endian bytes: `UnitCodec` is
+untagged and fixed-width, so a slot of an older layout would not fail to
+decode but decode into a plausible program, and `DispatchPersist.restore`
+therefore reads that int by hand and treats any other value as an **empty
+slot** (`staleSchema=` on the `dispatch stats:` line, named per site under
+`NQP_DISPATCH_PERSIST_TRACE`). Nothing migrates: the build that reads a
+slot is the build that wrote it, so bumping `SCHEMA` -- required for any
+change to the `P`-types, including the declaration order of `ArgKind` or
+`ResumeKind`, which persist by index -- costs one retraining run.
+
+A `PProgram` is a `DispatchProgram` with every reference replaced by a
+stable name:
 
 - **Objects, code refs and STables** are `PRef(handle, index, kind)` --
   the serialization context's handle, the object's index in it, and the
@@ -214,9 +227,22 @@ rows repointed, `unit.dispatch` rebuilt, every other entry copied byte
 for byte, through a tmp file and an atomic rename. Programs merge per
 slot (restored plus new, deduplicated by their `DispatchDump` text,
 capped at `Dispatch.MAX_PROGRAMS`), so training Rakudo after nqp does
-not truncate what nqp's run wrote. The marker is `dispatch-record: wrote
-<n> slots (<n> programs, <n> unpersistable) to <artifact>`, one line per
-artifact, and both builds fail if it never appears.
+not truncate what nqp's run wrote. A path under `src/vm/jvm/stage0` is
+**refused**, whatever the selector says: stage0 is what the next build
+compiles from, and the gradle build deliberately copies the untrained
+stage2 into it.
+
+The recorder runs in a shutdown hook, whose throwable the JVM prints to a
+stream nobody greps while the exit status stays 0, so it contains every
+failure itself: per program and per artifact, as a `dispatch-record:
+FAILED ...` line, and it ends every run with one `dispatch-record: done
+<n> paths, <n> slots, <n> programs, <n> unpersistable, <n> failed`. That
+pair is the gate -- **both builds require the `done` line and the absence
+of any `FAILED` one** -- because a run that rewrote some artifacts and
+then threw satisfies the per-artifact `dispatch-record: wrote <n> slots
+(<n> programs, <n> unpersistable) to <artifact>` lines just as well as a
+whole run does. Each artifact is announced by `dispatch-record: rewriting
+<path>` before it is touched.
 
 Both builds train, with the trivial program (`-e ''`), because loading a
 setting or a module is itself the first execution under attack:
@@ -226,10 +252,16 @@ setting or a module is itself the first execution under attack:
   program against the copy with `NQP_DISPATCH_RECORD=all`, and `syncLib`
   takes the trained copy. `jBootstrapFiles` goes on copying the
   **untrained** stage2 into `src/vm/jvm/stage0`, so **stage0 stays
-  empty-tabled**.
+  empty-tabled**. `trainDispatch` is INTENTIONALLY always out of date
+  (`outputs.upToDateWhen { false }`, marker at
+  `build/jvm/dispatch-trained.txt`, outside the synced directory): it
+  rewrites the very jars it declares as inputs, so each build's `Sync`
+  restores the untrained jars and this run trains them afresh rather than
+  compounding one training run onto the last.
 - **rakudo** (`tools/templates/jvm/Makefile.in`): a stamp target after
-  `rakudo.jar` and the three settings runs the trivial program the same
-  way, tests the runner's exit status, greps for the marker, and then
+  `rakudo.jar`, the three settings and the two runtime jars (so a
+  runtime-only rebuild retrains) runs the trivial program the same way,
+  tests the runner's exit status, greps for the markers, and then
   `touch -r`-normalises the rewritten artifacts' mtimes so that a second
   `make` is a no-op. The runner depends on the stamp. Rakudo's run
   rewrites nqp's lib jars too -- about a third of a cold run's sites are
