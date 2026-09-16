@@ -95,3 +95,25 @@ Fix wave (2026-09-16, from the final whole-branch review: 0 Critical, 5 Importan
 Task 10 (2026-09-16), the milestone close, on rakudo 6217a89e61 / nqp a837bf1bb. Gates WITH clocks: Configure --gen-nqp 4.3 s (`done 9 paths, 1683 slots, 1711 programs, 41 unpersistable, 0 failed`); full make 888 s exit 0, `+++ Training` ONCE, blib/.dispatch-train.log ends `done 21 paths, 4282 slots, 4584 programs, 50 unpersistable, 0 failed` with no FAILED and blib/.dispatch-trained present; v6c 375 s; CORE.c 296 s (parse 223.037 / optimize 22.040 / qast 16.729 / unit 20.701, stage sum 282.5); t/01-sanity default 25/25 in 57 s; cold `-e ''` stats restored=4475 restoredSites=4193 dropped=37 staleSchema=0 recorded=195. Verify gate RE-TAKEN (the slot schema changed after Task 8): nqp suite 155/155 208 s over 11 processes (matched 271378, byOutcome 1309, mismatched=0, unseen 116617, zero MISMATCH blocks), t/01-sanity 25/25 51 s (matched 117438, byOutcome 327, mismatched=0). Rig row `close` above (marker `m7-rig: DONE tag=close`); every dispatch counter identical to row `c`, only the walls moved.
 Task 10, whole `t/`: **NOT GATHERED** (user rule: a failed benchmark is not re-run). 482 files, one warm 6 GB server, `--jobs=1 --chunk=*` through watched-run as a background job, 3361 s, exit 1 -- but the server stopped producing TAP at file 310 of 482 (`t/02-rakudo/thread-unhandled-exception.t`) and the remaining 172 all reported `Tests: 0` / `Non-zero exit status: 1` / `No plan found in TAP output`. NOT the low-memory guard of ruling 15 (banner printed, 310 files ran, MemAvailable 24.4 -> 15.6 -> 24.4 GB, no Killed, no OutOfMemory, empty dmesg, the sweep ran to completion) and NOT any single file (the four around the break pass together on a fresh server: 4 files, 81 tests, PASS, 66 s; `t/12-rakuast/block.rakutest` and `t/04-nativecall/01-argless.t` pass directly). Cause: the single-server sweep wedging after ~285 files of t/02-rakudo. Evidence written up in docs/jvm-full-suite-run-2026-09-16.md. The 3361 s is a truncated run, not a fast one (10.8 s/file over the 310 that ran, against 11.9 s/file over the 2026-09-13 427-file run), so it is NOT comparable to 5078 s.
 Task 10, the red diff over the 310 files that did run: 20 of the 24 baseline reds red, 4 green (15-gh_1202.t, 16-begin-time-eval.t, native-argument-snapshot.t, try-statement-backtrace-frame.t), the remaining baseline entries not reached. **ONE NEW RED: t/02-rakudo/closure-static-clone.t, test 5 (".clone through the method road still works", expected 'documented', got '')**. Reproduces under `./rakudo-j -Ilib` outside any harness AND with `NQP_DISPATCH_PERSIST=off`, so Phase C is exonerated. The test was added by A6' itself (rakudo d6d5a2ea7e, 2026-09-14), so the regression sits between that commit and the close -- Phase B's artifact rework or one of the two upstream rebases. Unbisected (each step is a ~900 s build); recorded as an open item of the close.
+
+## Hashes before and after the close's rebase (Task 10, 2026-09-16)
+
+The close was measured on rakudo `6217a89e61` / nqp `a837bf1bb`, and every
+document names those. The close's rebase (rakudo onto `origin/main`
+`67f2e3bcff`, **two** upstream commits, 219 replayed, NO conflict) rewrote
+the rakudo side once more. nqp was not rebased (`upstream/main` had nothing
+new), so **nqp `a837bf1bb` is still the tip and the docs' nqp hashes need no
+mapping**.
+
+| rakudo commit | before | after |
+|---|---|---|
+| Phase C: plan, ledger, C0 findings | 8863808d86 | 661d3390ae |
+| Phase C: Makefile training stamp | 5b51570903 | cd10f67fdb |
+| Phase C: close docs | 165c477f2b | a42e17fb18 |
+| Phase C: the handoff hash mapping | a896b743e0 | 4204a9691c |
+| **the fix wave (the MEASURED tree)** | **6217a89e61** | **d7a9257d50** |
+| the close's docs | 5c3a4a38d1 | b4cb5c8344 |
+
+Trees are identical across the rewrite; only the two upstream commits are
+new. The nine v2 stage0 jars were never touched (the nqp tree was not
+rebased) and remain uncommitted (user rule).
