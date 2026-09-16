@@ -111,8 +111,9 @@ decision (presented with numbers, the user's call), training's ~1 %
 run-to-run variation and what it costs reproducibility, the empty A7
 promotion list, the warm-clock question, one new red (`t/02-rakudo/closure-static-clone.t`, not
 Phase C's doing -- it fails with `NQP_DISPATCH_PERSIST=off` too), and the
-suite clock itself: the close's whole-`t/` run wedged its server at file
-310 of 482 and is recorded as **not gathered**
+suite clock itself: the close's whole-`t/` run lost its server to the
+server's own 9 GiB `MemoryMax` cap (the kernel's cgroup OOM killer, after
+55 minutes, at file 310 of 482) and is recorded as **not gathered**
 (`docs/jvm-full-suite-run-2026-09-16.md`). Full table:
 `docs/jvm-perf-findings-2026-09.md`, "Milestone 7: the close".
 **Next: milestone 8, an `Assumption` per STable.**

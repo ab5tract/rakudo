@@ -479,8 +479,9 @@ sites against `recorded=195` on the program the build trains). Both
 clocks were re-measured on the final build: cold `rakudo -e` **2.247 s**
 against the 2.68 s baseline, cold `nqp -e` 1.198 s against 1.12 s, and
 `blib/CORE.c.setting.jar` **296 s** from the last `make` (888 s, one
-`+++ Training`). The whole-`t/` clock against 5078 s is **not gathered**: the sweep's single server stopped producing TAP at
-file 310 of 482 and the user rule forbids re-running a failed benchmark
+`+++ Training`). The whole-`t/` clock against 5078 s is **not gathered**: the sweep's single server was killed by its own 9 GiB
+`MemoryMax` cgroup cap at file 310 of 482 (its native memory outgrew the
+off-heap allowance over 55 minutes) and the user rule forbids re-running a failed benchmark
 (`docs/jvm-full-suite-run-2026-09-16.md`). The 310 files that did run
 hold one new red, `t/02-rakudo/closure-static-clone.t`, which is not
 Phase C's doing -- it fails with `NQP_DISPATCH_PERSIST=off` too.
