@@ -400,3 +400,8 @@ Artifacts (untracked, in the rakudo worktree, `m7-rig/` is not a tracked directo
   outside this phase.
 - `m7-rig/b0-sanity-census2.log` carries every census line twice (the block and the failed-chunk
   dump); the totals were read from the single header line. Cosmetic.
+
+**Integration gate on the final tree (rakudo 98116748c3 / nqp cceb673bb, 2026-09-16 21:56-22:09):**
+runtime JUnit 69/69 (up to date), nqp suite Result: PASS, Files=153, Tests=13216 (two more than the
+B0 gate: the census test's two child-status asserts), prove 506 s / gradle 735 s; warm t/01-sanity
+knob off 25 files in 57 s on one server, no reds.
