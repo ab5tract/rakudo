@@ -1120,8 +1120,11 @@ compares with. Plan and rulings:
 Phase C closed 2026-09-16 on rakudo `79829d402e` / nqp `f5c5bc8fa`
 (schema nqp `e27a795d8`, consumer `5fd74d9b6`, recorder and writer
 `3d0b54fa4`, verify by outcome `d3e602917`, gradle training `f5c5bc8fa`;
-rakudo's Makefile training `79829d402e`). The ledger with every gate
-clock is
+rakudo's Makefile training `79829d402e`). **Those are the hashes the phase
+was measured on; the handoff rebase at the close rewrote them** (rakudo
+`79829d402e` -> `5b51570903`, nqp `f5c5bc8fa` -> `e3c800371`, trees
+identical) -- the full before/after mapping is in the ledger. The ledger
+with every gate clock is
 `docs/superpowers/plans/2026-09-15-jvm-milestone-7-first-execution-phase-c.ledger.md`.
 
 The plan's fifteen rulings, written before Task 3 and open to the user's
