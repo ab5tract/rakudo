@@ -118,6 +118,30 @@ server's own 9 GiB `MemoryMax` cap (the kernel's cgroup OOM killer, after
 `docs/jvm-perf-findings-2026-09.md`, "Milestone 7: the close".
 **Next: milestone 8, an `Assumption` per STable.**
 
+**Milestone 8, Phase A landed 2026-09-16** (rakudo `dd60f647e0` / nqp
+`055e14ae9`): the type state. An STable's mutable facts -- method cache,
+v-table, type-check cache, container/invocation/boolification specs, HLL
+owner and role -- moved into an immutable `TypeState` with one Truffle
+`Assumption`; writers publish a complete successor state, and every sited
+op, every dispatch guard on all three roads and every folded dispatch
+program tests the assumption of each state whose facts it trusted, so a
+republish re-resolves instead of folding a stale fact. Gates: nqp suite
+156/156 (195 s), `t/01-sanity` 25/25 (45 s), `make` exit 0 with no
+recompile on an up-to-date tree (2 s; the phase's own full build was
+855 s), `t/02-rakudo/type-state.t` 4/4, verify `mismatched=0`. **Row `a`
+is a no-op clock**: cold `rakudo -e` 2.290 s and cold `nqp -e` 1.190 s
+against the close's 2.247 / 1.198, misses 4933 and hits 35541 against
+4931 / 35512 -- inside the series' spread on both sides, so the
+dependent-load risk did not show. **The storm baseline says there is no
+storm**: of `publishes=7460` on a cold `-e ''`, zero invalidated compiled
+code (`engine.TraceAssumptions`), and a test written to republish twice
+produces six. Two findings carried forward: a Rakudo-side runtime edit
+costs a full setting recompile (`Makefile:320` makes `$(RUNTIME_JAR)` a
+hard prerequisite of `rakudo.jar`; the Makefile was deliberately not
+changed -- the user's call), and `dedicatedClasslib` is a third promotion
+road, engine-only and without an encoder row. **Phase B (the promotion
+campaign) is next.**
+
 | item | state on 2026-09-13, cold start updated 2026-09-15 |
 |---|---|
 | 1 plain call | unchanged: partial, paused (per-call `Object[]`, mainline OSR shape) |
