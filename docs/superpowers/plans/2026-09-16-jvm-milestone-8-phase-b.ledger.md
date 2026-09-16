@@ -56,18 +56,23 @@ tail histogram). So the recorded slots really do carry the artifact's CRC under 
 brief's literal check (`touch rakudo-runtime.jar && make -n`) lists `blib/Raku/Grammar.jar`,
 `blib/Perl6/Compiler.jar`, `rakudo.jar`, CORE.c/d/e, BOOTSTRAP v6d/v6e, the training stamp and the
 runners -- i.e. rakudo.jar and the settings WOULD rebuild, which by the brief's rule is recorded
-here as a finding and the Makefile was not touched. But that reading is confounded, and an A/B on
-the one variable settles it: with `rakudo-runtime.jar` dated 20:02 and then `touch`ed to now, and
-nothing else changed, `make -n` emits **byte-identical** target lists (`diff` empty). The touch
-costs zero rebuilds; the order-only `|` in `J_RAKUDO_DEPS_EXTRA` holds.
+here as a finding and the Makefile was not touched. But that reading is confounded (below), and an A/B
+on the runtime jar's mtime alone cannot discriminate on this tree: the control arm already rebuilds
+rakudo.jar and every setting through the inversion below, a superset of anything the runtime jar
+could trigger, so its byte-identical target lists (`diff` empty) prove nothing either way. What
+establishes the claim is the generated Makefile itself: `Makefile:323` reads
+`J_RAKUDO_DEPS_EXTRA = | $(RUNTIME_JAR) $(NQP_RUNTIME_JAR)` and `Makefile:1327` puts that expansion
+LAST on the `$(RAKUDO_JVM):` prerequisite line, so GNU make takes both jars as order-only; the only
+hard reference to the runtime jar is the intended one, `TRAIN_STAMP` (`Makefile.in:196`). The
+order-only `|` holds by that reading (final re-review, 2026-09-16).
 
   What makes the tree stale independently is a pre-existing sub-second timestamp inversion inside
   `blib/` left by the b0 bisect session's jar restore at 21:01:34 -- `make -n --debug=b` says
   `Prerequisite 'blib/Raku/Actions.jar' is newer than target 'blib/Raku/Grammar.jar'`, and their
   mtimes are 21:01:34.195 vs 21:01:33.946 (0.25 s apart). That cascades Grammar -> rakudo.jar ->
   the settings and has nothing to do with either runtime jar. **The lesson for the next
-  verification: an order-only claim can only be read off a tree that is otherwise up to date, or
-  off an A/B like the one above; a bare `make -n` on a dirty tree proves nothing either way.**
+  verification: an order-only claim is read off the generated Makefile text, or observed on a tree
+  that is otherwise up to date; a bare `make -n` on a dirty tree proves nothing either way.**
 
 Rulings:
 1. stamp 0 for in-process SCs is recorded and compared, not unpersistable (spec Revision 1). An
@@ -382,3 +387,16 @@ Artifacts (untracked, in the rakudo worktree, `m7-rig/` is not a tracked directo
 `m7-rig/b0-{rakudo-e,nqp-e}-census2.err` and `m7-rig/b0-sanity-census2.log`; logs, the 252 MB
 `corec-b0.jfr`, `make-b0.log` and the `make -n` A/B captures (`make-n-old.txt`,
 `make-n-touched.txt`) under `/home/longwalker/.claude/jobs/455b5a91/tmp/`.
+
+**Final re-review residuals (2026-09-16), parked with rulings:**
+- `evalserver-sweep.raku` `census-block` selects by prefix over the whole chunk text, so a TAP line
+  beginning `  site `/`  table `/`  classlib ` would be lifted even with no census; knob-on only.
+  Ruling: deferred; anchor the selection at the first `op census:` line when the sweep is next
+  touched. Cost if wrong: a spurious block line in a census log.
+- The concurrent drains leave the stderr promise unawaited if the stdout slurp throws. Ruling:
+  deferred (a "Promise broken" nag at worst; the pipe still drains).
+- The same sequential-slurp shape survives in `tools/build/pr-stack.raku:93-94` and
+  `tools/build/dice-spectest.raku:60` (never drains stderr). Ruling: recorded as open items,
+  outside this phase.
+- `m7-rig/b0-sanity-census2.log` carries every census line twice (the block and the failed-chunk
+  dump); the totals were read from the single header line. Cosmetic.
