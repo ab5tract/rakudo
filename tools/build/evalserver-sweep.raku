@@ -114,6 +114,10 @@ sub MAIN(
         note "[{ (now - $started).Int }s] chunk { ++$done }/{ +@chunks }: "
              ~ ($code == 0 ?? 'ok' !! 'FAIL')
              ~ ($out ~~ /'No subtests run'/ ?? '  *** a file produced no TAP ***' !! '');
+        if %*ENV<NQP_OP_CENSUS>:exists {
+            my $block = census-block($out);
+            say $block || "evalserver-sweep: no op census block for chunk $i";
+        }
         %( :$i, :files(@batch), :$code, :$out )
     };
 
@@ -130,6 +134,20 @@ sub MAIN(
         say "--- raw tail ---\n" ~ @tail.join("\n") if @tail;
     }
     exit @failed ?? 1 !! 0;
+}
+
+# NQP_OP_CENSUS makes the eval server print its op census when it exits. That
+# goes to the server's stderr, which the chunk runners fold into the chunk's
+# output -- and the sweep only ever prints a chunk's output when the chunk
+# FAILED, so a green sweep dropped the block on the floor and m7-rig's
+# --census found nothing to parse. Lift the block out for every chunk instead.
+sub census-block(Str $text --> Str) {
+    my @lines = $text.lines;
+    my $i = @lines.first(*.starts-with('op census:'), :k);
+    return '' without $i;
+    my $j = $i;
+    $j++ while (@lines[$j + 1] // '') ~~ / ^ [ 'op census:' | '  ' [ 'table ' | 'classlib ' | 'site ' ] ] /;
+    @lines[$i .. $j].join("\n")
 }
 
 # t/harness5 starts and stops its own server.
