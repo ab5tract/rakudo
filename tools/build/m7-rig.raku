@@ -62,6 +62,7 @@ sub parse-cold(Str $text) {
     # so they are summary-only and never enter the row.
     %r<restored> = +$0 if $text ~~ / ' restored=' (\d+) /;
     %r<recorded> = +$0 if $text ~~ / ' recorded=' (\d+) /;
+    %r<publishes> = +$0 if $text ~~ / ' publishes=' (\d+) /;
     for $text.lines {
         %r<by>{$1} = +$0 if / ^ '  misses ' (\d+) ' ' (\S+) /;
     }
@@ -70,7 +71,7 @@ sub parse-cold(Str $text) {
 
 sub cold-summary(%r) {
     my @top = %r<by>.sort(-*.value).head(8).map({ .key ~ '=' ~ .value });
-    "hits={%r<hits> // '-'} misses={%r<misses> // '-'} restored={%r<restored> // '-'} recorded={%r<recorded> // '-'} "
+    "hits={%r<hits> // '-'} misses={%r<misses> // '-'} restored={%r<restored> // '-'} recorded={%r<recorded> // '-'} publishes={%r<publishes> // '-'} "
       ~ "stage-lines={%r<stage-lines>} top: @top.join(' ')"
 }
 
