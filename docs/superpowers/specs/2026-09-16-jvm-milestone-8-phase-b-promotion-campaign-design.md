@@ -82,12 +82,16 @@ the slot as a handle-to-stamp map; `DispatchSlot.SCHEMA` goes from 1 to
 2. On restore, `DispatchPersist.restore` compares every stamp against
 the loaded SC's; a slot with any mismatch is dropped, counted as
 `staleStamp=` on the dispatch-stats line, and named under the existing
-trace knob. A `PRef` into an unstamped SC is `Unpersistable` on the
-record side, so restore never meets an unstamped handle. Old-schema
-slots are dropped by the schema check that already exists, which is how
-the schema bump retrains every slot once. The stamp costs nothing at
-cold start (no hashing; the CRC is in the zip directory) and changes no
-artifact format.
+trace knob. A reference into an in-process SC (the bootstrap
+`__6MODEL_CORE__`, a compile in progress) records stamp 0 and matches
+only a stamp 0 under the same handle; bootstrap drift across a
+runtime-jar rebuild stays covered by the training stamp's hard
+dependency on both runtime jars. (Revision 1, 2026-09-16: the first
+wording would have dropped every program guarding on a bootstrap
+type.) Old-schema slots are dropped by the schema check that already
+exists, which is how the schema bump retrains every slot once. The
+stamp costs nothing at cold start (no hashing; the CRC is in the zip
+directory) and changes no artifact format.
 
 **Makefile.** `$(RUNTIME_JAR)` moves after the `|` in
 `J_RAKUDO_DEPS_EXTRA` (`tools/templates/jvm/Makefile.in`). The training
