@@ -69,6 +69,21 @@ sub parse-cold(Str $text) {
     %r
 }
 
+sub parse-census(Str $text) {
+    my %r;
+    if $text ~~ / 'op census: table=' (\d+) ' classlib=' (\d+) ' siteCalls=' (\d+) ' siteMisses=' (\d+) / {
+        %r<table> = +$0; %r<classlib> = +$1; %r<site-calls> = +$2; %r<site-misses> = +$3;
+    }
+    %r<top-table> = $text.lines.grep(*.starts-with('  table ')).head(8).map({ .words[2] ~ '=' ~ .words[1] }).join(' ');
+    %r<top-classlib> = $text.lines.grep(*.starts-with('  classlib ')).head(8).map({ .words[2] ~ '=' ~ .words[1] }).join(' ');
+    %r
+}
+
+sub census-summary(%r) {
+    "table={%r<table> // '-'} classlib={%r<classlib> // '-'} siteCalls={%r<site-calls> // '-'} siteMisses={%r<site-misses> // '-'} "
+      ~ "top-table: {%r<top-table> || '-'} top-classlib: {%r<top-classlib> || '-'}"
+}
+
 sub cold-summary(%r) {
     my @top = %r<by>.sort(-*.value).head(8).map({ .key ~ '=' ~ .value });
     "hits={%r<hits> // '-'} misses={%r<misses> // '-'} restored={%r<restored> // '-'} recorded={%r<recorded> // '-'} publishes={%r<publishes> // '-'} "
@@ -105,6 +120,8 @@ multi sub MAIN(Str :$parse-sweep!, Str :$baseline = 'docs/jvm-t02-rakudo-red-bas
     say sweep-summary(parse-sweep($parse-sweep.IO.slurp, $baseline));
 }
 
+multi sub MAIN(Str :$parse-census!) { say census-summary(parse-census($parse-census.IO.slurp)) }
+
 multi sub MAIN(
     Tag  :$tag!,                #= row name: base, a1, a3 ...
     Str  :$out = 'm7-rig',      #= output directory
@@ -114,10 +131,13 @@ multi sub MAIN(
     # (--/warm --out=DIR silently became --warm='--out=DIR', losing --out).
     Cool :$warm = 'proxy',      #= proxy: the t/01-sanity clock and nothing else; full: the single-server t/02-rakudo clock (milestone close); none: neither (--/warm)
     Int  :$heap = 8,            #= eval-server heap in GB
+    Bool :$census = False,      #= after the timed rows: one NQP_OP_CENSUS=1 run and one JFR run per cold row, and a second warm proxy with the knob
     Str  :$baseline = 'docs/jvm-t02-rakudo-red-baseline.txt',
 ) {
     die "m7-rig: NQP_DISPATCH_RECORD is set; a training run is never a measured run"
         if %*ENV<NQP_DISPATCH_RECORD>:exists;
+    die "m7-rig: NQP_OP_CENSUS is set; the timed rows must run with the knob off (use --census)"
+        if %*ENV<NQP_OP_CENSUS>:exists;
     $*OUT.out-buffer = False;
     my $dir = $out.IO; $dir.mkdir;
     my %base = %*ENV, RAKUDO_RAKUAST => '1';
@@ -147,6 +167,27 @@ multi sub MAIN(
         %row{%b<name> ~ '-stats'} = parse-cold($best[1]);
         say sprintf("m7-rig: cold %s best=%.3fs  all: %s  %s", %b<name>, $best[0],
                     @runs.map({ sprintf '%.2f', $_[0] }).join(' '), cold-summary(%row{%b<name> ~ '-stats'}));
+    }
+
+    if $census {
+        for @bench -> %b {
+            my ($ctext, $ccode) = capture(%b<cmd>, :cwd(%b<cwd>), :env(%(|%cold, NQP_OP_CENSUS => '1')));
+            $dir.add("$tag-%b<name>-census.err").spurt($ctext);
+            die "%b<name> census: exit $ccode" unless $ccode == 0;
+            die "%b<name> census: no 'op census:' marker" unless $ctext.contains('op census:');
+            %row{%b<name> ~ '-census'} = parse-census($ctext);
+            say "m7-rig: census %b<name> " ~ census-summary(%row{%b<name> ~ '-census'});
+            my $jfr = $dir.add("$tag-%b<name>.jfr").absolute.IO;
+            my ($jtext, $jcode) = capture(%b<cmd>, :cwd(%b<cwd>),
+                :env(%(|%base, JAVA_TOOL_OPTIONS => "-XX:FlightRecorderOptions=stackdepth=512 -XX:StartFlightRecording=filename=$jfr,settings=profile")));
+            $dir.add("$tag-%b<name>-jfr.err").spurt($jtext);
+            die "%b<name> jfr: exit $jcode (output in $tag-%b<name>-jfr.err)" unless $jcode == 0;
+            die "%b<name> jfr: no recording at $jfr" unless $jfr.e;
+            my $attr = run 'raku', 'tools/build/jfr-attribute.raku', '--ops', $jfr, :cwd($ROOT), :out;
+            $dir.add("$tag-%b<name>-jfr.txt").spurt($attr.out.slurp(:close));
+            die "%b<name> jfr-attribute: exit {$attr.exitcode}" if $attr.exitcode != 0;
+            say "m7-rig: jfr %b<name> $jfr ({$jfr.s} bytes) -> $tag-%b<name>-jfr.txt";
+        }
     }
 
     # One directory on ONE server, saved as <tag>-<suffix>.log and parsed.
@@ -191,6 +232,14 @@ multi sub MAIN(
             %sweep = sweep('t/01-sanity', :tag-suffix<sanity>);
             $warm-cell = "{%sweep<warm>}/sanity";
             say "m7-rig: warm t/01-sanity {%sweep<warm>}s " ~ sweep-summary(%sweep);
+            if $census {
+                my ($ctext, $ccode) = capture(['raku', 'tools/build/evalserver-sweep.raku', '--chunk=*',
+                                               '--jobs=1', "--heap=$heap", 't/01-sanity'],
+                                              :cwd($ROOT), :env(%(|%base, NQP_OP_CENSUS => '1')));
+                $dir.add("{$tag}-sanity-census.log").spurt($ctext);
+                die "m7-rig: sanity census produced no 'op census:' block (exit $ccode)" unless $ctext.contains('op census:');
+                say "m7-rig: census sanity " ~ census-summary(parse-census($ctext));
+            }
         }
         when 'none' { }
         default { die "m7-rig: --warm must be proxy, full or none, not '$warm'" }

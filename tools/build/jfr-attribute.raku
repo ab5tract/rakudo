@@ -17,11 +17,14 @@ sub MAIN(
     Int  :$top = 12,                  #= rows per table
     Str  :$thread,                    #= only samples on this thread name
     Bool :$innermost = False,         #= match only the Java frames between the leaf and the nearest interpreter frame (exclusive shares)
+    Bool :$ops = False,               #= per-op exclusive view: containers = the generic op entries, the sites, dispatch; implies --innermost
     *@container,                      #= name=frame-substring pairs; default: the unit load stages
 ) {
     @container ||= <load-block=runLoadIfAvailable deserialize=runDeserializeIfAvailable
                     build-table=ProgramUnit.buildTable sc=SerializationReader.deserialize
                     decode=UnitLoader.readRecord parse-program=NqpWire.decode>;
+    @container = <table=NqpOps.run classlib=NqpOps.classlib sites=NqpTypeOps dispatch=NqpDispatch> if $ops;
+    my $inner = $innermost || $ops;
     my @c = @container.map({ my ($n, $p) = .split('=', 2); %( :name($n), :pat($p) ) });
     my $p = run 'jfr', 'print', '--events', 'jdk.ExecutionSample', '--stack-depth', $depth, $jfr, :out;
     my (@samples, $cur, $thr, $in-stack);
@@ -50,9 +53,9 @@ sub MAIN(
     sub region(@f) {
         # the frames above the innermost generated interpreter frame; the whole stack otherwise
         my $i = @f.first({ .contains('NqpRootNodeGen') }, :k);
-        $innermost && $i.defined ?? @f[^$i] !! @f
+        $inner && $i.defined ?? @f[^$i] !! @f
     }
-    if $innermost {
+    if $inner {
         my @self = @samples.grep({ .<frames>[0].contains('NqpRootNodeGen') });
         say sprintf "interpreter self (leaf is a generated frame): %d samples %.1f%%", +@self, 100 * @self / (@samples || 1);
         my %h; %h{.<frames>[0].subst(/^ .* '$' /, '')}++ for @self;
