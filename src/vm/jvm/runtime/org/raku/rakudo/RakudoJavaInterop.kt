@@ -820,10 +820,8 @@ open class RakudoJavaInterop(gc: GlobalContext) : BootJavaInterop(gc) {
                 it.remove()
         }
 
-        val fst = freshType.st
-        val fs = fst.state
-        fst.publish(fs.withFacts(methodCache = names,
-            modeFlags = fs.modeFlags or STable.METHOD_CACHE_AUTHORITATIVE))
+        freshType.st.update { s -> s.withFacts(methodCache = names,
+            modeFlags = s.modeFlags or STable.METHOD_CACHE_AUTHORITATIVE) }
 
         ThisHOW.bind_attribute_boxed(tc, gcx.JavaHOW, "%!submethods", STable.NO_HINT, submethods)
         ThisHOW.bind_attribute_boxed(tc, gcx.JavaHOW, "%!methods", STable.NO_HINT, Ops.hllizefor(methods, "Raku", tc))
