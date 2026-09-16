@@ -654,3 +654,115 @@ record and force-pushed again -- the final hash is in the Task 5 report.)
 
 **Phase A is closed. Next: the Phase B plan (the promotion campaign), which
 inherits milestone 7's empty A7 list and the `dedicatedClasslib` third road.**
+
+## Final review and fix wave (2026-09-16)
+
+The whole-branch review of Phase A (rakudo `fdd298054c` / nqp `055e14ae9`)
+found **no critical defect**. It found three Important items and nine Minor
+hardenings; **all twelve landed in one fix wave**, one commit per tree, with
+the gate re-run.
+
+### The three Important items -- fixed
+
+1. **Stale programs were persisted.** `DispatchPersist.recordAtExit` wrote
+   every entry of `site.programs`; a program whose type republished after it
+   was recorded (it is evicted only at the NEXT install) reached the slot and
+   would be restored under a fresh guard with its baked callee. It now
+   persists `p.isFresh` programs only; a slot left with nothing is skipped by
+   the existing `persisted.isEmpty()` guard.
+2. **`STable.publish` was a non-atomic read-modify-write.** Two concurrent
+   `publish(state.withFacts(...))` pairs could install a state whose
+   assumption is never invalidated. `publish` is now `@Synchronized` and
+   `STable.update(f: (TypeState) -> TypeState)` computes the successor **under
+   the lock**, so no writer builds one from a state it no longer owns.
+   `republish()` is `update { it.withFacts() }`, and **every** writer of the
+   `X.publish(X.state.withFacts(...))` shape was converted: `Ops.kt`
+   (setmethcache, setmethcacheauth, settypecache, settypecheckmode,
+   setinvokespec, setdebugtypename, setcontspec, setboolspec, settypehll,
+   settypehllrole), `KnowHOWMethods.kt` (compose, add_method),
+   `KnowHOWBootstrapper.kt` (all), `BootJavaInterop.kt` and the Rakudo tree's
+   `RakudoJavaInterop.kt`. The only surviving `publish` calls are `update`'s
+   own, `republish`'s (through `update`) and `SerializationReader`'s one
+   publish of a freshly built state. `TypeStateTest` gained
+   `updateSeesTheCurrentStateAndInstallsItsResult`.
+3. **Three double `st.state` reads where the facts must agree** were hoisted
+   to one read each: `Ops.findmethodNonFatal` (cache and its AUTHORITATIVE
+   flag), `Ops.istype_nd` (one `os` for the invocant's mode + cache, one `ts`
+   for the target's NEEDS_ACCEPTS flag), and
+   `SerializationWriter.serializeStable` (nine reads -> one `val s` at the top
+   of the STable section).
+
+### The nine Minor hardenings -- fixed
+
+4. `NqpDispatch.Folder.fold(Guard)`, `OfType` branch: `states.add(g.state ?:
+   t.state)`, mirroring the `Literal` branch -- a type fixed by a guard made
+   outside a recording is never folded under no assumption.
+5. `DispatchRecord.emitGuards`: the recorded state is written to
+   `Guard.OfType.state` only when it is non-null, so the constructor default
+   is never overwritten with null.
+6. `NqpDispatch.Cache.refresh`: the identity short-circuit now also requires
+   `!hasStale()`, so a quiet site whose program list never changes refolds a
+   program whose type republished instead of keeping it for ever.
+7. `NqpTypeOps.muSinkCache` joins the per-run reset, beside `for (s in SITES)
+   s.reset()`.
+8. `SerializationReader` publishes a **copy** of the deserialized method-cache
+   hash (`HashMap((methodCacheRef as VMHashInstance).storage)`): the guest
+   keeps the hash object, and a guest mutation must not change a published
+   fact without a publish.
+9. `SerializationReader` calls `st.republish()` immediately after
+   `REPR.deserialize_repr_data`. **Ruling 1 is amended**: the facts still
+   publish once, before parametricity and REPR data, so a mid-deserialization
+   reader sees exactly what it saw before; but REPR data now gets its own
+   republish, because the `create` and bigint sites **do** trust the state for
+   it.
+10. `KnowHOWREPRInstance.composedType` KDoc: it names the **LAST** type this
+    meta-object composed. A meta-object composed more than once leaves the
+    earlier types holding their own published copies of the table, which no
+    longer follow it -- as before the type state, where they held their own
+    aliases; `add_method` republishes the last one.
+11. Cosmetics: the dead `use MONKEY-TYPING;` is gone from
+    `t/02-rakudo/type-state.t`; the stats line uses `STable.PUBLISHES.sum()`
+    unqualified (the file imports `STable`); `DispatchBootstrap.install` says
+    why it walks twice (`any` answers the common case without allocating);
+    and both `Guard.OfType.state` and `Guard.Literal.state` say that the
+    data-class `copy()` drops them -- never copy a guard.
+12. `docs/jvm-truffle-only-plan.md`, the milestone-8 Phase A paragraph: the
+    storm-baseline one-liner now matches the findings table -- **four**
+    invalidations of installed code on the cold run (2 `validRootAssumption`,
+    2 `nodeRewritingAssumption`), **none of them a `TypeState`**; "zero"
+    applies to the type states, not to the run.
+
+### The Phase B design ruling
+
+**A site may fold only a fact that some state it holds actually published.**
+A method resolution that walks the HOW/MRO (a non-authoritative cache) is
+**not** such a fact: no single state published it, and no single assumption
+covers it. So Phase B's `findmethod` / `can` / `tryfindmethod` sites fold the
+**authoritative-cache case only**, unless a multi-state guard (one that holds
+every state the walk consulted) is designed first.
+
+### Rulings made during execution (from the process ledger)
+
+Verbatim, every `Ruling` line of
+`.superpowers/sdd/2026-09-16-jvm-milestone-8-type-state-phase-a/progress.md`:
+
+```
+| T3 / T4 | nqp/t/jvm/19-type-state.t: created in T3 with tests 1-2 owned by T4 | CONFLICT: T3 would commit a file with two known-failing tests. Ruling below. |
+| T1 self | TypeStateTest.theWriterOpsPublish mutates tc.gc.BOOTHash's STable (mode flags, bool spec, hll role) | RISK: ProgramUnitTestSupport.tc() may share a GlobalContext across the runtime test suite; mutating a bootstrap type can leak into other tests. Ruling below. |
+Ruling: T3 writes nqp/t/jvm/19-type-state.t with the istype half only (plan(2)); T4 extends it to plan(4) with the method-call half — no task commits a red test. Cost if wrong: none (same coverage at the end of T4).
+Ruling: TypeStateTest.theWriterOpsPublish operates on a FRESH type object (`tc.gc.BOOTHash!!.st.REPR.type_object_for(tc, tc.gc.BOOTHash!!.st.HOW)`), never on a shared bootstrap type — the writer ops are exercised the same way and no other runtime test sees the mutation. Cost if wrong: a type_object_for that needs more than a HOW; the implementer reports it.
+Ruling: Important 1 (double st.state read in settypecheckmode/setmethcacheauth/BootJavaInterop/RakudoJavaInterop) is FIXED although the plan's Step 8 code mandated it for settypecheckmode with a rationale — the global constraint "read facts from a captured state object" is the spec's rule and outranks the plan's argument. Cost if wrong: none (one local per writer).
+Ruling: Important 2 (trailer names Opus) is fixed by amend, stamps preserved; the trailer names the directing session (M7 rule).
+Task 1: minor (deferred): deserialized states carry name=null (debugName is not on the wire), so the assumption trace names CORE types "type"; Task 5's storm baseline reads COUNTS, the trace's stack identifies the site. Ruling: accepted for Phase A; a name from the HOW would need guest code at deserialization.
+Ruling 1 sharpened (reviewer minor 6): the old reader assigned facts INCREMENTALLY between readRef() calls that can recurse into object deserialization, so a nested read of this STable previously saw partial facts and now sees none until the single publish; the one concrete sub-case (a ContainerSpec.deserialize reading st.ContainerSpec) was checked clean in all three specs; the general case rests on the nqp suite + t/01-sanity gates of Task 2. Cost if wrong: a deserialization-time reader of a partial fact; the gate shows it.
+Task 1: fix round 1/5 dispatched -> implementer DONE, amended nqp c1b73c43b (dates preserved), runtime tests 56/56 15 s. Ruling: setcontspec reads st.state twice by design (guard, then the freshest state at publish after the spec is built; the two reads need not agree) -- left as is. Cost if wrong: none (a concurrent publish between them is absorbed by using the later state).
+Ruling 8 CORRECTED (implementer finding): the settings DO recompile on a Rakudo-runtime edit -- Makefile J_RAKUDO_DEPS_EXTRA has $(RUNTIME_JAR) as a HARD prerequisite of rakudo.jar (only nqp's runtime jar is order-only), and a moved rakudo HEAD re-expands gen/jvm/main-version.nqp, which pulls the frontend jars. Cost: ~700 s per rakudo-side `make` in Phase A (Tasks 2 and 5). Ruling: the Makefile is NOT changed in this phase -- making the runtime jar order-only is a semantic choice (settings compile ON that runtime) for the user; recorded as an open user question for the Phase A record. Cost if wrong: two long makes.
+Ruling: Task 3 wires istype through dedicatedClasslib (cls Ops, meth "istype", nargs 2 -> Op.ISTYPE): engine-jar only, no encoder change, no rebuild of any artifact; the spec's section 3 names istype's checked trust, which a dead site cannot deliver. Consequence recorded for Task 5: rig row a ALSO carries istype becoming sited (a confound on the "dependent load" reading; reported as such). Lesson for Phase B: the dedicatedClasslib map is a THIRD promotion road -- a classlib op promotes engine-only by name, without the encoder row the plan's recipe assumed; the plan's "classlib = full build" claim is wrong for any op whose dedicated node already exists or is added engine-side. Cost if wrong: an INT-typed dedicated result on the classlib road (hllize was OBJ->OBJ) -- the t/jvm + t/nqp runs and Task 5's gate show it.
+Ruling: the SinkSite holds Mu's state too (a site "trivial because the type's sink is Mu's" depends on both) -- folded into Task 3 before its review. Cost if wrong: one more field on one site.
+Ruling: Important 2 (the istype routing has seen no Rakudo-level run) is a GATE item, not a Task 3 code fix: Task 4 runs t/02-rakudo/type-state.t through ./rakudo-j on the synced engine jar, Task 5 runs make + t/01-sanity + the nqp suite; the ledger names the routing as the change those gates cover. Cost if wrong: a Rakudo red found one task later.
+Ruling: Important 3 (the test cannot detect loss of the routing) -> the test gets a comment naming NqpProgramBuilder.dedicatedClasslib as its load-bearing premise and the bite proof is recorded here; an assertable site counter is Phase B's census tooling (NQP_OP_CENSUS counts dedicated vs classlib), deferred. Cost if wrong: a silently vacuous test until Phase B.
+Ruling: test-shape deviations accepted -- (a) nqp: setmethcache is inert for nqp-meth-call (resolves via $how.find_method), so the nqp method-call half uses Foo.HOW.add_method on a subclass overriding an inherited m (republishes via setmethcacheauth); (b) Rakudo: source-level augment is BEGIN-time and EVAL of an augment dies in RakuAST, so the Rakudo half uses runtime .^add_method + .^compose; both halves run through ONE sub body (one site); the istype half reads its invocant from a closure (settypecache drops Any from the cache, a parameter then refuses to bind). Cost if wrong: the tests cover the republish roads that exist, not the literal augment statement; the spec's intent (a resolved site sees a republish) is met.
+Ruling: Important 1 (Guard.OfType captures its state at emitGuards, AFTER the dispatcher read the facts -- a TOCTOU window the "captured state" rule exists to close) is FIXED in fix round 1, not parked: DispatchRecord records the tracked value's st.state at guardType()/guardLiteral(OBJ) time (before the facts read), emitGuards hands it to Guard.OfType.state and to a new transient Guard.Literal.state (OBJ only), the Folder prefers the guard-recorded state over st.state, and DispatchProgram.isFresh covers both guard kinds (also resolves minor 3's asymmetry). The spec's letter ("captured at recording time") is kept; the point of capture moves earlier within the recording. Cost if wrong: a wider change to DispatchRecord than the brief had; the runtime tests + both .t files + verify mode gate it.
+Ruling: ONE fix wave lands Important 1 (DispatchPersist.recordAtExit persists only p.isFresh), Important 2 (STable.publish @Synchronized + a closure `update(f)` computing the successor under the lock; EVERY writer goes through update so no writer builds a successor from a state it no longer owns -- this touches the two Rakudo-tree writers, so the wave pays one full make), Important 3 (hoist the three double reads: findmethodNonFatal, istype_nd, SerializationWriter.writeSTable), and the cheap hardenings: Minor 4 (Folder OfType branch `g.state ?: t.state`), 5 (emitGuards writes only a non-null recorded state), 6 (refresh's short-circuit also requires !hasStale()), 7 (muSinkCache joins the per-run reset), 8 (the reader publishes a COPY of the deserialized method-cache hash), 9 (st.republish() after deserialize_repr_data -- ruling 1 amended: create/bigint now trust the state for REPR data), 10 (composedType KDoc "the last type composed"), 11 (dead MONKEY-TYPING, qualified PUBLISHES, install's double-walk comment), 12 (plan-position one-liner aligned with the findings table). Cost if wrong: a wider wave than "three small fixes"; every item is one to three lines and the gate (nqp suite + sanity) covers them.
+Ruling (design, for Phase B -- from the resolveSink triage): a site may fold only a fact that some state it holds actually published; a method resolution that walks the HOW/MRO (non-authoritative cache) is NOT such a fact, so Phase B's findmethod/can/tryfindmethod sites fold the authoritative-cache case only (or design a multi-state guard first). Recorded for the Phase B plan.
+```

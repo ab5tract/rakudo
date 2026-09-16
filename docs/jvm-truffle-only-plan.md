@@ -133,9 +133,12 @@ is a no-op clock**: cold `rakudo -e` 2.290 s and cold `nqp -e` 1.190 s
 against the close's 2.247 / 1.198, misses 4933 and hits 35541 against
 4931 / 35512 -- inside the series' spread on both sides, so the
 dependent-load risk did not show. **The storm baseline says there is no
-storm**: of `publishes=7460` on a cold `-e ''`, zero invalidated compiled
-code (`engine.TraceAssumptions`), and a test written to republish twice
-produces six. Two findings carried forward: a Rakudo-side runtime edit
+storm**: on a cold `-e ''` (`engine.TraceAssumptions`) `publishes=7460`
+invalidate installed code four times -- two `validRootAssumption`, two
+`nodeRewritingAssumption` -- and **none of the four is a `TypeState`**, the
+type states all publishing before anything they touch is compiled; a test
+written expressly to republish twice produces six type-state
+invalidations out of 63. Two findings carried forward: a Rakudo-side runtime edit
 costs a full setting recompile (`Makefile:320` makes `$(RUNTIME_JAR)` a
 hard prerequisite of `rakudo.jar`; the Makefile was deliberately not
 changed -- the user's call), and `dedicatedClasslib` is a third promotion

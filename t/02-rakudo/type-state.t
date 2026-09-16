@@ -1,7 +1,6 @@
 use lib <lib>;
 use Test;
 use nqp;
-use MONKEY-TYPING;
 # Milestone 8, the type state: a type's published facts (method cache,
 # type-check cache) live in an immutable TypeState with an Assumption. A
 # dispatch program or a site that folded a fact must see the change when
