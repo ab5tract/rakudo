@@ -28,6 +28,8 @@ Makefile
 *.moarvm
 *.js.map
 blib/Perl6/**/*.js
+/blib/.dispatch-trained
+/blib/.dispatch-train.log
 lib/Test.pir
 lib/Pod/To/Text.pir
 lib/lib.pir
