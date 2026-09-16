@@ -51,6 +51,30 @@ shared by two live sites each. Per-jar split in the plan. Dumps and table:
 | b | 107eca63a3 | 318558c2d | 2.461 | 1.160 | 5667 | 100711 | 50/sanity | none | Phase B close, the baseline |
 | c | 79829d402e | f5c5bc8fa | 2.272 | 1.203 | 4931 | 35512 | 63/sanity | none | Phase C close, trained build; restored=4470 recorded=849 sitesAll=7569 dropped=37 (best cold rakudo-e); nqp restored=1644 recorded=257 |
 
+## Hashes before and after the handoff rebase (Task 9, 2026-09-16)
+
+The phase was measured on rakudo `79829d402e` / nqp `f5c5bc8fa`, and every
+document names those. The handoff rebase at the close (rakudo onto
+`origin/main` `af3df50dba`, one upstream commit, no conflict; nqp onto
+`upstream/main` `e31676e5b`, one upstream commit, no conflict) rewrote them:
+
+| commit | before | after |
+|---|---|---|
+| rakudo: plan, ledger, C0 findings | b114238897 | 8863808d86 |
+| rakudo: Makefile training stamp (the measured tree) | 79829d402e | 5b51570903 |
+| rakudo: this close's docs | 62b2b5b008 | 165c477f2b |
+| nqp: DispatchDump (C0) | 5f46163d2 | 35e4f734a |
+| nqp: schema + DispatchSlotCodec | e27a795d8 | 936e57fae |
+| nqp: consumer + modes + counters | 5fd74d9b6 | 3a4082327 |
+| nqp: recorder + UnitDispatchWriter | 3d0b54fa4 | c17218e16 |
+| nqp: verify by outcome + log + drop reasons | d3e602917 | a1bdba778 |
+| nqp: gradle training (the measured tree) | f5c5bc8fa | e3c800371 |
+
+Trees are identical across the rewrite; only the two upstream commits are
+new. The nine v2 stage0 jars were stashed under the tag
+`stage0-v2-phase-c-task9` for the nqp rebase and restored byte for byte
+(md5 verified, stash dropped); they remain uncommitted (user rule).
+
 ## Log
 Task 2 (2026-09-15): rakudo rebased onto origin/main -> b114238897 (214 commits over 48 upstream; one conflict, src/Raku/ast/signature.rakumod: upstream's `$definite` derivation (syntactic :D/:U or IMPL-CAPTURE-DEFINITE) kept, our `!$definedness-done &&` added to its condition). Gate: make 869 s wall, t/01-sanity 25/25 in 62 s. Pushed --force-with-lease to ab5tract. nqp upstream/main 0 new commits. Note: the worktree's 3rdparty/nqp-configure has a dangling gitdir pointer; `git rebase --continue` needs `-c diff.ignoreSubmodules=all -c status.submoduleSummary=false`.
 Task 3 (2026-09-15): nqp 18310f0a2 (DispatchSlot schema + DispatchSlotCodec + UnitCodec Double + DispatchDump on the codec's addressing), 40/40 runtime tests. Review: approved; one Important finding -> Ruling 16: HLL guards persist as (name, compiler-side) and realise through a non-creating lookup (GlobalContext.findHLLConfig), because a type's hllOwner comes from whichever of the two config maps was current at deserialize, and the guard compares identity. Cost if wrong: a dead/dropped HLL-guarded program, never a wrong answer.
@@ -64,3 +88,4 @@ Task 6 (2026-09-16, first pass): training by hand works. Cold rakudo -e '' after
 Task 6 close (2026-09-16): re-run on nqp d3e602917 — verify mismatched 0 everywhere (nqp cold matched 1658 byOutcome 8 unseen 62; rakudo cold matched 4475 byOutcome 4 unseen 127; warm t/01-sanity matched 117490 byOutcome 327 unseen 73893 over 2 processes); t/01-sanity 25/25 under verify (43 s) and default (42 s). Drops are all `no SC <handle>` for 5 handles that exist in no jar (SCs made later in the run or per compile), 37 rakudo / 30 nqp, ~0.8 % of installed programs. Ruling 20 confirmed.
 Task 7 (2026-09-16): nqp f5c5bc8fa (gradle: stage2Trained Sync -> trainDispatch JavaExec with NQP_DISPATCH_RECORD=all on the copy, marker dispatch-trained.txt, syncLib from the copy; jBootstrapFiles keeps the untrained stage2), rakudo 79829d402e (Makefile.in: stamp target after rakudo.jar + the three settings runs the trivial program with NQP_DISPATCH_RECORD=all, log + exit test + grep marker, `touch -r` normalises the rewritten artifacts' mtimes so a second make is a no-op; the runner depends on the stamp). Gate, default mode: clean buildJvm 218 s; nqp suite 155/155 196 s; make clean+make 883 s (Training once; CORE.c parse 221 s, stages 282 s); t/01-sanity 25/25 55 s; cold stats restored 4475 recorded 195. Review approved; Ruling 21 (training reproduced up to ~1 % run-to-run variation; verify is the net), Ruling 22 (post-make lib jars get the default-mode nqp suite); fix round: the training line no longer masks the runner's exit through tee.
 Task 8 (2026-09-16): verify gate nqp suite 155/155 204 s (11 processes: matched 271378 byOutcome 1309 mismatched 0 unseen 116617), t/01-sanity 25/25 51 s (matched 117441 byOutcome 327 mismatched 0 unseen 73941), zero MISMATCH blocks; off gate 155/155 201 s + 25/25 49 s, identical to default; default-mode nqp suite on the post-make lib jars 155/155 206 s.
+Task 9 (2026-09-16): rig row `c` above (5 cold runs each, `--warm=proxy`, nothing else running, no NQP_DISPATCH_RECORD in the environment); m7-rig's `parse-cold` now also captures `recorded=`/`restored=` (optional, so older captures still parse) and `cold-summary` prints them, with the row line unchanged so the series stays comparable. Docs written: findings "Milestone 7, Phase C" (b) the 22 rulings as landed, (c) the numbers, (d) the gates with clocks, (e) sizes + the compression question for the user, (f) open items and deferred minors; `docs/jvm-unit-lazy-loading.md` "The dispatch table" rewritten for a filled table + the Diagnostics list; the spec's "Phase C: closed"; the position doc. Commits rakudo 62b2b5b008 (docs) then 637b468183 (the hash mapping above). Handoff rebase: rakudo onto origin/main af3df50dba and nqp onto upstream/main e31676e5b, one upstream commit each, NO conflict; both pushed --force-with-lease to ab5tract (the nqp branch was still at Phase B's b51c1a0db before this push). Open item recorded in the findings: the warm proxy clock reads 63 s against row b's 50 s while the harness5 clock of the same directory read 55/51/49 s in Tasks 7-8 -- single samples, not re-run (user rule). Remaining: Task 10, the milestone close.
