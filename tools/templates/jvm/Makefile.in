@@ -114,11 +114,14 @@ NQP_RUNTIME_JAR = @nfp(nqp/build/jvm/share/runtime/nqp-runtime.jar)@
   @nfp(@bpm(BLIB)@/.dispatch-train.log)@
 
 @bpv(ML_EXTRA)@ = @nfp(src/vm/jvm/Raku/JavaModuleLoader.nqp)@
-# NQP_RUNTIME_JAR sits after the | : order-only, GNU make syntax. The jar
+# Both runtime jars sit after the | : order-only, GNU make syntax. A jar
 # must be fresh before any build JVM runs on it, but its rebuild (seconds)
 # must not timestamp-cascade into a full setting recompile (many minutes)
 # -- compiled bytecode does not depend on the runtime that executes it.
-@bpv(RAKUDO_DEPS_EXTRA)@ = $(RUNTIME_JAR) | $(NQP_RUNTIME_JAR)
+# The training stamp keeps its hard dependency on both (a runtime edit
+# retrains), see TRAIN_STAMP below. User decision 2026-09-16 (milestone 8
+# Phase B): rakudo-runtime.jar joined nqp-runtime.jar on this side.
+@bpv(RAKUDO_DEPS_EXTRA)@ = | $(RUNTIME_JAR) $(NQP_RUNTIME_JAR)
 
 @bpv(NQP_FLAGS_EXTRA)@ = --javaclass=perl6
 
