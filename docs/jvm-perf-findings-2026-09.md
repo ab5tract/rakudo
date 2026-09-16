@@ -1239,6 +1239,56 @@ The seven made while executing:
     before `make` retrained them. Cost if wrong: an untested lib-jar
     state ships.
 
+**The fix wave** (the final whole-branch review, 2026-09-16: 0 Critical,
+5 Important, 12 Minor -> "ready with fixes"). It landed as nqp
+`a837bf1bb` and rakudo `6217a89e61`, and those two commits are part of
+the phase; the rig row measured on them is `close` in the milestone
+section below. Six more rulings:
+
+23. **The moved-unnamed-slot test is mandatory** (reverses Task 5's
+    deferral). `UnitDispatchWriter` never exercised the one branch that
+    could corrupt every later read. Cost if wrong: a silently corrupt
+    artifact.
+24. **The recorder contains every throwable, per program and per path**,
+    prints `dispatch-record: FAILED <path> <reason>`, and ends with
+    `dispatch-record: done <paths> paths, <slots> slots, <programs>
+    programs, <unpersistable> unpersistable, <failed> failed`; **both
+    build markers require the `done` line and the absence of `FAILED`**.
+    A malformed slot stays a hard error in *restore*. Before this, a
+    throwable in the exit hook left a green half-trained build, the
+    markers satisfied by the paths written earlier. Cost if wrong: a
+    training failure is loud instead of silent.
+25. **`DispatchSlot` carries a leading `SCHEMA` int (1)**; a mismatch
+    reads as an empty slot, counted on the stats line as
+    `staleSchema=`. `TRAIN_STAMP` also depends on `$(RUNTIME_JAR)` and
+    `$(NQP_RUNTIME_JAR)`, so a runtime-only rebuild plus `make` retrains
+    instead of leaving old-codec slots in place. Cost if wrong: an
+    untagged codec change mis-decodes silently.
+26. **The recorder refuses any path under `src/vm/jvm/stage0`** and
+    prints the path list it will rewrite before writing. `all` stays the
+    builds' selector. Cost if wrong: a hand-run
+    `NQP_DISPATCH_RECORD=all` rewrites the uncommitted stage0 jars.
+27. **The gradle marker moves out of the synced directory**
+    (`nqp/build/jvm/dispatch-trained.txt`), the trained jars are declared
+    outputs, and the task is documented as intentionally always out of
+    date.
+28. **`stage2Trained` is `upToDateWhen { false }` too** — the
+    always-retrain had been *emergent* from the marker's position inside
+    the synced directory, not designed, so every build now trains fresh
+    untrained jars. Cost if wrong: about 2 s per build.
+
+Also in the wave, with no ruling of their own: a kitchen-sink
+round-trip test over every P-type, a test that the `recordAtExit` hook
+is installed at all, `blib/.dispatch-trained` and
+`blib/.dispatch-train.log` added to `CLEANUPS` and `.gitignore`, and two
+one-character cleanups. 50/50 runtime tests; a clean `buildJvm` of 223 s
+reported `done 9 paths, 1683 slots, 1711 programs, 41 unpersistable,
+0 failed`, and a repeat `buildJvm` of 1 s retrained byte-identically.
+Two deferrals came out of it and are in the milestone's "what it left"
+list: the markers still have no slot-quantity floor, and `done`'s
+`unpersistable` and `failed` counts overlap for a program whose
+`persist` threw.
+
 ### (c) The numbers
 
 Rig row `c` against Phase B's `b`, both `--warm=proxy`, best of five cold
@@ -1462,6 +1512,210 @@ found; the SDD ledger has the context):
   asserts a quantity floor; a greedy `sed` range in the log grep; the tee
   objects are configuration-cache-hostile; `engineJarFile` is an input by
   classpath snapshot only; the marker file records absolute paths.
+
+## Milestone 7: the close (2026-09-16)
+
+Spec: `docs/superpowers/specs/2026-09-13-jvm-milestone-7-first-execution-design.md`.
+Three phases, thirteen measured rig rows, one rig
+(`tools/build/m7-rig.raku`). The final tree is rakudo `6217a89e61` /
+nqp `a837bf1bb`; every clock below is from that build. The milestone's
+own baselines were **cold `rakudo -e` 2.68 s** and **cold `nqp -e`
+1.12 s** (the 2026-09-13 wire fix) and **whole `t/` 5078 s** over 427
+files (2026-09-13, one warm 8 GB server).
+
+### The whole milestone, one row per lever
+
+Four numbers per row: cold `rakudo-j -e 'say 1'`, cold
+`nqp-j-gradle -e 'say(1)'`, dispatch `misses`, dispatch `hits` — best of
+five cold runs, stock runners, `NQP_UNIT_LOAD_STATS` and
+`NQP_DISPATCH_STATS` on. Hashes are rakudo / nqp, each in its own tree.
+
+| lever | rakudo / nqp hash | cold rakudo-e | cold nqp-e | misses | hits | verdict |
+|---|---|---|---|---|---|---|
+| base (milestone start) | `bc00863fef` / `c17d93d27` | 2.502 s | 1.135 s | 6815 | 125055 | base |
+| A1 presized SC maps | `76b62a0b4f` / `cb654e4bf` | 2.518 s | 1.125 s | 6815 | 125055 | struck (kept: cannot regress) |
+| A2 diagnostics | `b5c559de25` / `793161369` | 2.509 s | 1.085 s | 6815 | 125055 | no claim; delivered the misses histogram |
+| A3 callback via the unit road | `ee460e4775` / `7602b2254` | 2.543 s | 1.100 s | 6815 | 125055 | struck (kept) |
+| A4 stub fast path | `e6a29ddc9e` / `39688c263` | 2.496 s | 1.116 s | 6815 | 125055 | struck (kept) |
+| A5 record off the hash maps | `7287e64a60` / `942ff0a5f` | 2.516 s | 1.145 s | 6815 | 125055 | struck (kept) |
+| A7 boundaries | `e965a90438` / `f36509da7` | 2.611 s | 1.151 s | 6815 | 125055 | struck (kept; `NQP_CLASSLIB_INLINE=1` is its A/B) |
+| A7b runners on the class path | `b3daa412c1` / `9f0417c5d` | 2.604 s | 1.165 s | 6815 | 125055 | **landed**: boundaries real under every runner |
+| A8 dispatcher compilation (spike) | `114175eaa8` / `f36509da7` | - | - | - | - | **struck** by its own spike (+455 ms at 50, +691 at 10) |
+| A8b raku-invoke bailout (diagnosis) | `157695f982` / `9f0417c5d` | - | - | - | - | finding; the fix is A8c |
+| A8c constant handle per branch | `56e78028bf` / `4736905d0` | 2.597 s | 1.148 s | 6815 | 125055 | **landed**: `opt failed` 3 -> 0, `raku-invoke` compiles |
+| A6' static clone road | `96f643b334` / `4736905d0` | 2.504 s | 1.192 s | **5661** | **100697** | **landed**: the phase's one counter move |
+| b Phase B close (artifact v2) | `107eca63a3` / `318558c2d` | **2.461 s** | **1.160 s** | 5667 | 100711 | **landed**, clock-neutral by design |
+| c Phase C close (persisted miss) | `79829d402e` / `f5c5bc8fa` | **2.272 s** | 1.203 s | **4931** | **35512** | **landed** |
+| **close** (the fix wave, final tree) | **`6217a89e61` / `a837bf1bb`** | **2.247 s** | **1.198 s** | 4931 | 35512 | the milestone's measured tree |
+
+Row `close` is row `c` plus the final review's fix wave (item (b) below).
+**Every dispatch counter is identical across the two rows** —
+`sites=7463 anon=6 sitesAll=7569 restored=4470 restoredSites=4188
+dropped=37 recorded=849` on the best cold rakudo run, and
+`sites=3012 anon=4 sitesAll=3059 restored=1644 restoredSites=1634
+dropped=30 recorded=257` on the best cold nqp run, with the new
+`staleSchema=0` on both — so the fix wave changed no behaviour, only the
+guards around it. The two clocks moved 2.272 -> 2.247 s and 1.203 ->
+1.198 s, inside the spread; the phase claims neither as a delta.
+
+**Two programs, two `recorded` figures — do not read them as one series.**
+The build trains on `-e ''`, so the figure the mechanism is claimed on is
+a cold `rakudo-j -e ''`: `recorded=` **4723 untrained -> 195 trained**.
+The rig's program is `-e 'say 1'`, which the build never trained, and its
+unit is in-memory, so its own sites have no identity and no slot: it
+reads `recorded=849`. Both are correct; they measure different programs.
+The same split applies to nqp: `-e ''` trains to `recorded=87`, the rig's
+`say(1)` reads `recorded=257`.
+
+**Read the table honestly.** Across the whole milestone the cold rakudo
+clock went **2.502 s -> 2.247 s** and only two rows moved anything
+outside the series' own spread (2.50-2.64 s): `A6'`, which took misses
+6815 -> 5661, and `c`, which took hits 100711 -> 35512 and the clock
+2.461 -> 2.272 s. Everything between them is inside the noise, and the
+milestone says so rather than summing deltas.
+
+**The A7 promotion list is empty, and stays open.** Phase A Step 8's
+trigger was cold `rakudo -e` above 2.64 s or warm `t/02-rakudo` above
+~3210 s; row `a7` read 2.611 s and 3165 s, so the step never ran and **no
+classlib op was promoted to a sited node**. Milestone 8 inherits the
+list as it is: empty, with `NQP_CLASSLIB_INLINE=1` as the one-command
+A/B.
+
+### The close's own gates, with their clocks
+
+| gate | result | wall |
+|---|---|---|
+| `Configure.pl --backends=jvm --gen-nqp` | `dispatch-record: done 9 paths, 1683 slots, 1711 programs, 41 unpersistable, 0 failed` | **4.3 s** |
+| full `make` | exit 0, `+++ Training dispatch slots` once | **888 s** |
+| v6c inside it | 165 s -> 540 s | 375 s |
+| `blib/CORE.c.setting.jar` inside it | parse 223.037 / optimize 22.040 / qast 16.729 / unit 20.701 | **296 s** (stage sum 282.5 s) |
+| the training log | `done 21 paths, 4282 slots, 4584 programs, 50 unpersistable, 0 failed`, no `FAILED` line | - |
+| `t/01-sanity`, default | 25/25, 303 tests, PASS | **57 s** |
+| cold `-e ''` stats | `restored=4475 restoredSites=4193 dropped=37 staleSchema=0 recorded=195` | - |
+| nqp suite, verify (re-taken: the schema changed) | 155/155, 11 processes, matched 271378, byOutcome 1309, **mismatched=0**, unseen 116617 | **208 s** |
+| `t/01-sanity`, verify | 25/25, matched 117438, byOutcome 327, **mismatched=0**, unseen 73949 | **51 s** |
+| the rig | row `close` above | 5 cold runs each + the warm proxy |
+
+### The two milestone clocks
+
+| clock | milestone baseline | at the close | source |
+|---|---|---|---|
+| cold `rakudo-j -e 'say 1'` | 2.68 s (2026-09-13, after the wire fix) | **2.247 s** (-16 %) | rig row `close` |
+| cold `nqp-j-gradle -e 'say(1)'` | 1.12 s (same) | **1.198 s** (+7 %) | rig row `close` |
+| whole `t/`, one warm server | 5078 s / 427 files (2026-09-13) | **not gathered** — the run truncated at file 310 of 482 (`docs/jvm-full-suite-run-2026-09-16.md`) | this close's sweep, recorded as not gathered |
+| `blib/CORE.c.setting.jar` | 297 s (milestone 6 close) | **296 s** | this close's `make` |
+
+**CORE.c is flat across milestone 7**, which is the expected result: the
+milestone's levers are all on first *execution*, and the two that touch
+the compile side (A8c's graph shape, Phase C's training pass) pay for
+themselves inside the noise. The training pass itself costs 3 s of the
+888 s build (885 s -> 888 s).
+
+### The suite clock, and one new red
+
+**The whole-`t/` run did not complete, and its clock is not gathered.**
+482 files, one warm 6 GB server, 3361 s wall — but the server stopped
+producing TAP at file 310 (`t/02-rakudo/thread-unhandled-exception.t`),
+and the remaining 172 each reported `Tests: 0` and `No plan found in TAP
+output`. It was not the low-memory guard (the banner printed, 310 files
+ran, `MemAvailable` fell 24.4 -> 15.6 GB and recovered, no `Killed`, no
+`OutOfMemory`, empty `dmesg`), and it was not any single file (the four
+around the break pass together on a fresh server, 81 tests in 66 s; files
+from the dead stretch pass directly). It is the single-server sweep
+wedging after ~285 files of `t/02-rakudo`. Per the user rule of
+2026-09-15 it is **not re-run**; the evidence is in
+`docs/jvm-full-suite-run-2026-09-16.md` and the next planned suite
+measurement takes the clock.
+
+Over the 310 files that did run, twenty of the twenty-four baseline reds
+are red, four are green, and there is **one new red**:
+
+    t/02-rakudo/closure-static-clone.t   test 5, ".clone through the
+    method road still works": expected 'documented', got ''
+
+It reproduces under `./rakudo-j -Ilib` outside any harness, and it
+**still fails with `NQP_DISPATCH_PERSIST=off`**, so Phase C's persisted
+miss is not the cause. The test was added by A6' itself (rakudo
+`d6d5a2ea7e`) and passed then, so the regression sits between that commit
+and the close — Phase B's artifact rework or one of the two upstream
+rebases. Unbisected: each step is a ~900 s build. **It is an open item of
+the close, not a closed one.**
+
+### What milestone 7 left
+
+Carried out of Phase C's item (f), Phase B's item (f), the fix wave's
+deferrals and the lazy-loading spec, in the order a milestone-8 plan
+would meet them:
+
+1. **Lazy-loading phase 2 — SC demand deserialization.** Phase B made
+   the SC blob a mapped `ByteBuffer` and phase 1 is done; phase 2 is
+   what remains of
+   `docs/superpowers/specs/2026-09-13-jvm-lazy-unit-loading-design.md`.
+2. **The compression question is presented, not decided** (ruling 11,
+   item (e) of the Phase C section): deflating `unit.records` +
+   `unit.programs` (~26 MB of CORE.c's 56 MB) roughly halves the jar and
+   costs 20-80 ms of inflate on every cold start, against an
+   `open-store` stage of 2.07 ms. Clock-negative by construction; **the
+   user's call.**
+3. **Training is not bit-reproducible** (ruling 21): about 1 % of slots
+   vary run to run from execution-order variation in the training run.
+   The consequence is wider than the slots: **a built artifact is no
+   longer byte-for-byte reproducible from its sources**, which is a cost
+   against build caching, against content-addressed distribution, and
+   against a Native Image build that wants a fixed image heap. Verify is
+   the net that says the varying slots are still correct; it is not a
+   reproducibility guarantee. A two-dump diff of two gradle trainings
+   was deferred.
+4. **Neither build marker has a slot-quantity floor.** Both require the
+   recorder's `done` line and the absence of `FAILED` (ruling 24), so a
+   training run that rewrote every path with *zero* slots would still
+   pass. The quantities are printed (`4282 slots` in `make`,
+   `1683 slots` in `buildJvm`) but nothing asserts a minimum.
+5. **`done`'s `unpersistable` and `failed` counts overlap**: a program
+   whose `persist` threw is counted in both, so the two columns do not
+   sum to a partition of the programs.
+6. **`t/02-rakudo/closure-static-clone.t` is red** (test 5: `$!why`
+   does not survive a clone through the method road), reproducibly and
+   with `NQP_DISPATCH_PERSIST=off`. Introduced between A6' (rakudo
+   `d6d5a2ea7e`, which added the test) and the close; unbisected.
+7. **The single-server sweep wedges after ~285 files of `t/02-rakudo`**,
+   which is what cost the close its suite clock. Whatever measures the
+   suite next has to settle this first.
+8. **The warm clock's open question.** Rig row `b` read a warm proxy of
+   50 s, `c` 63 s and `close` 59 s, while `t/harness5 --evalserver` on
+   the same directory read 49-57 s across Tasks 6-8 and this close.
+   Single samples on every side, never re-run (user rule). Nothing in
+   the design predicts a warm regression — a restored program is the
+   program the site would have recorded — and the whole-`t/` run that was meant to settle it did not complete (below), so it stays open for milestone 8.
+9. **The ~1.3 % slot erosion** (ruling 20): training Rakudo after nqp
+   lets a Raku-flavoured program win an nqp site's slot. Cause known
+   (`no SC`), accepted.
+10. **`Configure.pl` invalidates the whole build**, so there is no cheap
+   "retrain only" path: removing `blib/.dispatch-trained` costs a full
+   ~888 s `make`.
+11. **The empty promotion list** (A7 Step 8) and the **classlib
+   boundary's deopt-on-exception** narrow claim, whose A/B is
+   `NQP_CLASSLIB_INLINE=1` on a workload that throws *through* a
+   classlib op.
+12. **`NqpTypeOps.create` still misses unconditionally** on a
+    layout/REPRData mismatch — uncountable by construction.
+13. **The in-build stage `JavaExec` tasks are still on the boot class
+    path** (`nqp/build.gradle.kts`), so runtime-tree boundaries stay
+    invisible to the JVM that compiles nqp's own stages. A7b fixed the
+    generated runners, not these.
+14. **Hygiene**: `evalserver-sweep.raku` silently accepts a non-existent
+    explicit target; the five Rakudo units still share
+    `--javaclass=perl6`; the corrupt-artifact bounds list in Phase B's
+    item (f) is unspent; any `build.gradle.kts` edit recompiles both nqp
+    stages.
+15. **Stage0 is still nine UNCOMMITTED v2 jars in the nqp working tree**
+    (user rule: no jar is committed until the user says so), so a fresh
+    clone of the pushed branch does not build. The working tree is the
+    source of truth until the rule is lifted.
+
+The collected deferred minors — schema, consumer, writer, build — are in
+Phase C's item (f) and Phase B's item (f) above; none was ruled a
+defect.
 
 ## Things that cost time to learn
 

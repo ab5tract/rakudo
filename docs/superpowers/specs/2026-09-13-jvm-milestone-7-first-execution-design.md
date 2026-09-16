@@ -465,3 +465,27 @@ costs one runtime rebuild and one rig run, not a gate.
 - Both clocks re-measured on the final build and recorded against
   2.68 s and 5078 s; CORE.c recorded from the last make.
 - Docs, memory, rebase and push per "The close".
+
+**Milestone 7: closed 2026-09-16** (rakudo `6217a89e61`, nqp
+`a837bf1bb` -- row `c`'s tree plus the final review's fix wave; the nine
+v2 stage0 jars stay uncommitted by user rule). Every item of "Done"
+above is met. A1-A8 are landed or struck with their four numbers and
+hashes in the findings; Phase B passed its window sequence, stage0 was
+regenerated once and the v1 reader deleted; Phase C passed the verify
+gate at `mismatched=0` -- re-taken on the fixed tree after the schema
+version landed, and with `staleSchema=0` on a cold run -- and the
+dispatch counters show the persisted share (`restored=4475` at 4193
+sites against `recorded=195` on the program the build trains). Both
+clocks were re-measured on the final build: cold `rakudo -e` **2.247 s**
+against the 2.68 s baseline, cold `nqp -e` 1.198 s against 1.12 s, and
+`blib/CORE.c.setting.jar` **296 s** from the last `make` (888 s, one
+`+++ Training`). The whole-`t/` clock against 5078 s is **not gathered**: the sweep's single server stopped producing TAP at
+file 310 of 482 and the user rule forbids re-running a failed benchmark
+(`docs/jvm-full-suite-run-2026-09-16.md`). The 310 files that did run
+hold one new red, `t/02-rakudo/closure-static-clone.t`, which is not
+Phase C's doing -- it fails with `NQP_DISPATCH_PERSIST=off` too.
+What the milestone left -- lazy-loading phase 2, the compression
+decision, training's ~1 % run-to-run variation and the reproducibility
+it costs, the markers' missing quantity floor, the empty A7 promotion
+list, the warm-clock question -- is listed in
+`docs/jvm-perf-findings-2026-09.md`, "Milestone 7: the close".

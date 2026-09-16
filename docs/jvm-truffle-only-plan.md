@@ -84,26 +84,47 @@ position table (kept below as history) is unchanged for items 1-3 and
   CORE.c 283/280/281 s. Format doc: `docs/jvm-unit-lazy-loading.md`;
   numbers: `docs/jvm-perf-findings-2026-09.md`, "Milestone 7, Phase B".
 
-**Cold start, the persisted miss (2026-09-16).** Milestone 7 Phase C
-filled the `unit.dispatch` table Phase B wrote empty (rakudo
-`79829d402e` / nqp `f5c5bc8fa`): both builds run one training pass of
-the trivial program, and every site now restores its recorded dispatch
-programs at its first miss instead of running the dispatcher's guest
-code. On the trivial program `recorded=` falls 4723 -> 193 and `hits=`
-80298 -> 13292; rig row `c` reads cold `rakudo -e` 2.272 s (from
-2.461 s), cold `nqp -e` 1.203 s, misses 4931, hits 35512, with the
-verify gate at zero mismatches. **Next: the milestone 7 close -- whole
-`t/` once on one warm server -- and then the compression decision and
-lazy-loading phase 2 (SC demand deserialization).**
+**Milestone 7 closed 2026-09-16** (rakudo `6217a89e61` / nqp
+`a837bf1bb`, plus nine v2 stage0 jars that stay UNCOMMITTED by user
+rule). The milestone was "first execution", and it ran in three phases:
+**A** measured ten runtime levers one at a time and landed three of them
+(A7b, the generated runners on the class path, so the runtime tree's
+`@TruffleBoundary`s are real; A8c, one constant `MethodHandle` per
+attribute-cache branch, which made `raku-invoke` -- the busiest root of
+a cold run -- compile at all; and A6', a native static clone road, which
+took dispatch misses 6815 -> 5661); **B** rewrote the unit artifact as
+**version 2** -- a stored, mappable zip, a `BlockRecord` per block, lazy
+`StaticCodeInfo` bodies, one load road, site identity through the
+compile key, and an empty `unit.dispatch` table -- clock-neutral at the
+top level and structural underneath; **C** filled that table: both
+builds run one training pass of the trivial program, and every site now
+restores its recorded dispatch programs at its first miss instead of
+running the dispatcher's guest code. On the program the build trains,
+`recorded=` falls **4723 -> 195** and `hits=` **80298 -> 13292**. Rig
+row `close`: cold `rakudo -e` **2.247 s** (from the milestone's 2.68 s
+baseline, -16 %), cold `nqp -e` 1.198 s, misses 4931, hits 35512, with
+the verify gate at `mismatched=0` over the nqp suite and `t/01-sanity`
+and `staleSchema=0` on a cold run. CORE.c is unchanged at 296 s: this
+milestone bought first execution, not compile time. **What it left:**
+lazy-loading phase 2 (SC demand deserialization), the compression
+decision (presented with numbers, the user's call), training's ~1 %
+run-to-run variation and what it costs reproducibility, the empty A7
+promotion list, the warm-clock question, one new red (`t/02-rakudo/closure-static-clone.t`, not
+Phase C's doing -- it fails with `NQP_DISPATCH_PERSIST=off` too), and the
+suite clock itself: the close's whole-`t/` run wedged its server at file
+310 of 482 and is recorded as **not gathered**
+(`docs/jvm-full-suite-run-2026-09-16.md`). Full table:
+`docs/jvm-perf-findings-2026-09.md`, "Milestone 7: the close".
+**Next: milestone 8, an `Assumption` per STable.**
 
 | item | state on 2026-09-13, cold start updated 2026-09-15 |
 |---|---|
 | 1 plain call | unchanged: partial, paused (per-call `Object[]`, mainline OSR shape) |
 | 2 language id | unchanged: partial, paused (slice 2: hllbool, box types, hlllist/hllhash) |
 | 3 calling convention | unchanged: partial, paused (`NQP_CODE_NOFRAME` off, dispatch blocks deferred) |
-| 4 compiler workload | **measured twice, partly landed** (milestone 6 + the 2026-09-12 timings). Tier policy + one compiler thread on every setting compile and on `J_NQP_RR`: CORE.c 434 -> 297 s, clean make 985 -> 922 s. Ceiling found: guest compilation is at most 17.5 % of a CORE.c compile, so this item cannot move CORE.c much further by knobs. Open inside it: the eight items milestone 6 handed to milestone 7 (`docs/jvm-perf-findings-2026-09.md`, "What milestone 7 inherits"), six of them one pattern (slow paths visible to the inliner: `nqp/src/vm/jvm/runtime` still has zero `@TruffleBoundary` against 113 in `nqp/nqp-truffle/src`, re-counted 2026-09-13); v6c unprofiled; setting compilation not idempotent |
+| 4 compiler workload | **measured twice, partly landed**, and milestone 7 closed the *execution* half rather than this one. Tier policy + one compiler thread on every setting compile and on `J_NQP_RR`: CORE.c 434 -> 297 s, clean make 985 -> 922 s; the close's `make` reads CORE.c **296 s** and the whole build 888 s, so milestone 7 moved this item **not at all**, as designed. Ceiling found: guest compilation is at most 17.5 % of a CORE.c compile. Milestone 7 closed two of the eight items it inherited (the `raku-invoke` bailout half of item 1 via A8c, and the boundary-visibility half via A7b) and left the rest, including the empty A7 promotion list and the in-build stage `JavaExec` tasks still on the boot class path; v6c unprofiled (375 s here, the build's largest single compile); setting compilation not idempotent |
 | 5-9 | DONE, unchanged (milestones 1-5) |
-| cold start (outside the nine) | **phase 1 DONE 2026-09-15** as milestone 7 Phase B (artifact v2, the mapped store, lazy bodies, site identity, the empty dispatch table; rakudo `107eca63a3` / nqp `318558c2d`). It is clock-neutral at the top level -- cold `rakudo -e` 2.504 -> 2.461 s, cold `nqp -e` 1.192 -> 1.160 s, both inside the spread -- and its real result is per stage and structural: the decode stage is gone, eager static-lexical application is gone, the SC blob is mapped and ready for demand reading, and every dispatch site now has a stable (unit, program, ordinal) address. **Phase 2 (SC demand deserialization) is what remains of the lazy-loading spec**; the SC slice is already handed to the reader as a `ByteBuffer`. **Phase C (the persisted miss) is DONE 2026-09-16** (rakudo `79829d402e` / nqp `f5c5bc8fa`): the dispatch table is filled by a training run in both builds, `recorded=` 4723 -> 193 on the trivial program, row `c` cold `rakudo -e` 2.272 s. What remains of milestone 7 is its close (whole `t/` once) |
+| cold start (outside the nine) | **milestone 7 CLOSED 2026-09-16** (rakudo `6217a89e61` / nqp `a837bf1bb`). Phase 1 of lazy loading landed as Phase B (artifact v2, the mapped store, lazy bodies, site identity) and is clock-neutral by design; Phase C filled the dispatch table from a training run in both builds, and that is where the clock moved: cold `rakudo -e` **2.68 -> 2.247 s**, `recorded=` 4723 -> 195 on the trained program, hits 100711 -> 35512. **Phase 2 (SC demand deserialization) is what remains of the lazy-loading spec.** Left open at the close: the compression decision, training's ~1 % run-to-run variation (artifacts are no longer reproducible byte for byte), one new red (`closure-static-clone.t`), and the suite clock, not gathered because the sweep's single server wedged at file 310 of 482 |
 
 **Against the north star.** `docs/jvm-truffle-migration.md` is at its
 end state except for two entries of its Phase 5 inventory: the calling
