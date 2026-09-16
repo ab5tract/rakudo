@@ -122,6 +122,20 @@ the starting point:
    is under 30 minutes; the worktree is the source of truth and both
    trees rebase onto their upstream mains at every handoff.
 
+7. **Revision 1 (2026-09-16, user decision): lazy-loading phase 2 is
+   milestone 8's Phase C, after Phase B.** The user asked why lazy
+   loading had bought so little cold start; the honest answer is that
+   phase 1 (artifact v2, lazy bodies) was clock-neutral because the
+   setting's load-time execution dominates and the serialization context
+   is still read eagerly in full (28 MB raw for CORE.c), and that phase 2
+   (SC demand deserialization, `docs/superpowers/specs/2026-09-13-jvm-lazy-unit-loading-design.md`)
+   had been left unscheduled by milestone 7's close and by this spec's
+   first revision. The lazy spec's estimate for phases 1 and 2 together
+   was about 21 % of the cold run, none of it delivered by phase 1. Phase
+   C's first task measures phase 2's own share on the current build
+   (`NQP_UNIT_LOAD_STATS=1`) before anything is designed; its plan is
+   brainstormed after Phase B closes. Sections 5 and 6 are amended below.
+
 ## Section 1: the type state
 
 `STable` splits in two. What stays on it is identity and structure:
@@ -351,6 +365,16 @@ promotion bought.
   carries encoder rows, one rig row, one ledger entry per op; boundary
   trims ride along in the same build. Phase B ends by the stop rule.
 
+**Phase C (Revision 1): lazy-loading phase 2, SC demand deserialization.**
+- **C0:** measure the SC read's share of the cold run on the Phase B
+  close tree (`NQP_UNIT_LOAD_STATS=1` per stage, `tools/build/unit-load-profile.raku`),
+  so the 21 % estimate becomes a number before any design.
+- **C1..Cn:** the lazy-loading spec's phase 2 as designed there
+  (`docs/superpowers/specs/2026-09-13-jvm-lazy-unit-loading-design.md`,
+  "Phase 2"), planned with its own brainstorm after Phase B closes; the
+  rig row is `c`; the format may change once (stage0 regenerates once,
+  still uncommitted under the jar rule).
+
 **Rig:** `tools/build/m7-rig.raku` as it stands (cold rakudo-e, cold
 nqp-e, dispatch counters, warm `t/01-sanity` proxy), with the publish
 and census counters added to its parse.
@@ -372,8 +396,9 @@ stage0 is not regenerated and remains the nine uncommitted v2 jars.
 ## Section 6: out of scope, open items, risks
 
 **Out of scope, by decision.** The Native Image road and the auxiliary
-engine cache (milestone 9, decision 3). Lazy-loading phase 2 and the
-compression decision stay where milestone 7 left them. Java interop is
+engine cache (milestone 9, decision 3). Lazy-loading phase 2 is IN scope
+since Revision 1 (Phase C); the compression decision stays where
+milestone 7 left it, to be re-taken with Phase C's numbers. Java interop is
 untouched. The `DynamicObject`/`Shape` migration stays rejected:
 milestone 5's layout is the shape fact, the type state is the type
 fact.
