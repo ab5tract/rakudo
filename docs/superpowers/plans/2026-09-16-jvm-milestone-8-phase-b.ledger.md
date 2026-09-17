@@ -756,7 +756,10 @@ boundary removal changes where a sample is attributed as well as how long the wo
 ### The settle plan for `t/nqp/023-named-args.t` (Task 3)
 
 The settle plan B1 left open, run on rakudo `74cdc5f495` / nqp `76d88cf32` -- batch 1's engine and
-Task 2's jars, nothing rebuilt, retrained or edited for this. Each cell is the same driver
+Task 2's jars. Nothing was rebuilt or edited for this, and the four 2x2 cells retrained nothing --
+but the verify **suite** step did: its own `> Task :trainDispatch` wrote 9 paths (log line 97,
+quoted below), so "nothing retrained" holds of the cells, not of the suite. Each cell is the same
+driver
 (`prove -q --exec ./nqp-j-gradle t/nqp/023-named-args.t`, `:cwd("nqp")`), with the cell's knob in
 front of it and every other knob unset.
 
@@ -782,7 +785,7 @@ log, counting watched-run's echo; the only distinct value of `mismatched=` in th
 **What that covers, stated per process -- and what the counters actually count.** These are
 **recording-event counts, not slot-set sizes**, and the difference decides how much the line is
 worth. `Dispatch.kt:274-275` calls `DispatchPersist.verify` **once per completed recording** at a
-site; `DispatchPersist.kt:163-177` then bumps `verifyMatched` **once per applicable kept program
+site; `DispatchPersist.kt:162-180` then bumps `verifyMatched` **once per applicable kept program
 per recording** (so one recording can bump it more than once, and a hot site that records a hundred
 times contributes a hundred bumps for the one slot), `verifyByOutcome` when the texts differ but
 the outcomes agree, and `verifyUnseen` once per recording whose site has an **empty** kept list or
@@ -790,16 +793,18 @@ no applicable kept program. Since `Dispatch.kt:123` sets `site.verifyPrograms` t
 `restore` returns -- an empty list when nothing was persisted for that site -- `unseen` is
 dominated by **newly recorded sites with no persisted counterpart**, which is the opposite
 population to "persisted slots that went unexercised". The counters that would give the loaded set,
-`restored` / `restoredSites` (`DispatchPersist.kt:60-61`), are not on the verify line at all, so
+`restored` / `restoredSites` (`DispatchPersist.kt:61-62`), are not on the verify line at all, so
 this run reports no loaded-set or distinct-slot figure and none is inferred here.
 
 So: the 256,728 is a sum of **events** over 155 processes, not 256,728 distinct programs. Per
 process, `matched=` has median **1,668** (mean 1,656, min **0**, max 1,681) and `matched+unseen`
 has median **2,350** (mean 2,405, min 1,730, max 4,100) -- and the ceiling on distinct slots behind
-any of it is what **this run's own** `> Task :trainDispatch` wrote: `dispatch-record: done 9 paths,
-**1,681 slots**, 1,709 programs, 41 unpersistable, 0 failed` (log line 97), the set the suite's
-jars carried. (Not B1's 4,191: that is the rakudo tree's retrain, a different set of paths, and it
-does not appear in this log.) A median process's 1,668 `matched=` events against 1,681 persisted
+any of it is what **this run's own** `> Task :trainDispatch` wrote, in the log's own digits:
+`dispatch-record: done 9 paths, 1681 slots, 1709 programs, 41 unpersistable, 0 failed` (log line
+97). Calling that the set the suite's jars carried is an **inference**, not a reading: it is the set
+those nine retrained paths hold, and a unit loaded from an artifact **outside** those nine paths
+could contribute kept programs of its own that this line does not count. (Not B1's 4,191: that is
+the rakudo tree's retrain, a different set of paths, and it does not appear in this log.) A median process's 1,668 `matched=` events against 1,681 persisted
 slots is ~99 % -- of *events to slots*, a ratio that says the events are spread over roughly the
 whole persisted set rather than piled on a few, and nothing more, since the instrument cannot tell
 one slot matched 1,668 times from 1,668 slots matched once. (The observed **max** `matched=` is
@@ -898,7 +903,11 @@ quoted as the finding. One caveat of the same-session pair itself: it is **one c
 the CORE.c clock has no same-configuration repeat in this session at all -- the nearest thing to a
 variance estimate on this workload is the 3 s between the two road-on compiles (266 JFR vs 263
 census) under different instruments -- so 16 s is well outside what little is known of the
-noise, but it is not a repeated measurement. Incidentally the census knob's overhead is no longer
+noise, but it is not a repeated measurement. Stated plainly, for the campaign's stop rule: **the
+CORE.c clock's noise floor is UNMEASURED this session** -- there is no same-configuration repeat on
+it, and the 3 s above is an estimate between two differently instrumented road-on runs, not a
+variance. A **negative** reading on this clock therefore cannot yet end the campaign; part 2 takes a
+same-configuration repeat at b2b, and only against that floor can a null result be read as one. Incidentally the census knob's overhead is no longer
 visible at all: 263 s with the census against 266 s with JFR, the census compile the *faster* of the
 two (at b1r the same pair read 294 vs 286, at B0 356 vs 319).
 
@@ -926,7 +935,10 @@ all six containers the double-counting is 17 and 26 samples, 0.1-0.2 %.)
 
 The kill-switch is a real A/B on the same jars: **`NqpClassLibRoad` is 2074 samples with the road on
 and exactly 0 with `NQP_SITES_OFF=classlib`**, and the variadic container is the mirror image
-(137 against 2385). The road's own entry table at b2a is
+(137 against 2385). Note for anyone comparing knob runs across batches: `off()` in
+`NqpProgramBuilder` treats `all` as every name, so **`NQP_SITES_OFF=all` now switches the typed
+classlib road off too** -- batch 1's `all` A/B numbers (which could only disable batch 1's sites) and
+an `all` run on this tree are measuring different amounts of engine and are **not comparable**. The road's own entry table at b2a is
 `ClassLib2.doCall` 607 (29.3 % of the container), `ClassLib1` 560, `ClassLib3` 409, `ClassLib4` 220,
 `ClassLib0` 123, `ClassLibLong1` 76, `ClassLibLong2` 40, `ClassLibLong3` 39 -- **the long flavour is
 155 of 2074 samples, 7.5 %** (and 93 of the 1250 road leaves, 7.4 %). The 1250 is re-derivable in
@@ -980,7 +992,12 @@ therefore take the **Object** flavour: one exact handle and no argument array, b
 result. The measurement above is consistent with that: the long flavour is 7.5 % of the road's
 samples, so **the -5.7 % is the exact-handle-plus-arity-node change, essentially none of it the
 primitive return**. Whatever the long flavour is worth is still unmeasured, and siting `elems` and
-friends (6.3) is what would let it apply to them.
+friends (6.3) is what would let it apply to them. And the change is narrower still than
+"exact handle": behind the default `@TruffleBoundary` the `invokeExact` inside each `callN` remains
+**one JVM call site shared by every instruction of that arity and flavour** -- eight sites for the
+process, not one per instruction; per-instruction folding of the `@CompilationFinal` handle happens
+only under `NQP_CLASSLIB_INLINE` -- so what the default road actually removes, and what the -5.7 %
+buys, is **the two `Object[]` allocations and the spreading/boxing adapter**.
 
 Rulings:
 1. The long flavour serves context-free INT/UINT ops of arity 1-3 only (plan Ruling 1; a deviation
@@ -1007,9 +1024,16 @@ Rulings:
    brief asked for, duly reads `classlib 1.0 %` and `outside all 52.1 %`. All three recordings were
    therefore re-attributed with an explicit six-container set into
    `m7-rig/{b1r,b2a,b2a-off}-corec-jfr-full.txt`, which is what this section's table reports; the
-   `--ops` files are kept beside them, unedited, as produced. **The tool was not changed** (this
-   task writes no code); updating the `--ops` preset to name the two new patterns is left to
-   whoever next touches it.
+   `--ops` files are kept beside them, unedited, as produced. **The tool was not changed by that
+   task** (it writes no code). **Fixed in the final-review fix wave** (this commit): the `--ops`
+   preset in `tools/build/jfr-attribute.raku` now names the six containers this section used by hand
+   -- `table=NqpOps.run classlib=NqpOps.classlib classlib-typed=NqpClassLibRoad sites=NqpTypeOps
+   sites2=NqpSiteOps dispatch=NqpDispatch`. Validated by re-attributing all three recordings with
+   the plain `--ops` flag: `corec-b2a.jfr`, `corec-b2a-off.jfr` and `corec-b1r.jfr` each reproduce
+   their `-full` table's six container lines **sample for sample**, `outside all` included (b2a
+   2358/137/2074/244/155/2362, outside 5122; b2a-off 2182/2385/0/211/122/2285, outside 5180; b1r
+   2208/2404/0/344/0/2371, outside 5366). The stale-preset `m7-rig/*-corec-jfr.txt` files are left
+   untouched as the record of what the old preset reported.
 6. Every CORE.c compile here ran on `/usr/bin/perl rakudo-j-build` (B0's Ruling 7, as at b1r); every
    other token of the brief's command lines is verbatim, including the file names.
 

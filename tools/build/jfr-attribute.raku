@@ -7,9 +7,12 @@
 # hottest leaf frames and the hottest project frames (org.raku.*, excluding
 # the generated interpreter classes), counted once per sample (inclusive).
 #
+# Containers are given as bare `name=frame-substring` positionals (there is no
+# --container option; the slurpy @container collects them):
+#
 #     raku tools/build/jfr-attribute.raku prof/rakudo-e.jfr
-#     raku tools/build/jfr-attribute.raku --container='load-block=runLoadIfAvailable' \
-#         --container='deserialize=runDeserializeIfAvailable' --top=15 file.jfr
+#     raku tools/build/jfr-attribute.raku load-block=runLoadIfAvailable \
+#         deserialize=runDeserializeIfAvailable --top=15 file.jfr
 
 sub MAIN(
     Str  $jfr,                        #= the recording
@@ -17,16 +20,22 @@ sub MAIN(
     Int  :$top = 12,                  #= rows per table
     Str  :$thread,                    #= only samples on this thread name
     Bool :$innermost = False,         #= match only the Java frames between the leaf and the nearest interpreter frame (exclusive shares)
-    Bool :$ops = False,               #= per-op exclusive view: containers = the generic op entries, the sites, dispatch; implies --innermost
+    Bool :$ops = False,               #= per-op exclusive view: the six op containers (generic table, classlib boundary, typed classlib road, both site files, dispatch); implies --innermost
     *@container,                      #= name=frame-substring pairs; default: the unit load stages
 ) {
     # --ops overwrites @container wholesale, so given both, one of them is
     # silently ignored. Check before the default fills @container in.
-    die "--ops and --container are mutually exclusive" if $ops && @container;
+    die "--ops and explicit name=frame containers are mutually exclusive" if $ops && @container;
     @container ||= <load-block=runLoadIfAvailable deserialize=runDeserializeIfAvailable
                     build-table=ProgramUnit.buildTable sc=SerializationReader.deserialize
                     decode=UnitLoader.readRecord parse-program=NqpWire.decode>;
-    @container = <table=NqpOps.run classlib=NqpOps.classlib sites=NqpTypeOps dispatch=NqpDispatch> if $ops;
+    # The six containers the B2a ledger section reads by hand: the generic op
+    # table, the untyped classlib boundary, the typed classlib road, both site
+    # files (NqpSiteOps was split out of NqpTypeOps in milestone 8 batch 2), and
+    # dispatch. Keep this list in step with the engine's file names -- a moved
+    # class silently lands in 'outside all'.
+    @container = <table=NqpOps.run classlib=NqpOps.classlib classlib-typed=NqpClassLibRoad
+                  sites=NqpTypeOps sites2=NqpSiteOps dispatch=NqpDispatch> if $ops;
     my $inner = $innermost || $ops;
     my @c = @container.map({ my ($n, $p) = .split('=', 2); %( :name($n), :pat($p) ) });
     my $p = run 'jfr', 'print', '--events', 'jdk.ExecutionSample', '--stack-depth', $depth, $jfr, :out;
