@@ -772,11 +772,23 @@ The 2x2 is a real 2x2: both knobs are read by name from the process environment
 `System.getenv("NQP_DISPATCH_PERSIST")`, whose `off` arm ignores persisted slots), so the four
 cells are four configurations and not four spellings of one.
 
-nqp suite under `NQP_DISPATCH_PERSIST=verify`: **Result: FAIL**, Files=154 Tests=13247, prove
-**528 s** / gradle **530 s** (`BUILD FAILED in 8m 50s`), `mismatched=0` on **every one of the 155
-verify lines** the run printed (310 occurrences in the log, counting watched-run's echo; the only
-distinct value of `mismatched=` in the whole file is `0`, over 256,728 matched programs).
-`t/nqp/023-named-args.t .................. ok` in that same run.
+nqp suite under `NQP_DISPATCH_PERSIST=verify`
+(log: `/home/longwalker/.claude/jobs/584f1b84/tmp/nqp-suite-verify-b2.log`): **Result: FAIL**,
+Files=154 Tests=13247, prove **528 s** / gradle **530 s** (`BUILD FAILED in 8m 50s`),
+`mismatched=0` on **every one of the 155 verify lines** the run printed (310 occurrences in the
+log, counting watched-run's echo; the only distinct value of `mismatched=` in the whole file is
+`0`). `t/nqp/023-named-args.t .................. ok` in that same run.
+
+**What that covers, stated per process.** The 256,728 is a sum over processes, not a count of
+distinct programs: the 155 `matched=` values are 1,656 on average (median 1,668, min **0**, max
+1,681), i.e. **on the order of 1,670 slots re-derived 155 times over**, not 256,728 distinct ones.
+The `min=0` is the one process that verified nothing, and it is not a test file: it is the build's
+own `> Task :trainDispatch` step at [2s] (`matched=0 byOutcome=0 mismatched=0 unseen=1730`, log
+line 77), which is why there are 155 verify lines for 154 files. And each process leaves a large
+part of the persisted set untouched: `unseen=` runs **183 to 2,430** (median 692, mean 749), so at
+the medians a process verifies 1,668 of the 2,360 slots it loaded and 1,668 of the **4,191** the
+retrain wrote -- under half of the trained set, in any one process. The verify road's reach here is
+one shallow pass over the commonly-loaded slots, repeated; it is not a sweep of the persisted set.
 
 **The FAIL is the knob's own banner, not a red.** The single failing test is
 `t/nqp/114-pod-panic.t` (`Wstat: 0 Tests: 1 Failed: 1`), which spawns a child `nqp` and matches its
@@ -785,10 +797,10 @@ inherits `NQP_DISPATCH_PERSIST=verify` and prints `dispatch-verify: on` to stder
 so the anchor cannot match. Confirmed directly and deterministically: `./nqp-j-gradle
 t/nqp/114-pod-panic.t` is `ok 1` (2.8 s) and the same command under
 `NQP_DISPATCH_PERSIST=verify` is `not ok 1` (3.1 s), and `-e` with the streams separated shows both
-`dispatch-verify:` lines going to stderr. So the verify suite is green on everything verify is for
--- it is a property of running a whole suite under a stderr-printing knob, and a note for whoever
-takes the next verify suite: that one file will fail under it until the banner moves or the test
-filters it.
+`dispatch-verify:` lines going to stderr. The suite's verdict stays **FAIL**; what can be said is
+narrower, that **the verify road itself reported no mismatch**. The FAIL is a property of running a
+whole suite under a stderr-printing knob, and a note for whoever takes the next verify suite: that
+one file will fail under it until the banner moves or the test filters it.
 
 Verdict: **not reproduced in 80 file runs and one verify suite; the red stays an open item with no
 attribution, and B2's suite runs are its next chance.** What the four cells add to B1's ranked
@@ -796,5 +808,8 @@ candidates is only negative: 80 runs of the file, including 20 with batch 1's si
 and 20 with persisted slots ignored, produce no failure, so no cell is implicated and none is
 cleared either -- the plan's power against a once-in-hundreds intermittent was never large. The
 one thing the verify suite does narrow is candidate (a), the misbound persisted `lang-meth-call`
-slot: 256,728 restored programs were re-derived and compared with `mismatched=0`, which is evidence
-against a *systematic* misbind on this tree, though not against a racing or one-shot one.
+slot: every restore the run made was re-derived and compared with `mismatched=0` -- but, per the
+coverage above, that is ~1,669 slots per process over 155 processes (one of them 0), with
+`unseen=183-2,430` never exercised in any given one, so it is evidence against a *systematic*
+misbind **among the commonly-loaded slots** on this tree, and no evidence at all about the unseen
+remainder, a racing misbind or a one-shot one.
