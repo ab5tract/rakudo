@@ -42,7 +42,10 @@ subset Suite of Str where 'rakudo' | 'nqp';
 # until the file list exists to resolve it against.
 subset Chunk of Str where { $_ eq '*' || (/^ \d+ $/ && .Int > 0) };
 
-sub MAIN(
+#| Print the census block the sweep would lift out of FILE (the largest block); a test hook.
+multi sub MAIN(Str :$census-block!) { say largest-census-block($census-block.IO.slurp) }
+
+multi sub MAIN(
     *@targets,
     Suite :$suite = 'rakudo',  #= rakudo (t/harness5) or nqp (prove inside nqp/)
     Int  :$heap,               #= GB of heap per server (default 6, less on a tight box)
@@ -115,7 +118,7 @@ sub MAIN(
              ~ ($code == 0 ?? 'ok' !! 'FAIL')
              ~ ($out ~~ /'No subtests run'/ ?? '  *** a file produced no TAP ***' !! '');
         if %*ENV<NQP_OP_CENSUS>:exists {
-            my $block = census-block($out);
+            my $block = largest-census-block($out);
             say $block || "evalserver-sweep: no op census block for chunk $i";
         }
         %( :$i, :files(@batch), :$code, :$out )
@@ -136,24 +139,22 @@ sub MAIN(
     exit @failed ?? 1 !! 0;
 }
 
-# NQP_OP_CENSUS makes the eval server print its op census when it exits. That
-# goes to the server's stderr, which the chunk runners fold into the chunk's
-# output -- and the sweep only ever prints a chunk's output when the chunk
-# FAILED, so a green sweep dropped the block on the floor and m7-rig's
-# --census found nothing to parse. Lift the block out for every chunk instead.
-#
-# Selected by PREFIX over the whole text, not as a contiguous run: the census
-# and the dispatch stats are printed by two shutdown hooks, which the JVM runs
-# CONCURRENTLY, so a `dispatch stats:` line (or anything else a dying server
-# says) can land in the middle of the census and cut a run short. The census
-# lines are self-identifying, so order of appearance is all that is needed.
-sub census-block(Str $text --> Str) {
-    $text.lines.grep({
-           .starts-with('op census:')
-        || .starts-with('  table ')
-        || .starts-with('  classlib ')
-        || .starts-with('  site ')
-    }).join("\n")
+# The text a census is read from can hold several JVMs' blocks (a sweep
+# captures every process started under NQP_OP_CENSUS, helpers included);
+# the one to read is the largest by its table total. Blocks are the runs
+# of census-shaped lines from one `op census:` header to the next; other
+# lines (dispatch stats, TAP) may be interleaved and are dropped.
+# Kept identical to m7-rig.raku's copy; the two scripts are standalone.
+sub largest-census-block(Str $text --> Str) {
+    my @blocks;
+    for $text.lines {
+        if .starts-with('op census:') { @blocks.push([$_]) }
+        elsif @blocks && (.starts-with('  table ') || .starts-with('  classlib ') || .starts-with('  site ')) {
+            @blocks.tail.push($_)
+        }
+    }
+    return '' unless @blocks;
+    @blocks.max({ .[0] ~~ / 'table=' (\d+) / ?? +$0 !! -1 }).join("\n")
 }
 
 # t/harness5 starts and stops its own server.

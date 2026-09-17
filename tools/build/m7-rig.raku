@@ -69,7 +69,25 @@ sub parse-cold(Str $text) {
     %r
 }
 
-sub parse-census(Str $text) {
+# The text a census is read from can hold several JVMs' blocks (a sweep
+# captures every process started under NQP_OP_CENSUS, helpers included);
+# the one to read is the largest by its table total. Blocks are the runs
+# of census-shaped lines from one `op census:` header to the next; other
+# lines (dispatch stats, TAP) may be interleaved and are dropped.
+sub largest-census-block(Str $text --> Str) {
+    my @blocks;
+    for $text.lines {
+        if .starts-with('op census:') { @blocks.push([$_]) }
+        elsif @blocks && (.starts-with('  table ') || .starts-with('  classlib ') || .starts-with('  site ')) {
+            @blocks.tail.push($_)
+        }
+    }
+    return '' unless @blocks;
+    @blocks.max({ .[0] ~~ / 'table=' (\d+) / ?? +$0 !! -1 }).join("\n")
+}
+
+sub parse-census(Str $raw) {
+    my $text = largest-census-block($raw);
     my %r;
     if $text ~~ / 'op census: table=' (\d+) ' classlib=' (\d+) ' siteCalls=' (\d+) ' siteMisses=' (\d+) / {
         %r<table> = +$0; %r<classlib> = +$1; %r<site-calls> = +$2; %r<site-misses> = +$3;
