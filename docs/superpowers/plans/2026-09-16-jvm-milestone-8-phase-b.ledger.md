@@ -1108,9 +1108,11 @@ inside it (244 s) although it carries a different instrument. From here a batch 
 only outside that spread. What B2a could only estimate at 3 s between two differently instrumented
 runs is now measured on two identical ones, and it is smaller.
 
-Against that floor, b2a -> b2b is **266 -> 243/245 s, -21 to -23 s = -8.3 %**, an order of magnitude
-outside the spread, and it is **parse** that carries it (205.5 -> 187.7, **-17.8 s = -8.7 %**) with
-`unit` second (20.0 -> 16.8/17.0, -3.0 s = -15 %); `optimize` and `qast` move -1 to -3 %. The pair
+Against that floor, b2a -> b2b is **266 -> 243/245 s, -21 to -23 s = -7.9 to -8.7 %**, an order of
+magnitude outside the spread, and it is **parse** that carries it (205.5 -> 187.7/187.9,
+**-17.6 to -17.8 s = -8.6 to -8.7 %**) with `unit` second (20.0 -> 16.8/17.0, -3.0 to -3.2 s = -15 to
+-16 %); `qast` is third (-5.5 to -8.1 %) and `optimize` barely moves (-3.1 % on b2b-1, +0.4 % on
+b2b-2, i.e. inside its own run-to-run). The pair
 also sits **at or below the spike's flagged 246 s** (243 and 245, i.e. the spike's number is inside
 this pair's spread), and its parse stage is **below** the spike's flagged parse (187.7/187.9 against
 190.9). Read together with the b2b-flag row: **the split delivered the whole of what the flag
@@ -1190,7 +1192,8 @@ Object ones, not dearer. The rig's other three workloads (`m7-rig/b2b-{rakudo-e,
 ### Reading against the stop rule (spec section 4, Revision 3)
 
 **The batch MOVES, on the CORE.c clock, and this is the first row that can say so against a measured
-floor.** The clock's same-session spread is **2 s (0.8 %)**; b2a -> b2b is **-21 to -23 s (-8.3 %)**.
+floor.** The clock's same-session spread is **2 s (0.8 %)**; b2a -> b2b is **-21 to -23 s
+(-7.9 to -8.7 %)**.
 The comparison is cross-session (b2a was taken in the previous session) and so carries B0's
 machine-state item -- but unlike every earlier cross-session pair this one has a **second, internal
 witness**: the spike's flag-default compile reproduced b2a's 266 s exactly on this machine before
