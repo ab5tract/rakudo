@@ -625,3 +625,106 @@ wait; the one-off `023-named-args.t` red did not recur (its settle plan stands, 
 Consequence for B2: the census ranks candidates by calls, and calls are not seconds; B2's selection
 reads the JFR --ops exclusive shares (the CORE.c compile is where the classlib share is measurable)
 and takes its rows the same-session way, off/on under the kill-switch.
+
+## B2, the opening: the retake (Task 2 of the batch 2 part 1 plan)
+
+Tree: rakudo `11cdd3856f` / nqp `76d88cf32` (batch 1's engine, Task 1's readers).
+Jars rebuilt (6 s, `BUILD SUCCESSFUL`, 12 tasks up to date), retrained
+(`dispatch-record: done 21 paths, 4191 slots, 4490 programs, 14 unpersistable, 0 failed`, 2 s).
+
+Rig row b1r (rig wall 125 s, all markers present, `m7-rig: DONE tag=b1r`), a reference for today's
+machine, NOT a series row -- no stop rule is read from it:
+
+`| b1r | 11cdd3856f | 76d88cf32 | 2.274 | 1.207 | 4933 | 35843 | 44/sanity | none | |`
+
+The five walls behind it: rakudo-e 2.31 2.27 2.34 2.30 2.39, nqp-e 1.30 1.26 1.27 1.21 1.30.
+`hits=35843` (b1's 37077 on the same jars-and-training shape; the A/B already recorded `hits` as
+run-to-run, not a build invariant), `misses=4933` unchanged, warm `t/01-sanity` 25 files in 44 s on
+one server, `red=0 new-red=-`.
+
+### The census, per workload (b1 -> b1r)
+
+| workload | table | classlib | siteCalls | siteMisses | top classlib (8), b1r |
+| --- | --- | --- | --- | --- | --- |
+| rakudo-e | 33,340 -> 33,254 | 124,036 -> 122,661 | 129,910 -> 128,512 | 744 -> 741 | Ops.setcodeobj 27116, Ops.atkey 15482, Ops.atpos 10434, Ops.isnull 10041, Ops.concat 8247, Ops.how 8210, Ops.shift 4189, Ops.elems 3137 |
+| nqp-e | 22,156 -> 22,170 | 19,870 -> 20,146 | 33,204 -> 33,453 | 117 -> 117 | Ops.concat 3400, Ops.shift 2260, Ops.setcodeobj 1484, Ops.push 944, Ops.isnull 875, Ops.iter 858, Ops.atpos 830, Ops.atkey 750 |
+| sanity | 3,231,214 -> 3,225,690 | 13,880,310 -> 13,853,545 | 24,073,100 -> 24,044,622 | 34,760 -> 34,685 | Ops.atkey 1903452, Ops.atpos 1623066, Ops.isnull 1299484, Ops.how 988641, Ops.setcodeobj 683021, Ops.elems 557656, Ops.shift 481389, Ops.eqaddr 421293 |
+| CORE.c | *b0 bound* 257,104,670 -> **254,048,524** | *b0 bound* 1,084,094,672 -> **478,104,209 (-55.9 %)** | *b0 bound* 692,228,289 -> **1,610,755,139** | *b0 bound* 3,965 -> 7,745 | Ops.atpos 40878010, Ops.getattr_i 37062384, Ops.bindattr_i 35763164, Ops.atkey 32043232, Ops.isnull 31766260, Ops.who 26441996, Ops.elems 25534673, Ops.shift 25260732 |
+
+Sources: `m7-rig/b1r-rakudo-e-census.err`, `m7-rig/b1r-nqp-e-census.err`,
+`m7-rig/b1r-sanity-census.log`, `m7-rig/b1r-corec-census.err` (303 lines, header first), each read
+with `raku tools/build/m7-rig.raku --parse-census=<file>`; the b1 column is the "Road totals,
+B0 -> B1" table above. The three cheap workloads are flat b1 -> b1r (every total within 1.4 %, i.e.
+cold-start run-to-run variance), which is the point of the retake: **the tree did not move, so the
+CORE.c column is now measured rather than bounded.**
+
+On CORE.c the eight names batch 1 moved are **0 on the classlib road** (`Ops.decont`,
+`Ops.isconcrete`, `Ops.create`, `Ops.istrue`, `Ops.isfalse`, `Ops.iscont`, `Ops.findmethod`,
+`Ops.can` all absent); what remains under those stems is `Ops.isconcrete_nd` 703,317,
+`Ops.decont_s` 22,883, the sized `iscont` arms (2,493 / 2,070 / 2,013 / 1,836) and `Ops.createsc`
+19 -- different ops, as B1's rulings 11 and 4 already recorded. The -606 M classlib calls are
+`Ops.decont`'s 499.7 M plus `Ops.isconcrete`'s 73.4 M plus the rest of the eight, and they reappear
+on the site road: `DecontSite calls=1,213,793,356 misses=1`, `IsTypeSite 126,941,693 / 3,134`,
+`IsTrueSite 119,963,760 / 3,157 slow=[pinned=32080302 method=4921532 mode6=210367 generic=4662]`,
+`IsConcreteSite 92,302,881 / 0`, `CreateSite 46,359,109 / 171`, `FindMethodSite 8,915,793 / 415
+slow=[pinned=4404075 advisory=428529 nocache=89795 generic=404]`, `IsContSite 79,959 / 45`.
+(`siteCalls` more than doubles because `DecontSite` double-counts inner sites by design.)
+
+CORE.c clocks, three standalone compiles on `/usr/bin/perl rakudo-j-build` (Ruling 7), output to the
+job dir so the build's jar was untouched:
+
+| run | wall | parse | optimize | qast | unit |
+| --- | --- | --- | --- | --- | --- |
+| `NQP_OP_CENSUS=1` | **294 s** | 226.58 | 24.70 | 18.86 | 23.24 |
+| JFR `settings=profile`, knob off | **286 s** | 221.95 | 23.05 | 17.81 | 21.70 |
+| JFR + `NQP_CLASSLIB_INLINE=1` (the spike) | **272 s** | 208.68 | 22.56 | 18.09 | 20.97 |
+
+Against B0's same two points (356 s census, 319 s JFR): -17.4 % and -10.3 %. The census knob now
+costs 8 s (+2.8 %) on top of the profiled run where at B0 it cost 37 s -- consistent with the census
+having ~1.2 G fewer classlib counter bumps to take. None of these three walls is a knob-off,
+unprofiled CORE.c point, and B0's open item (that session's machine state) covers part of the
+-17 %; they are recorded as measurement points, not as a compile-time result.
+
+### JFR `--ops`, CORE.c: b0 -> b1r -> spike
+
+`m7-rig/b0-corec-jfr.txt` (12,956 samples) -> `m7-rig/b1r-corec-jfr.txt` (14,181: main 14,071,
+TruffleCompilerThread-53 105) -> `m7-rig/b1r-corec-inline-jfr.txt` (13,527: main 13,415,
+TruffleCompilerThread-53 100). Shares are of all samples.
+
+| container | b0 | b1r | spike (NQP_CLASSLIB_INLINE=1) |
+| --- | --- | --- | --- |
+| table | 15.4 % (1991) | 15.6 % (2208) | 16.3 % (2199) |
+| classlib | 26.7 % (3459; leaf `classlibInline` 68.7 % = 18.3 % global) | **17.0 %** (2404; leaf `classlibInline` 61.0 % = **10.3 % global**) | **13.8 %** (1861; leaf `classlibInline` 52.7 % = **7.3 % global**) |
+| sites | 2.3 % (297) | 2.4 % (344) | 2.6 % (346) |
+| dispatch | 15.3 % (1988) | 16.7 % (2371) | 17.0 % (2304) |
+| interpreter self | 8.4 % (1082) | 10.5 % (1488) | 12.6 % (1700) |
+| outside all | 31.9 % (4139) | 37.8 % (5366) | 37.8 % (5117) |
+
+The sites container's entry table is no longer two names: b1r reads `IsTypeOp.doIsType` 137 = 39.8 %
+of the container (0.97 % global), `Truthy.doTruthy` 86 = 25.0 % (0.61 %), `CreateOp.doCreate` 35,
+`DecontOp.doDecont` 30, `FindMethodOp.doFind` 28, `IsTrueOp.doIsTrue` 15, `IsConcreteOp` 5 --
+batch 1's four site classes are visible where they were absent at b0, and they cost 2.4 % of the
+compile between them. Outside all four containers the picture is unchanged: `sun.misc.Unsafe.putObject`
+is 50.3 % of that bucket (19.0 % global), the unit stage's serialization writes.
+
+Reading: on CORE.c batch 1 is **measurable in seconds, not only in calls** -- the classlib road
+falls 26.7 % -> 17.0 % of samples (its `classlibInline` leaf 18.3 % -> 10.3 % global) while the
+sited road it fed rises only 2.3 % -> 2.4 %, so the eight promoted names were *not* among the road's
+cheapest here, unlike on the two cold rows. What the classlib road still holds at 17.0 % is 478 M
+calls of generic ops with no site of their own (`atpos`, `getattr_i`, `bindattr_i`, `atkey`,
+`isnull`, `who`, `elems`, `shift` are the head), which is exactly what batch 2's trim is aimed at.
+The spike says PE visibility is worth part of the rest: making the op bodies visible to partial
+evaluation (boundary removed) takes the container 17.0 % -> 13.8 % and its leaf 10.3 % -> 7.3 %
+global, about a fifth to a third of the road, on a wall 14 s (-4.9 %) shorter -- **one sample, no
+repeat**, and the same 3.2 points reappear in `interpreter self` (+2.1) and `table` (+0.7), so part
+of it is re-attribution rather than saving. That is the honest ceiling on the trim: a road worth
+about 17 % of a CORE.c compile, of which PE visibility can reach roughly a third.
+
+Rulings: (1) Ruling 3 of the plan (a census reader takes the largest block) applied to every file
+read here; `m7-rig/b1r-corec-census.err` is 303 lines and begins with `op census:`. (2) **The
+brief's Steps 3-5 spelled `./rakudo-j`; all three compiles were run on `/usr/bin/perl
+rakudo-j-build`**, applying B0's Ruling 7 unchanged (the stock 4 GB runner carries none of
+milestone 6's tier policy, and a CORE.c wall taken on it is comparable to nothing else in this
+project). Every other token of the three command lines is the brief's, verbatim. (3) The spike's
+-14 s wall and the +2.1 points of `interpreter self` under it are recorded, not explained: a
+boundary removal changes where a sample is attributed as well as how long the work takes.
