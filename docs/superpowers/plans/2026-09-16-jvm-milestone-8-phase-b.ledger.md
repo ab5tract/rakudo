@@ -865,12 +865,20 @@ Against b1r (2.274 / 1.207 / 44 s): cold rakudo-e **-0.3 %**, cold nqp-e **-0.6 
 rakudo-e 2.246 (off) / 2.267 (on) = **+0.9 % with the road on**, nqp-e 1.227 / 1.200 = **-2.2 % with
 it on**, warm 46 / 46 s. The two cold rows disagree in sign, which is the usual verdict of this pair
 on a change that is not about load: **the cold rows say nothing here and are reported for the
-record.**
+record.** The warm proxy, unlike the CORE.c clock, does have a same-configuration repeat in this
+session, and it is a wide one: Step 1's standalone sweep read **40 s** (14:56:42) and the rig's warm
+proxy **46 s** two minutes later, on the same tree, with the same command line --
+`m7-rig.raku:218-220` runs `raku tools/build/evalserver-sweep.raku --chunk=* --jobs=1 --heap=8
+t/01-sanity`, which is Step 1's command, and the sweep exports its own `RAKUDO_RAKUAST=1` to the
+servers either way (`evalserver-sweep.raku:170`), so the two runs' children are the same; both
+numbers are the sweep's own `N files in Ns` line -- **a 6 s, 15 % spread with nothing changed**. That is the warm proxy's noise floor here,
+and every warm reading below is to be read against it.
 
 ### The CORE.c clock (first-class from B2)
 
-All four compiles on `/usr/bin/perl rakudo-j-build` (B0's Ruling 7), output to the job dir, one at a
-time, nothing else running:
+The three compiles of this section, and the two b1r rows carried from the retake, all on
+`/usr/bin/perl rakudo-j-build` (B0's Ruling 7), output to the job dir. This section's three ran one
+at a time with nothing else running; the b1r pair is quoted from the retake above, not re-run here:
 
 | compile | wall | parse | optimize | qast | unit |
 | --- | --- | --- | --- | --- | --- |
@@ -887,8 +895,9 @@ Logs: `corec-jfr-b2a.log`, `corec-jfr-b2a-off.log`, `corec-census-b2a.log` in
 286 -> 266 s (-7.0 %) and the census clock 294 -> 263 s (-10.5 %), both in the same direction and
 both carrying B0's open machine-state item, which is why the knob pair and not the b1r pair is
 quoted as the finding. One caveat of the same-session pair itself: it is **one compile each**, and
-the only variance estimate this session offers is the 3 s between the two road-on compiles (266 JFR
-vs 263 census) under different instruments -- so 16 s is well outside what little is known of the
+the CORE.c clock has no same-configuration repeat in this session at all -- the nearest thing to a
+variance estimate on this workload is the 3 s between the two road-on compiles (266 JFR vs 263
+census) under different instruments -- so 16 s is well outside what little is known of the
 noise, but it is not a repeated measurement. Incidentally the census knob's overhead is no longer
 visible at all: 263 s with the census against 266 s with JFR, the census compile the *faster* of the
 two (at b1r the same pair read 294 vs 286, at B0 356 vs 319).
@@ -920,22 +929,26 @@ and exactly 0 with `NQP_SITES_OFF=classlib`**, and the variadic container is the
 (137 against 2385). The road's own entry table at b2a is
 `ClassLib2.doCall` 607 (29.3 % of the container), `ClassLib1` 560, `ClassLib3` 409, `ClassLib4` 220,
 `ClassLib0` 123, `ClassLibLong1` 76, `ClassLibLong2` 40, `ClassLibLong3` 39 -- **the long flavour is
-155 of 2074 samples, 7.5 %** (and 93 of the 1250 road leaves, 7.4 %).
+155 of 2074 samples, 7.5 %** (and 93 of the 1250 road leaves, 7.4 %). The 1250 is re-derivable in
+full from `m7-rig/b2a-corec-road-leaves.txt`, the same container attributed with `--top=200` so
+that all sixteen `NqpClassLibRoad` leaf names are printed and sum to it (a `--top=40` cut would
+drop five of them: `obj0` 7, `callLong3` 5, `long2` 3, `obj4` 2, `long3` 2).
 
 ### The census, per workload (b1r -> b2a)
 
-| workload | classlib | classlibTyped | siteCalls | top classlib (8), b2a |
-| --- | --- | --- | --- | --- |
-| rakudo-e | 122,661 -> 124,036 | 123,996 (**99.97 %**) | 128,512 -> 129,910 | Ops.setcodeobj 27116, Ops.atkey 15692, Ops.atpos 10611, Ops.isnull 10161, Ops.how 8455, Ops.concat 8247, Ops.shift 4189, Ops.elems 3216 |
-| nqp-e | 20,146 -> 19,870 | 19,845 (**99.87 %**) | 33,453 -> 33,204 | Ops.concat 3400, Ops.shift 2260, Ops.setcodeobj 1484, Ops.push 944, Ops.iter 858, Ops.isnull 848, Ops.atpos 789, Ops.elems 726 |
-| sanity | 13,853,545 -> 13,860,998 | 13,832,376 (**99.79 %**) | 24,044,622 -> 24,036,183 | Ops.atkey 1906359, Ops.atpos 1625972, Ops.isnull 1301350, Ops.how 993508, Ops.setcodeobj 683014, Ops.elems 558999, Ops.shift 477336, Ops.eqaddr 421124 |
-| CORE.c | 478,104,209 -> **478,105,835** | **475,195,846** (**99.39 %**) | 1,610,755,139 -> 1,610,757,009 | Ops.atpos 40878245, Ops.getattr_i 37062390, Ops.bindattr_i 35763164, Ops.atkey 32043494, Ops.isnull 31766412, Ops.who 26441996, Ops.elems 25534798, Ops.shift 25260732 |
+| workload | table | classlib | classlibTyped | siteCalls | siteMisses | top classlib (8), b2a |
+| --- | --- | --- | --- | --- | --- | --- |
+| rakudo-e | 33,254 -> 33,340 | 122,661 -> 124,036 | 123,996 (**99.97 %**) | 128,512 -> 129,910 | 741 -> 744 | Ops.setcodeobj 27116, Ops.atkey 15692, Ops.atpos 10611, Ops.isnull 10161, Ops.how 8455, Ops.concat 8247, Ops.shift 4189, Ops.elems 3216 |
+| nqp-e | 22,170 -> 22,156 | 20,146 -> 19,870 | 19,845 (**99.87 %**) | 33,453 -> 33,204 | 117 -> 117 | Ops.concat 3400, Ops.shift 2260, Ops.setcodeobj 1484, Ops.push 944, Ops.iter 858, Ops.isnull 848, Ops.atpos 789, Ops.elems 726 |
+| sanity | 3,225,690 -> 3,227,094 | 13,853,545 -> 13,860,998 | 13,832,376 (**99.79 %**) | 24,044,622 -> 24,036,183 | 34,685 -> 34,611 | Ops.atkey 1906359, Ops.atpos 1625972, Ops.isnull 1301350, Ops.how 993508, Ops.setcodeobj 683014, Ops.elems 558999, Ops.shift 477336, Ops.eqaddr 421124 |
+| CORE.c | 254,048,524 -> **254,048,613** | 478,104,209 -> **478,105,835** | **475,195,846** (**99.39 %**) | 1,610,755,139 -> 1,610,757,009 | 7,745 -> 7,745 | Ops.atpos 40878245, Ops.getattr_i 37062390, Ops.bindattr_i 35763164, Ops.atkey 32043494, Ops.isnull 31766412, Ops.who 26441996, Ops.elems 25534798, Ops.shift 25260732 |
 
 Sources: `m7-rig/b2a-{rakudo-e,nqp-e}-census.err`, `m7-rig/b2a-sanity-census.log`,
 `m7-rig/b2a-corec-census.err` (303 lines, first line the header), each read with
 `raku tools/build/m7-rig.raku --parse-census=<file>` and the new header field taken from the same
 block's `op census:` line. **The call counts do not move**: on CORE.c classlib is
-+1,626 calls in 478.1 M (+0.0003 %), `table` +89 in 254.0 M, `siteCalls` +1,870 in 1.61 G, and the
++1,626 calls in 478.1 M (+0.0003 %), `table` +89 in 254.0 M, `siteCalls` +1,870 in 1.61 G,
+`siteMisses` 7,745 on both sides to the unit, and the
 top-8 names are the same eight in the same order to within a few hundred calls. That is the point of
 the trim and the check on it: the road carries the same traffic, by a different mechanism.
 **99.4 % of the CORE.c road is typed** (the 2.9 M remainder is arity >= 5 and the dedicated sites,
@@ -946,9 +959,14 @@ clock.** The robust comparison is the same-session pair on the same jars and the
 266 s with the road, 282 s with `NQP_SITES_OFF=classlib`, **-5.7 %**, parse -6.0 % -- not the
 cross-session b1r pair (-7.0 %), which carries B0's machine-state item; the two agree in direction
 and size, which is as much as a cross-session pair can be asked for. The warm proxy does **not**
-move (46 s against 46 s off, 44 s at b1r), and the cold rows disagree in sign and are reported only
-for the record. The sample shares agree with the wall: the classlib road is 17.3 % of the compile
-off and 15.7 % on (its leaf 10.0 % -> 8.9 % global), everything else within a point or so, with
+move (46 s against 46 s off, 44 s at b1r) -- but that instrument's own noise floor this session is
+6 s (40 s against 46 s, nothing changed, see the rows paragraph above), so it could not have
+resolved a change of the CORE.c pair's size even if one were there: the warm proxy's verdict here
+is **"no signal"**, not "no effect". The cold rows disagree in sign and are reported only
+for the record. The sample shares move with the wall, though shares are normalized and so a
+container's fall has to reappear somewhere by construction: the classlib road is 17.3 % of the
+compile off and 15.7 % on (its leaf 10.0 % -> 8.9 % global), everything else within a point or so,
+with
 `interpreter self` +1.1 and `table` +1.0 -- a boundary that is crossed once per instruction instead
 of once per call moves work into the interpreter's own frames as well as removing some of it, so
 part of that 1.6-point fall is re-attribution, as the B2-opening spike warned. A share-to-seconds
@@ -970,8 +988,13 @@ Rulings:
    Object-flavoured until 6.3 sites them). See the premise paragraph above.
 2. The typed road is Kotlin (plan Ruling 2); the variadic road stays in NqpOps.java for arity 5-6,
    the dedicated sites and the kill-switch.
-3. A census reader takes the largest block (plan Ruling 3); every census file read or written here
-   is non-empty and begins with `op census:`.
+3. A census reader takes the largest block (plan Ruling 3), scoped as at the retake: the extracted
+   `m7-rig/b2a-corec-census.err` is 303 lines and **begins** with `op census:`, while the three rig
+   files are whole run outputs in which the header sits wherever the process printed it
+   (`b2a-rakudo-e-census.err` line 5254 of 5495, `b2a-nqp-e-census.err` line 1885 of 2061,
+   `b2a-sanity-census.log` line 3 of 739). Each of the four holds **exactly one** `op census:`
+   block, so the largest-block reader has nothing to choose between and the four headers quoted
+   above are the files' only ones.
 4. **The capture test survived.** Task 5 Step 2 ran the capture snippet on the unchanged (variadic)
    tree and it printed `43`, so the primary branch was taken: the three capture asserts were kept
    and `22-classlib-road.t` stayed at `plan(24)`, 24/24 green. No cut, no fallback variant, no
