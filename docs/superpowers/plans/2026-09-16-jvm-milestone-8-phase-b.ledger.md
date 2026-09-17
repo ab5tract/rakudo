@@ -662,8 +662,13 @@ On CORE.c the eight names batch 1 moved are **0 on the classlib road** (`Ops.dec
 `Ops.isconcrete`, `Ops.create`, `Ops.istrue`, `Ops.isfalse`, `Ops.iscont`, `Ops.findmethod`,
 `Ops.can` all absent); what remains under those stems is `Ops.isconcrete_nd` 703,317,
 `Ops.decont_s` 22,883, the sized `iscont` arms (2,493 / 2,070 / 2,013 / 1,836) and `Ops.createsc`
-19 -- different ops, as B1's rulings 11 and 4 already recorded. The -606 M classlib calls are
-`Ops.decont`'s 499.7 M plus `Ops.isconcrete`'s 73.4 M plus the rest of the eight, and they reappear
+19 -- different ops, as B1's rulings 11 and 4 already recorded. The -606.0 M classlib calls
+(1,084,094,672 -> 478,104,209) are accounted for by the five of the eight that clear the 30-row cut
+in b0's census file (`m7-rig/b0-corec-census.err`, 69 lines): `Ops.decont` 499,704,638,
+`Ops.isconcrete` 73,421,782, `Ops.create` 17,572,121, `Ops.istrue` 9,350,543, `Ops.can` 5,066,814
+= **605.1 M**. The remaining 0.9 M is **inference, not measurement**: `iscont`, `findmethod` and
+`isfalse` sit below that cut at b0 (bounded there at < 4,700,751 each), and cold/compile run-to-run
+variance is inside the same residual. The moved calls reappear
 on the site road: `DecontSite calls=1,213,793,356 misses=1`, `IsTypeSite 126,941,693 / 3,134`,
 `IsTrueSite 119,963,760 / 3,157 slow=[pinned=32080302 method=4921532 mode6=210367 generic=4662]`,
 `IsConcreteSite 92,302,881 / 0`, `CreateSite 46,359,109 / 171`, `FindMethodSite 8,915,793 / 415
@@ -679,9 +684,15 @@ job dir so the build's jar was untouched:
 | JFR `settings=profile`, knob off | **286 s** | 221.95 | 23.05 | 17.81 | 21.70 |
 | JFR + `NQP_CLASSLIB_INLINE=1` (the spike) | **272 s** | 208.68 | 22.56 | 18.09 | 20.97 |
 
-Against B0's same two points (356 s census, 319 s JFR): -17.4 % and -10.3 %. The census knob now
-costs 8 s (+2.8 %) on top of the profiled run where at B0 it cost 37 s -- consistent with the census
-having ~1.2 G fewer classlib counter bumps to take. None of these three walls is a knob-off,
+Against B0's same two points (356 s census, 319 s JFR): -17.4 % and -10.3 %. The census knob costs
+**8 s here** (294 - 286, +2.8 %) against **37 s at B0** (356 - 319); B0's section also quotes 28 s
+for the same knob, which is its census run against the M7-close knob-off, unprofiled 296 s -- a
+third baseline, not this one. The fall in that overhead is **not attributed here**, and in
+particular not to "fewer counters": the census's total counter work went *up* between the two
+trees, not down. `table + classlib + siteCalls` is **2,033,427,631 at b0 against 2,342,907,872 at
+b1r (+309 M)** -- the classlib road loses 0.606 G bumps while the site road gains 0.918 G -- so any
+explanation would have to argue that a site bump is cheaper than a classlib bump, and nothing
+measured here says that. None of these three walls is a knob-off,
 unprofiled CORE.c point, and B0's open item (that session's machine state) covers part of the
 -17 %; they are recorded as measurement points, not as a compile-time result.
 
@@ -700,12 +711,20 @@ TruffleCompilerThread-53 100). Shares are of all samples.
 | interpreter self | 8.4 % (1082) | 10.5 % (1488) | 12.6 % (1700) |
 | outside all | 31.9 % (4139) | 37.8 % (5366) | 37.8 % (5117) |
 
-The sites container's entry table is no longer two names: b1r reads `IsTypeOp.doIsType` 137 = 39.8 %
-of the container (0.97 % global), `Truthy.doTruthy` 86 = 25.0 % (0.61 %), `CreateOp.doCreate` 35,
-`DecontOp.doDecont` 30, `FindMethodOp.doFind` 28, `IsTrueOp.doIsTrue` 15, `IsConcreteOp` 5 --
-batch 1's four site classes are visible where they were absent at b0, and they cost 2.4 % of the
-compile between them. Outside all four containers the picture is unchanged: `sun.misc.Unsafe.putObject`
-is 50.3 % of that bucket (19.0 % global), the unit stage's serialization writes.
+The sites container's entry table is no longer dominated by two names: b1r reads
+`IsTypeOp.doIsType` 137 = 39.8 % of the container (0.97 % global), `Truthy.doTruthy` 86 = 25.0 %
+(0.61 %), `CreateOp.doCreate` 35, `DecontOp.doDecont` 30, `FindMethodOp.doFind` 28,
+`IsTrueOp.doIsTrue` 15, `IsConcreteOp` 5. **The container is 2.4 % of the compile, of which
+batch 1's four new classes are 134 samples = 0.94 % of the compile** (`Truthy` 86 + `FindMethodOp`
+28 + `IsTrueOp` 15 + `IsConcreteOp` 5, i.e. 39 % of the container); `IsTypeOp` and `DecontOp` were
+already entries at b0 (149 and 121 samples) and `CreateOp` too (16), so the other 1.5 points are
+not batch 1's, and `IsContOp` appears nowhere. Outside all four containers the bucket's
+*composition* is unchanged -- `sun.misc.Unsafe.putObject` 43.0 % of it at b0, 50.3 % at b1r, the
+unit stage's serialization writes -- but its *share* rises **31.9 % -> 37.8 %** and that leaf goes
+**13.7 % -> 19.0 % global**, roughly 44 s -> 55 s of the two walls, on an output jar of the same
+size to within 4 bytes (56,082,69x both times). **Unexplained** -- cross-session machine state and
+the sample budget are the obvious candidates -- and recorded so the next batch looks rather than
+skips it.
 
 Reading: on CORE.c batch 1 is **measurable in seconds, not only in calls** -- the classlib road
 falls 26.7 % -> 17.0 % of samples (its `classlibInline` leaf 18.3 % -> 10.3 % global) while the
@@ -715,10 +734,15 @@ calls of generic ops with no site of their own (`atpos`, `getattr_i`, `bindattr_
 `isnull`, `who`, `elems`, `shift` are the head), which is exactly what batch 2's trim is aimed at.
 The spike says PE visibility is worth part of the rest: making the op bodies visible to partial
 evaluation (boundary removed) takes the container 17.0 % -> 13.8 % and its leaf 10.3 % -> 7.3 %
-global, about a fifth to a third of the road, on a wall 14 s (-4.9 %) shorter -- **one sample, no
-repeat**, and the same 3.2 points reappear in `interpreter self` (+2.1) and `table` (+0.7), so part
-of it is re-attribution rather than saving. That is the honest ceiling on the trim: a road worth
-about 17 % of a CORE.c compile, of which PE visibility can reach roughly a third.
+global, on a wall 14 s (-4.9 %) shorter -- **one sample, no repeat** -- and the same 3.2 points
+reappear in `interpreter self` (+2.1) and `table` (+0.7), so part of it is re-attribution rather
+than saving. **The ceiling on the trim, stated tightly: the classlib road is ~17 % of a CORE.c
+compile, and PE visibility moved a fifth of it** -- 3.2 of 17.0 points = 19 %. (The leaf fraction
+alone moved 10.3 -> 7.3 = 29 %, a shade under a third; that is the generous reading of the same
+run, and it is a leaf share, not the road.) With the re-attribution above, the figure a later batch
+should plan against is **below a fifth of the road**, not a third of it. The share comparison spans
+two sessions and is the robust half of this section; the wall comparison carries B0's open
+machine-state item.
 
 Rulings: (1) Ruling 3 of the plan (a census reader takes the largest block) applied to every file
 read here; `m7-rig/b1r-corec-census.err` is 303 lines and begins with `op census:`. (2) **The
