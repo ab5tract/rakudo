@@ -1043,3 +1043,224 @@ Open items:
   through a harness / the eval server is an **open item, unscheduled** (user request, 2026-09-17).
 - B1's non-reproducing red (`t/nqp/023-named-args.t`) did not appear in any run of this batch;
   it stays open with no attribution.
+
+## B2b: the table road's switch (plan A of batch 2 part 2)
+
+Commits: rakudo `17a8804436` (huge-methods.raku; first cut `e3495c025e`), nqp `1e553daf8` (run0 in
+four pieces, thresholds `RUN0_T1=95` / `RUN0_T2=193` / `RUN0_T3=288`; comment fix `e217c2bb4`), nqp
+`fbe4fa7ee` (the verify banner), nqp `bd0220874` + `89fb46e5e` and rakudo `d22f026b1c` +
+`04e21b5d6b` (`classlibLong=`), and this one. Tree at the measurements: rakudo `04e21b5d6b` / nqp
+`89fb46e5e`; the jars were rebuilt at Task 4 and **retrained at the head of this task**
+(`dispatch-record: done 21 paths, 4190 slots, 4489 programs, 14 unpersistable, 0 failed`, 2.1 s).
+The nine `nqp/src/vm/jvm/stage0/*.jar` stay uncommitted (user rule).
+
+Gate: `huge-methods.raku` **2 -> 1** (127 s, Task 2's four-directory scan) -- the "before" state on
+this tree was **two** hits, `NqpOps.run0` at 8002 bytes **and** the runtime `Ops` class's `<clinit>`
+at 8003 (the op-name table fill, which runs once and is no JIT concern), so the gate keys on the
+`run0` line vanishing, not on the tally reaching 0; nqp suite after the split
+**Result: PASS Files=155 Tests=13271** (prove 512 s / gradle 710 s); runtime JUnit **69** tests,
+0 failures (2 s); `t/nqp/114-pod-panic.t` under `NQP_DISPATCH_PERSIST=verify` **not ok -> ok**
+(3.2 s RED / 3.17 s GREEN); `22-classlib-road.t` **27/27** (8 s, after the review's exclusivity
+assert; 26/26 at `bd0220874`); warm `t/01-sanity` **25 files in 40 s** on one server, no reds
+(Step 1, watched-run `elapsed=40s`, `/home/longwalker/.claude/jobs/584f1b84/tmp/sanity-b2b.log`).
+Piece sizes after the split: last bytecode offsets 2218 / 1991 / 2239 / 2180, dispatcher 63.
+
+### The spike that opened the row (spec 6.6, taken before this plan, on the b2a tree)
+
+| compile | wall | parse | table road | run0 self samples | files |
+| --- | --- | --- | --- | --- | --- |
+| flag default | 266 s | 205.2 s | 16.1 % (2199) | 1007 | corec-spike-off*, m7-rig/spike-off-corec-jfr.txt |
+| -XX:-DontCompileHugeMethods | 246 s | 190.9 s | 10.2 % (1356) | 105 | corec-spike-on*, m7-rig/spike-on-corec-jfr.txt |
+
+**Two numbers, both right, and they are not the same measurement**: `run0`'s self-time **sample
+share** at row b2a is **7.8 %** (1091 of 14,055, `m7-rig/b2a-corec-jfr-full.txt`), while **7.5 %** is
+the **wall** the flag bought in the spike above (266 s -> 246 s). The flag-default compile repeated
+row b2a's 266 s from the earlier session: the CORE.c clock's first same-configuration repeat,
+cross-session, delta 0 s.
+
+Rig row (rig wall 127 s, all markers present, `m7-rig: DONE tag=b2b`), verbatim from
+`m7-rig/rows.md`:
+
+`| b2b | 04e21b5d6b | 89fb46e5e | 2.264 | 1.244 | 4933 | 35843 | 48/sanity | none | |`
+
+(The rig writes no note cell; as at b2a the note is added by hand when the row is quoted -- here it
+would read `run0 split`.) The five walls behind it: rakudo-e 2.32 2.34 2.39 2.30 2.26, nqp-e
+1.29 1.31 1.30 1.32 1.24. `misses=4933` unchanged, `hits=35843` (b1r's figure exactly; b2a read
+37077 on the same jars-and-training shape -- `hits` is run-to-run, as B2's opening recorded),
+`red=0 new-red=-`.
+
+### The CORE.c clock
+
+All five on `/usr/bin/perl rakudo-j-build` (B0's Ruling 7), output to the job dir, one at a time
+with nothing else running. Logs in `/home/longwalker/.claude/jobs/584f1b84/tmp/`:
+`corec-jfr-b2b-1.log`, `corec-jfr-b2b-2.log`, `corec-jfr-b2b-flag.log`, `corec-census-b2b.log`.
+
+| compile | wall | parse | optimize | qast | unit |
+| --- | --- | --- | --- | --- | --- |
+| b2a JFR (before, previous session) | 266 s | 205.498 | 22.083 | 17.329 | 19.993 |
+| **b2b-1 JFR, default flags** | **243 s** | 187.661 | 21.398 | 15.920 | 16.791 |
+| **b2b-2 JFR, default flags** | **245 s** | 187.892 | 22.182 | 16.369 | 16.997 |
+| b2b-flag JFR, `-XX:-DontCompileHugeMethods` | 250 s | 193.793 | 21.874 | 16.060 | 17.307 |
+| b2b census (`NQP_OP_CENSUS=1`) | 244 s | 187.717 | 22.215 | 15.699 | 17.186 |
+
+**The clock's same-session spread**: b2b-1 vs b2b-2 = **2 s (0.8 %)**, and the census compile falls
+inside it (244 s) although it carries a different instrument. From here a batch moves on this clock
+only outside that spread. What B2a could only estimate at 3 s between two differently instrumented
+runs is now measured on two identical ones, and it is smaller.
+
+Against that floor, b2a -> b2b is **266 -> 243/245 s, -21 to -23 s = -8.3 %**, an order of magnitude
+outside the spread, and it is **parse** that carries it (205.5 -> 187.7, **-17.8 s = -8.7 %**) with
+`unit` second (20.0 -> 16.8/17.0, -3.0 s = -15 %); `optimize` and `qast` move -1 to -3 %. The pair
+also sits **at or below the spike's flagged 246 s** (243 and 245, i.e. the spike's number is inside
+this pair's spread), and its parse stage is **below** the spike's flagged parse (187.7/187.9 against
+190.9). Read together with the b2b-flag row: **the split delivered the whole of what the flag
+bought, and there is nothing left for the flag to buy.**
+
+The b2b-flag compile is the A/B that says so, and it says slightly more than "no difference": at
+**250 s** it is **5 s above** the b2b pair, outside the 2 s spread. With `run0` split, turning
+`DontCompileHugeMethods` off no longer unlocks the table road -- it only pays to JIT whatever huge
+methods remain in the process (the runtime `Ops.<clinit>` is one of them) -- so the flag's sign has
+flipped from -20 s to +5 s. Recorded as measured; one compile each side, and 5 s is 2 %.
+
+### JFR `--ops`, CORE.c: b2a -> b2b-1 / b2b-2 / b2b-flag
+
+`m7-rig/b2a-corec-jfr-full.txt` (14,055 samples: main 13,901, TruffleCompilerThread-53 149) ->
+`m7-rig/b2b-1-corec-jfr.txt` (13,658: main 13,527, compiler 123) ->
+`m7-rig/b2b-2-corec-jfr.txt` (13,255: main 13,156, compiler 92) ->
+`m7-rig/b2b-flag-corec-jfr.txt` (13,568: main 13,442, compiler 122). All three b2b files are the
+plain `--ops` preset (Ruling 5 of B2a: the preset now names the six containers and reproduces the
+hand-built tables, so no `-full` re-attribution was needed here). Shares are of all samples.
+
+| container | b2a | b2b-1 | b2b-2 | b2b-flag |
+| --- | --- | --- | --- | --- |
+| table (`NqpOps.run`) | **16.8 % (2358)** | **9.9 % (1354)** | **9.9 % (1309)** | **9.7 % (1314)** |
+| classlib, variadic (`NqpOps.classlib`) | 1.0 % (137) | 1.2 % (169) | 1.3 % (166) | 1.2 % (169) |
+| classlib, typed (`NqpClassLibRoad`) | 14.8 % (2074) | 16.5 % (2259) | 16.0 % (2121) | 16.8 % (2276) |
+| **classlib road, both** | **15.7 % (2211)** | **17.8 % (2428)** | **17.2 % (2287)** | **18.0 % (2445)** |
+| sites (`NqpTypeOps`) | 1.7 % (244) | 1.9 % (264) | 1.7 % (228) | 1.8 % (249) |
+| sites2 (`NqpSiteOps`) | 1.1 % (155) | 1.1 % (148) | 1.2 % (159) | 1.2 % (160) |
+| dispatch (`NqpDispatch`) | 16.8 % (2362) | 17.8 % (2426) | 17.9 % (2373) | 18.3 % (2480) |
+| interpreter self | 11.6 % (1629) | 12.3 % (1675) | 12.3 % (1633) | 12.1 % (1637) |
+| outside all | 36.4 % (5122) | 39.4 % (5385) | 39.9 % (5285) | 39.1 % (5309) |
+
+The table container lands **exactly where the spike's flagged run put it**: 1354 and 1309 samples
+against the spike-on's 1356 (10.2 %), from b2a's 2358. Every other container rises by a point or
+so, which is what normalization does when one container empties on a shorter wall; the classlib
+road's +2.1 points (15.7 -> 17.8) is that arithmetic and **not** a regression -- its call count is
+unchanged to 0.0003 % (below).
+
+Table road leaves at b2b-1, from `m7-rig/b2b-1-corec-table-leaves.txt` (the same recording
+attributed with `--top=200`, so no leaf is cut): `run0` **63**, `run0b` **34**, `run0a` **29**,
+`run0c` **12**, `run0d` **0**, and `NqpOps.run` itself **0** -- **138 samples over the five methods,
+10.2 % of the container and 1.01 % of the compile**, against b2a's `run0` alone at **1091 = 7.8 %**
+of the compile and the spike-on's 105. `NqpOps.run0` stays 100 % of the container *inclusively* (it
+is still the dispatcher every arm is reached through); what collapsed is its **self** time.
+(b2b-2 and b2b-flag were attributed at the default `--top=12`, which shows `run0` 60 / `run0a` 38 /
+`run0b` 30 and `run0` 60 / `run0b` 53 respectively, with the remaining pieces below that cut --
+quoted as a cross-check, not as a full leaf list.)
+
+### The census (b2a -> b2b)
+
+`m7-rig/b2a-corec-census.err` -> `m7-rig/b2b-corec-census.err` (303 lines each, first line the
+header, exactly one `op census:` block; read with
+`raku tools/build/m7-rig.raku --parse-census=<file>`):
+
+| total | b2a | b2b | delta |
+| --- | --- | --- | --- |
+| table | 254,048,613 | 254,048,524 | -89 |
+| classlib | 478,105,835 | 478,104,204 | -1,631 |
+| classlibTyped | 475,195,846 | 475,194,215 | -1,631 |
+| **classlibLong** | n/a (field added in Task 4) | **61,295,420** | new |
+| siteCalls | 1,610,757,009 | 1,610,755,131 | -1,878 |
+| siteMisses | 7,745 | 7,745 | 0 |
+
+**The tree did not change what it counts**: every total is within 0.0004 %, `siteMisses` identical
+to the unit, and the top table is the same eight names in the same order (`iseq_s` 44,743,838,
+`atkey` 39,182,428, `push` 38,842,755, `getattr_i` 28,136,649, `atpos` 19,723,991, `hlllist`
+15,893,894, `throwpayloadlex` 13,152,506, `getattr_s` 9,121,975). A switch split changes no
+semantics, and the census is the check on that.
+
+The new field prices the long flavour for the first time on a real workload: **61.3 M of the
+475.2 M typed classlib calls are `long`-flavoured, 12.9 %** -- against the **7.5 % of samples** the
+b2a JFR attributed to `ClassLibLong1..3`, so the long arms are somewhat *cheaper per call* than the
+Object ones, not dearer. The rig's other three workloads (`m7-rig/b2b-{rakudo-e,nqp-e}-census.err`,
+`m7-rig/b2b-sanity-census.log`) read `classlibLong` 14,653 of 122,621 (11.9 %), 1,493 of 20,121
+(7.4 %) and 1,887,808 of 13,796,115 (13.7 %).
+
+### Reading against the stop rule (spec section 4, Revision 3)
+
+**The batch MOVES, on the CORE.c clock, and this is the first row that can say so against a measured
+floor.** The clock's same-session spread is **2 s (0.8 %)**; b2a -> b2b is **-21 to -23 s (-8.3 %)**.
+The comparison is cross-session (b2a was taken in the previous session) and so carries B0's
+machine-state item -- but unlike every earlier cross-session pair this one has a **second, internal
+witness**: the spike's flag-default compile reproduced b2a's 266 s exactly on this machine before
+the change, and the spike's flagged compile predicted 246 s, which is where the b2b pair landed
+(243 / 245). The split is therefore credited with the flag's effect rather than with the session.
+**The warm proxy says nothing**: 48 s at b2b against 46 s at b2a and 40 s in this session's Step 1 --
+a 2 s difference inside that instrument's own 6 s (15 %) floor, measured at B2a and unchanged here
+(Step 1's 40 s against the rig's 48 s **is** that floor, taken again, and it is now 8 s wide).
+**The cold rows are for the record**: rakudo-e 2.264 s (b2a 2.267, -0.1 %) and nqp-e 1.244 s (b2a
+1.200, +3.7 %) -- opposite signs again, as on every change that is not about load. The split's
+effect equals the spike's flagged number, and the b2b-flag compile confirms nothing is left for the
+flag (it now costs 5 s rather than saving 20).
+
+Rulings:
+1. **The eight reordered arms** (plan Ruling 1) were *descent points*, not "eight arms moved": each
+   is an arm whose id is lower than its predecessor's, and resolving it moves the run of arms that
+   follows. The eight, by the arm at the descent -> the out-of-place arm: `OP_GETENVHASH=378` ->
+   `OP_GETHLLSYM` (185); `OP_GETHLLSYM=185` -> `OP_GETEXTYPE` (167); `OP_SIZED_NUM32=382` ->
+   `OP_ISTYPE_ND` (149); `OP_P6BINDASSERT=155` -> `OP_HLLLIST` (139); `OP_PUSH_S=147` ->
+   `OP_HLLHASH` (140); `OP_HLLHASH=140` -> `OP_ISCONT_I` (136); `OP_ISCONT_S=138` ->
+   `OP_ASSERTPARAMCHECK` (112); `OP_P6DECONTRV_RT=115` -> `OP_CONTROL` (108). **45 arm blocks**
+   changed position to resolve them; **no fall-through groups existed**, so no arm changed meaning;
+   the review verified **0 non-move deletions and 380 labels set-identical**, i.e. every arm
+   verbatim. All eight out-of-place arms land in `run0b`.
+2. **No runner carries the flag** (plan Ruling 2). `-XX:-DontCompileHugeMethods` appears in this
+   section's b2b-flag compile and nowhere else in the tree: it is a measurement, not a setting.
+3. **The banner condition** (plan Ruling 3) is `verifyLog != null || TRACE` -- under
+   `NQP_DISPATCH_PERSIST=verify` the `dispatch-verify: on` line now goes to the verify log file, or
+   to stderr only under `NQP_DISPATCH_PERSIST_TRACE=1`, never to a child's stderr by default. That
+   is what takes `t/nqp/114-pod-panic.t` from `not ok 1` to `ok 1` under verify, and it removes the
+   caveat B2a left for the next verify suite.
+4. **The census-gated rows of 6.3 Revision 4, re-read from this census.** Share = the road's b2b JFR
+   share x the op's count share of that road (table road 9.9 %, table total 254,048,524; classlib
+   road **both containers** 17.8 %, classlib total 478,104,204; both from b2b-1, with b2b-2 in its
+   own column):
+
+   | op | table calls | classlib calls | share (b2b-1) | share (b2b-2) | verdict |
+   | --- | --- | --- | --- | --- | --- |
+   | `atkey` | 39,182,428 | 32,043,232 | 1.53 + 1.19 = **2.72 %** | 2.68 % | **IN** b2c |
+   | `push` | 38,842,755 | 20,980,625 | 1.52 + 0.78 = **2.30 %** | 2.27 % | **IN** b2c |
+   | `atpos` | 19,723,991 | 40,878,010 | 0.77 + 1.52 = **2.29 %** | 2.24 % | **IN** b2c |
+   | `shift` | 0 | 25,260,731 | 0 + 0.94 = **0.94 %** | 0.91 % | **OUT** (under the 1 % line) |
+   | `elems` | 0 | 25,534,673 | 0 + 0.95 = **0.95 %** | 0.92 % | **OUT** (under the 1 % line) |
+   | `iter` | 0 | 12,760,400 | 0 + 0.47 = **0.47 %** | 0.46 % | **OUT** |
+   | `hlllist` | 15,893,894 | 0 | 0.62 + 0 = **0.62 %** | 0.62 % | **OUT** |
+   | `hllhash` | 3,929,397 | 0 | 0.15 + 0 = **0.15 %** | 0.15 % | **OUT** |
+
+   So **row b2c takes `atkey`, `push` and `atpos`** and leaves the other five. Two caveats for plan
+   B, both stated rather than resolved: `shift` (0.94 %) and `elems` (0.95 %) miss the line by
+   0.05-0.06 points, which is inside what a single recording can resolve -- they are **out on this
+   reading**, not out by a margin, and the reading is the same on both compiles; and the shares fell
+   for `atkey`/`push`/`hlllist`/`hllhash` only because **the table road's share halved with the
+   split** (16.8 -> 9.9 %), so the same call counts are now worth less of the compile. On the b2a
+   shares spec 6.3 Revision 4 quoted (table 16.1 %, typed classlib 15.0 %) all five of
+   `atkey`/`push`/`atpos`/`shift`/`elems` were "2.5 to 3.5 % per family"; after 6.6 only three are.
+5. **The classlib road's share is a union of two containers here** (`NqpOps.classlib` +
+   `NqpClassLibRoad`), because the census's `classlib` counter counts both flavours. Taking the
+   typed container alone (16.5 % at b2b-1) moves every classlib-side share in Ruling 4 down by about
+   7 % of itself and changes no verdict (`elems` 0.88 %, `shift` 0.87 %).
+6. **`NQP_SITES_OFF=all` disables the typed classlib road too** (recorded at B2a, repeated because
+   it keeps biting): an `all` A/B on this tree measures a different amount of engine than batch 1's
+   `all` runs did. No `all` run was taken for this row; the flag A/B above is the only knob pair.
+7. Every CORE.c compile here ran on `/usr/bin/perl rakudo-j-build` (B0's Ruling 7); every other
+   token of the four command lines is the brief's, verbatim, file names included.
+
+Open items:
+- The gradle `testNqp` task still runs the nqp suite **cold, one JVM per file** (710 s for Task 2's
+  run of 155 files). Routing it through a harness / the eval server remains an **open item,
+  unscheduled** (user request, 2026-09-17), carried forward from B2a.
+- The b2b-flag compile's **+5 s** is one measurement against one, and no mechanism is claimed for it
+  beyond "the flag now only buys compilation of methods that were left huge on purpose".
+- B1's non-reproducing red (`t/nqp/023-named-args.t`) did not appear in any run of this batch;
+  it stays open with no attribution.
