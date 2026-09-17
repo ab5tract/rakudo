@@ -430,10 +430,34 @@ passed in that same run. It does **not** reproduce: 6/6 standalone passes on
 (the 13246 - 13235 = 11 test difference is exactly this file's eleven tests). Nothing was rebuilt
 or changed between the two suite runs. So batch 1's gate is **PASS with one non-reproducing red**,
 and the red is left as an open item rather than attributed: the shape (a wrong *value*, not a wrong
-method) points at the standing persisted-slot misbind hazard (M7 Phase C, carried in M8's status)
-rather than at any of the four site classes, none of which can hand a caller an Int in place of a
-node. Cost if wrong: an intermittent mis-execution in the compiler, which would resurface on the
-next whole-suite run.
+method) points first at the standing persisted-slot misbind hazard (M7 Phase C, carried in M8's
+status). But batch 1's sites are **UNBISECTED, not exonerated**. The earlier reading -- "none of the
+four site classes can hand a caller an Int" -- is not an alibi: a site does not have to invent an
+Int, it need only pick the **wrong branch**, and after batch 1 `IsTrueSite` backs *every*
+object-typed condition in the compiler while a source-level `nqp::defined` reaches
+`IsConcreteSite`. A wrongly folded condition in `statementlist` is exactly the kind of thing that
+leaves a wrong value in a variable.
+
+The three facts the evidence actually gives:
+
+1. the message is the **dispatcher's** `langMethNotFound`, not `findmethod`'s error road -- the
+   lookup that failed was a `lang-meth-call` on a value, so `FindMethodSite` is not the reporter;
+2. the wrong value came out of `$_.ast`, a **bare accessor** (`$!made`) -- there is no computation
+   inside it for a fold to get wrong, so whatever was wrong was wrong *before* the accessor ran;
+3. the inputs were identical across the FAIL and the PASS (same tree, same jars, nothing rebuilt),
+   and the persisted slots are **read-only** without `NQP_DISPATCH_RECORD`, so no slot was rewritten
+   between the two runs.
+
+Ranked candidates: (a) a **misbound persisted `lang-meth-call` slot** at `$_.ast` (the M7 Phase C
+hazard, the shape that fits facts 1-3 best); (b) **a fold picking a wrong branch** -- a site whose
+guard passed on a fact that had moved; (c) **a half-written site read during partial evaluation**,
+which the fix wave's `st`-last publication narrows (it orders the stores, it is not a fence); (d)
+**guest-thread sharing** of one site.
+
+Settle plan, now that the batch has a kill-switch: loop `t/nqp/023-named-args.t` 50x on the built
+tree; run the 2x2 of `NQP_DISPATCH_PERSIST` on/off x `NQP_SITES_OFF` unset/`all`; and take a suite
+run under `NQP_DISPATCH_PERSIST=verify`. Cost if wrong: an intermittent mis-execution in the
+compiler, which would resurface on the next whole-suite run.
 
 Rig row b1: `| b1 | e3a9f48ab6 | 24bfcccac | 2.249 | 1.186 | 4933 | 37077 | 50/sanity | none | |`.
 Against b0 (2.460 / 1.334 / misses 4933 / hits 37077 / 64 s): rakudo-e **-8.6 %**, nqp-e
@@ -457,10 +481,27 @@ run in this task). B0 counts are the uncut re-takes (`b0-*-census2.*`); B1 count
 
 | op | road before | B0 count | B1 site calls | misses | pins | slow paths | verdict |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| iscont | classlib `Ops.iscont` | 402 / 0 / 46,713 | `IsContSite` 402 / 0 / 46,645 | 12 / 0 / 363 | 3 / 0 / 84 | `[pinned=365 generic=9]` / `[]` / `[pinned=43636 generic=283]` | **promoted**; `Ops.iscont` is 0 on all three roads |
-| istrue (+isfalse, +Truthy obj) | classlib `Ops.istrue` / `Ops.isfalse`; `Truthy` unsited (on neither road) | 2,628 / 147 / 328,821 (+isfalse 1 / 0 / 228) | `IsTrueSite` 19,329 / 6,722 / 2,400,527 | 68 / 24 / 4,959 | 8 / 4 / 803 | `[pinned=2820 method=77 generic=60 mode6=4]` / `[pinned=2276 generic=20 method=7]` / `[pinned=226203 method=24184 mode6=19485 generic=4156]` | **promoted**; `method=` is the mode-0 share: 77 / 7 / 24,184. Site calls far exceed the B0 classlib count because the `Truthy` object arm was counted on neither road before |
-| findmethod / tryfindmethod / can | classlib `Ops.findmethod`, `Ops.can`; table `tryfindmethod` | 42+2,613+29 = 2,684 / 19+87+30 = 136 / 7,212+367,103+30,686 = 405,001 | `FindMethodSite` 2,701 / 136 / 405,344 | 26 / 23 / 1,815 | 3 / 3 / 332 | `[nonauth=878 pinned=29 generic=23]` / `[pinned=32 generic=20]` / `[nonauth=102175 pinned=88602 generic=1536]` | **promoted**; `nonauth=` decides the multi-state question (below). The three B0 counts sum to within 0.6 % of the site's calls on every workload, so nothing leaked |
+| iscont | classlib `Ops.iscont` | 402 / 0 / 46,713 | `IsContSite` 402 / 0 / 46,645 | 12 / 0 / 363 | 3 / 0 / 84 | `[pinned=365 generic=9]` / `[]` / `[pinned=43636 generic=283]` | **promoted**; `Ops.iscont` is 0 on all three roads. The fold fires on ~6 % of calls (rakudo-e 37/402, sanity ~3,000/46,645), the rest take the inlined runtime road: `pinned=` 365 / 0 / 43,636. Two-entry polymorphism is the B2 candidate |
+| istrue (+isfalse, +Truthy obj) | classlib `Ops.istrue` / `Ops.isfalse`; `Truthy` unsited (on neither road) | 2,628 / 147 / 328,821 (+isfalse 1 / 0 / 228) | `IsTrueSite` 19,329 / 6,722 / 2,400,527 | 68 / 24 / 4,959 | 8 / 4 / 803 | `[pinned=2820 method=77 generic=60 mode6=4]` / `[pinned=2276 generic=20 method=7]` / `[pinned=226203 method=24184 mode6=19485 generic=4156]` | **promoted**; `method=` is the mode-0 share: 77 / 7 / 24,184, and `pinned=` 2,820 / 2,276 / 226,203 next to it. Site calls far exceed the B0 classlib count because the `Truthy` object arm was counted on neither road before |
+| findmethod / tryfindmethod / can | classlib `Ops.findmethod`, `Ops.can`; table `tryfindmethod` | 42+2,613+29 = 2,684 / 19+87+30 = 136 / 7,212+367,103+30,686 = 405,001 | `FindMethodSite` 2,701 / 136 / 405,344 | 26 / 23 / 1,815 | 3 / 3 / 332 | `[nonauth=878 pinned=29 generic=23]` / `[pinned=32 generic=20]` / `[nonauth=102175 pinned=88602 generic=1536]` | **promoted**; `nonauth=` decides the multi-state question (below), and `pinned=` is 29 / 32 / 88,602 next to it. The three B0 counts sum to within 0.6 % of the site's calls on every workload, so nothing leaked |
 | decont / isconcrete / create (by name) | classlib | `Ops.decont` 25,717 / 4,991 / 6,577,103; `Ops.isconcrete` 5,263 / 1,170 / 1,124,305; `Ops.create` 640 / 143 / 211,227 | `DecontSite` 37,584 -> 89,750, 10,107 -> 22,524, 6,892,935 -> 17,202,035; `IsConcreteSite` 175 -> 5,719, 30 -> 1,127, 97,685 -> 1,229,682; `CreateSite` 4,252 -> 4,904, 1,989 -> 2,133, 531,440 -> 743,174 | 8 / 0 / 2,322 (Decont); 0 / 0 / 0 (IsConcrete); 15 / 5 / 786 (Create) | 1 / 0 / 434; 0; 2 / 1 / 157 | `[]` on all three | **reachable**; all three names are 0 on the classlib road now. `Ops.isconcrete_nd` (567) and `Ops.createsc` (22) are unchanged between b0 and b1 -- different ops, not batch 1's |
+
+**What `pinned=` is, and what the `pins=` column counted.** `pinned=` is a *slow-path* key, not
+the `pins=` column: it counts the CALLS a site takes on the runtime road after it has given up, and
+for these three sites that give-up is **miss-pinned** -- the site saw more receiver types than
+`MAX_MISSES` = 4 tolerates. Per workload (rakudo-e / nqp-e / sanity): iscont **365 / 0 / 43,636**,
+istrue **2,820 / 2,276 / 226,203**, findmethod **29 / 32 / 88,602**. Whether a second entry per site
+(or a polymorphic guard) would recover any of them is **OPEN**: batch 1 measured the traffic, it did
+not answer the question, and none of the verdicts above should be read as answering it.
+
+The `pins=` column in the table counted **polymorphic pins only** -- a site that pinned at resolve
+time (an unfoldable fact: no method cache, boolification mode 0, an uninitialised STable) never
+reached the counter. The final-review wave (nqp **76d88cf32**) moves the bump into `Site.pin()`
+itself, so **b2's rows count every pin**: the same `rakudo-e` workload re-run after the wave reads
+`IsTrueSite pins=25` where b1's row says 8 and `FindMethodSite pins=11` where it says 3, on
+identical `calls=` and `misses=`. The same wave splits findmethod's `nonauth=` key into `nocache=`
+(the state has no method cache) and `advisory=` (a miss under a non-authoritative one); on rakudo-e
+all 878 are `advisory=`, so b1's `nonauth=878` reads as `advisory=878` from b2 on.
 
 Road totals, B0 -> B1:
 
@@ -529,10 +570,25 @@ Rulings made during batch 1:
 7. A method-cache **hit** folds under any authority; a **miss** folds only under an authoritative
    cache.
 8. `20-op-census.t`'s example ops were repointed to `sha1` / `reprname`.
-9. `NqpOps.str` is private, so `findmethodSlow` uses `if (name is String) name else name.toString()`.
+9. `NqpOps.str` is private, so `findmethodSlow` writes the str coercion out itself (the final-review
+   wave turned the null case into a named `IllegalArgumentException`: all three `Ops` entries take a
+   non-null `String`).
+10. **Boolification mode 6 (BIGINT) is left generic**: `mode6=19,485` on sanity (4 on rakudo-e) is
+    the largest unfolded istrue road after `method=`, and its read goes through the bigint cache
+    behind a boundary. A **named B2 candidate**, not an oversight.
+11. `Ops.isconcrete_nd` (**567** on rakudo-e, unchanged b0 -> b1) is a *different op* from
+    `Ops.isconcrete` and was not in batch 1's scope. A **named B2 candidate**.
+12. `m7-rig/b1-sanity-census.log` carries the site block **three times** -- three identical copies
+    under a *single* `op census:` header, so they are repeats of one process's counters, not three
+    runs to be summed. The totals in this section are read from that header line and the per-site
+    rows from one block; why the block repeats is unexplained and left for B2's tooling pass.
 
 The multi-state findmethod question: nonauth=**878** on rakudo-e (32.5 % of that site's 2,701
-calls), **102,175** on sanity (25.2 % of 405,344), **0** on nqp-e -> **NOT designed.** The 878 cold
+calls), **102,175** on sanity (25.2 % of 405,344), **0** on nqp-e, with pinned=**29** / **32** /
+**88,602** beside it -> **NOT designed.** The two keys are different questions: `nonauth` is a fact
+the rule forbids folding, `pinned` is miss-pinning, i.e. **polymorphism**, and that one is left
+**OPEN** here -- 88,602 pinned calls on sanity say a second entry is worth *measuring* in B2, not
+that batch 1 ruled on it. The 878 cold
 calls come from about five *monomorphic* sites probing names that are absent from ADVISORY caches
 (`WRAPPERS` x3, `CALL-ME` x2, `REQUIRED-REVISION`, `default`, `body`), not from polymorphism, so a
 multi-state guard -- which only helps a site that sees several receiver types -- would not remove

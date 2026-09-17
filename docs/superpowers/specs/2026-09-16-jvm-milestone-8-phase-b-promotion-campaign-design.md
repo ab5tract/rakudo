@@ -179,9 +179,11 @@ cheapest site in the batch and the reference for the pattern.
 Deconts first through an inner `DecontSite` with the `SuspendedIn`
 tail `IsConcreteSite` already has (a Proxy FETCH may suspend). Then a
 switch on the captured boolification mode, a compilation-final
-constant, so the compiled site is one REPR read: the type-object test
-for mode 5, the unbox for modes 1 to 4, the bigint sign for 6, the
-iterator or elems test for 7 and 8. Mode 0 (call a method) is not
+constant, so the compiled site is one REPR read. (Revision 2,
+2026-09-17: **modes 1-5, 7 and 8 fold; 0 pins (`method`); 6 stays on
+the runtime road** -- the BIGINT read goes through the bigint cache
+behind a boundary, so it is left generic by ruling, a named B2
+candidate at `mode6=19,485` on sanity.) Mode 0 (call a method) is not
 folded: the site takes the runtime's slow path and the census counts
 it as `istrue.method`. A negate flag serves `isfalse` and `Truthy`'s
 negated form. `Truthy` keeps its native-int and num arms and gains the
@@ -192,16 +194,20 @@ node with a constant kind operand (find, try, can). `tryfindmethod`
 reaches it by a `dedicatedOp` arm on `OP_TRYFINDMETHOD` with two args;
 the other two by classlib arms. Deconts through an inner `DecontSite`.
 The guard adds the name string's identity (names arrive from the
-constant pool; a different name is a miss). Under a valid state whose
-`modeFlags` carry `METHOD_CACHE_AUTHORITATIVE`, the site folds the
-cache's answer for the name: a code object, or null. `findmethod`
-throws through the runtime's slow path on null (the type-name guest
-call lives there), `can` returns 0 or 1, `tryfindmethod` returns the
-answer. A non-authoritative or absent cache is **not** a site miss: the
-site calls the HOW-walk slow path every time and the census counts it
-as `findmethod.nonauth`. This is the "fold only published facts" ruling
-of the Phase A ledger; the multi-state guard is designed only if
-`findmethod.nonauth` is hot.
+constant pool; a different name is a miss). (Revision 2, 2026-09-17: **Ruling 7's rule**, which is
+weaker than this paragraph's first wording.) Under a valid state, a
+cache **HIT folds under any authority** -- the runtime answers a hit
+before it ever consults the flag -- while a cache **MISS folds to null
+only under an AUTHORITATIVE cache**, since under an advisory one the HOW
+may still find the method. `findmethod` throws through the runtime's
+slow path on null (the type-name guest call lives there), `can` returns
+0 or 1, `tryfindmethod` returns the answer. An unfoldable miss is **not**
+a site miss: the site pins, calls the HOW-walk slow path every time, and
+the census names which of the two it met -- `findmethod.advisory` (a
+miss under a non-authoritative cache) or `findmethod.nocache` (no method
+cache at all). This is the "fold only published facts" ruling of the
+Phase A ledger; the multi-state guard is designed only if those keys are
+hot.
 
 **Reachability arms.** Three lines in `dedicatedClasslib` route
 source-level `decont`, `isconcrete` and `create` (one arg each) to
@@ -209,13 +215,20 @@ source-level `decont`, `isconcrete` and `create` (one arg each) to
 the Phase A istype precedent: both roads answer a boxed object, the
 untyped sink is unchanged.
 
+**The batch kill-switch.** (Revision 2, 2026-09-17.) Every batch gets a
+name in `NQP_SITES_OFF=name,...` (or `all`), read once in
+`NqpProgramBuilder`: with a name off the dedicated road is not built and
+the generic table/classlib road runs instead, so a suspect batch can be
+bisected in a child process without a rebuild.
+
 **Commits and gate.** One commit per site, the arms last. One
 runtime-jar rebuild (`./nqp/gradlew -p nqp :nqp-runtime:jar
 :nqp-truffle:jar syncRuntimeJars`), retrain, nqp suite, warm sanity,
 then rig row `b1` with the census on, compared against the B0 baseline
 per op.
 
-**Tests.** `nqp/t/jvm/20-op-sites.t`: each site folds the right answer;
+**Tests.** `nqp/t/jvm/21-op-sites.t` (Revision 2, 2026-09-17: the file
+landed as 21, next to the census's 20): each site folds the right answer;
 refolds after the writer op republishes the type (`setcontspec`,
 `setboolspec`, `setmethcache`, `setmethcacheauth`); its census hit
 counter moves, which proves the routing is live.
