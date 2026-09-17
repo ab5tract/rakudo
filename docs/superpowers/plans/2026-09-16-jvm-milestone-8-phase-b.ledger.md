@@ -752,3 +752,49 @@ milestone 6's tier policy, and a CORE.c wall taken on it is comparable to nothin
 project). Every other token of the three command lines is the brief's, verbatim. (3) The spike's
 -14 s wall and the +2.1 points of `interpreter self` under it are recorded, not explained: a
 boundary removal changes where a sample is attributed as well as how long the work takes.
+
+### The settle plan for `t/nqp/023-named-args.t` (Task 3)
+
+The settle plan B1 left open, run on rakudo `74cdc5f495` / nqp `76d88cf32` -- batch 1's engine and
+Task 2's jars, nothing rebuilt, retrained or edited for this. Each cell is the same driver
+(`prove -q --exec ./nqp-j-gradle t/nqp/023-named-args.t`, `:cwd("nqp")`), with the cell's knob in
+front of it and every other knob unset.
+
+| cell | runs | passed | wall |
+| --- | --- | --- | --- |
+| persist on, sites on | 50 | 50 | 105 s |
+| persist off, sites on (`NQP_DISPATCH_PERSIST=off`) | 10 | 10 | 19.0 s |
+| persist on, sites off (`NQP_SITES_OFF=all`) | 10 | 10 | 19.9 s |
+| persist off, sites off | 10 | 10 | 19.4 s |
+
+The 2x2 is a real 2x2: both knobs are read by name from the process environment
+(`NqpProgramBuilder.java:59` `System.getenv("NQP_SITES_OFF")`, `DispatchPersist.kt:34`
+`System.getenv("NQP_DISPATCH_PERSIST")`, whose `off` arm ignores persisted slots), so the four
+cells are four configurations and not four spellings of one.
+
+nqp suite under `NQP_DISPATCH_PERSIST=verify`: **Result: FAIL**, Files=154 Tests=13247, prove
+**528 s** / gradle **530 s** (`BUILD FAILED in 8m 50s`), `mismatched=0` on **every one of the 155
+verify lines** the run printed (310 occurrences in the log, counting watched-run's echo; the only
+distinct value of `mismatched=` in the whole file is `0`, over 256,728 matched programs).
+`t/nqp/023-named-args.t .................. ok` in that same run.
+
+**The FAIL is the knob's own banner, not a red.** The single failing test is
+`t/nqp/114-pod-panic.t` (`Wstat: 0 Tests: 1 Failed: 1`), which spawns a child `nqp` and matches its
+**stderr** against a `^`-anchored `'===SORRY!=== Error while compiling pod-test.nqp'`. The child
+inherits `NQP_DISPATCH_PERSIST=verify` and prints `dispatch-verify: on` to stderr before compiling,
+so the anchor cannot match. Confirmed directly and deterministically: `./nqp-j-gradle
+t/nqp/114-pod-panic.t` is `ok 1` (2.8 s) and the same command under
+`NQP_DISPATCH_PERSIST=verify` is `not ok 1` (3.1 s), and `-e` with the streams separated shows both
+`dispatch-verify:` lines going to stderr. So the verify suite is green on everything verify is for
+-- it is a property of running a whole suite under a stderr-printing knob, and a note for whoever
+takes the next verify suite: that one file will fail under it until the banner moves or the test
+filters it.
+
+Verdict: **not reproduced in 80 file runs and one verify suite; the red stays an open item with no
+attribution, and B2's suite runs are its next chance.** What the four cells add to B1's ranked
+candidates is only negative: 80 runs of the file, including 20 with batch 1's sites off entirely
+and 20 with persisted slots ignored, produce no failure, so no cell is implicated and none is
+cleared either -- the plan's power against a once-in-hundreds intermittent was never large. The
+one thing the verify suite does narrow is candidate (a), the misbound persisted `lang-meth-call`
+slot: 256,728 restored programs were re-derived and compared with `mismatched=0`, which is evidence
+against a *systematic* misbind on this tree, though not against a racing or one-shot one.
