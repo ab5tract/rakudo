@@ -91,9 +91,10 @@ sub parse-census(Str $raw) {
     my %r;
     # classlibTyped= is absent from pre-batch-2 census files, so it is optional.
     if $text ~~ / 'op census: table=' (\d+) ' classlib=' (\d+) ' siteCalls=' (\d+) ' siteMisses=' (\d+)
-                  [ ' classlibTyped=' (\d+) ]? / {
+                  [ ' classlibTyped=' (\d+) ]? [ ' classlibLong=' (\d+) ]? / {
         %r<table> = +$0; %r<classlib> = +$1; %r<site-calls> = +$2; %r<site-misses> = +$3;
         %r<classlib-typed> = +$4 if $4.defined;
+        %r<classlib-long> = +$5 if $5.defined;
     }
     %r<top-table> = $text.lines.grep(*.starts-with('  table ')).head(8).map({ .words[2] ~ '=' ~ .words[1] }).join(' ');
     %r<top-classlib> = $text.lines.grep(*.starts-with('  classlib ')).head(8).map({ .words[2] ~ '=' ~ .words[1] }).join(' ');
@@ -101,7 +102,7 @@ sub parse-census(Str $raw) {
 }
 
 sub census-summary(%r) {
-    "table={%r<table> // '-'} classlib={%r<classlib> // '-'} classlibTyped={%r<classlib-typed> // '-'} "
+    "table={%r<table> // '-'} classlib={%r<classlib> // '-'} classlibTyped={%r<classlib-typed> // '-'} classlibLong={%r<classlib-long> // '-'} "
       ~ "siteCalls={%r<site-calls> // '-'} siteMisses={%r<site-misses> // '-'} "
       ~ "top-table: {%r<top-table> || '-'} top-classlib: {%r<top-classlib> || '-'}"
 }
