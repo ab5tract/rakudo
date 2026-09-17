@@ -420,8 +420,12 @@ instruction knows at build time.
 - **Five arity nodes** for arity 0-4 replace the variadic `ClassLibOp`
   there; arity 5-6 keep the variadic node. Each node has two
   specialisations selected by the constant result type: `long` for
-  INT/UINT (boxing elimination makes `getattr_i`, `elems`, `existskey`
-  allocation-free on the result side) and `Object` for OBJ/STR/NUM.
+  INT/UINT and `Object` for OBJ/STR/NUM. (Revision 4, 2026-09-17: the long
+  flavour serves context-free INT/UINT ops of arity 1-3 only -- plan
+  Ruling 1, a `:tc` op must answer a suspend token, which a long cannot
+  carry -- so `getattr_i`, `elems` and `existskey`, all `:tc`, take the
+  Object flavour; the long road is the 69 context-free registrations,
+  e.g. `chars`, `eqat`. Landed as such in row b2a.)
 - **One exact handle per site, resolved once**, adapted to a uniform
   type per arity and flavour, `(Object, ..., ThreadContext) long|Object`;
   a non-`:tc` op has the context argument dropped by the adapter. No
@@ -443,7 +447,7 @@ instruction knows at build time.
   the road.
 - One commit, engine-only; runtime jar rebuild plus retrain.
 
-### 6.3 The heads (rig row b2b)
+### 6.3 The heads (rig row b2c; the table below is superseded by Revision 4 at the end of this section)
 
 The table road gets no generic trim: its switch already receives typed
 arguments per arm, an arity node would save one array, and its heads are
@@ -465,7 +469,35 @@ Tests in `21-op-sites.t` per new site: fold, refold after the writer op,
 the counter moves. One commit per head; row b2b after them, same-session
 off/on per switch name.
 
-### 6.4 Polymorphism and the multi-state question
+#### Revision 4 (2026-09-17): 6.3 re-ranked from row b2a, as row b2c
+
+The table above was written from the B0 census. Row b2a's census and JFR
+(the trimmed tree) and the table-road finding of 6.6 replace it; the row
+is now **b2c**, after 6.6's row b2b. Shares are the road's JFR share
+times the op's count share of that road at b2a (table road 16.1 %, typed
+classlib road 15.0 %); the table road's shares roughly halve after 6.6's
+split, so its ops are re-read from b2b's census before b2c is cut.
+
+| op | roads, CORE.c calls | share | verdict | design |
+| --- | --- | --- | --- | --- |
+| `getattr_i/_n/_s/_u`, `bindattr_*` | table 28M + 7M + 9M, classlib 37M + 36M + 23M + 6M | ~6 % | **promote** | `NativeAttrSite` on the `AttrSite` pattern (two entries; layout and class-handle identity, name identity); the layout's `longGetter`/`longSetter`/`refGetter`; reached by `dedicatedOp` for the native table ids and by name for the classlib forms; answers `long` or `Object` by slot kind; no guest code on the fast path, so the read nodes carry no suspend wrapper |
+| `iseq_s` | table 44.7M | 2.8 % | **trim** | a dedicated string-equality node, PE-visible, no boundary |
+| `atkey`, `push`, `atpos`, `shift`, `elems` | table 39M / 39M / 20M; classlib 32M / 21M / 41M / 25M / 25M | 2.5 to 3.5 % per family | **census-gated trim** | dedicated nodes making the REPR virtual call with typed operands; enter b2c only if still at or above 1 % on b2b's census after the split |
+| `isnull` | classlib 32M | 1.0 % | **promote** (reachability) | one `dedicatedClasslib` arm to the existing `Op.ISNULL` |
+| `who`, `how` | classlib 26M, 7M | 0.8 %, 0.2 % | **trim** | dedicated nodes: inner `DecontSite`, then the STable field; no fold (no published fact) |
+| `unbox_i`, `unbox_s` | classlib 12M, 6M | 0.5 % | **promote** | `UnboxSite`: inner `DecontSite`, then the layout's unbox slot through its getter handle, folded under STable identity (REPR data republishes on change); a fact not listed before |
+| `eqaddr` | classlib 16M | 0.5 % | **trim** | a dedicated identity-compare node, PE-visible |
+| boolification mode 6 | 210k pinned on `IsTrueSite` | small | **promote** | fold under the state: type object 0, else the sign of the layout's bigint slot |
+| `isconcrete_nd` | 703k | small | **promote** | a no-decont flag on the `IsConcreteSite` road |
+| `iter`, `hlllist`, `hllhash` | classlib 13M; table 16M / 4M | 0.4 %, 1.0 %, 0.2 % | **census-gated** | re-read after the split; designed only if over the line, as their own row |
+| `lastexpayload`, `getcodeobj`, `callercode`, `takeclosure`, `concat` | classlib 13M, 7M, 7M, 6M, 11M | 0.2 to 0.4 % | **leave** | frame or context reads, pure functions; served by the typed road |
+
+Kill-switch names per site kind; tests in `21-op-sites.t` per new site
+(fold, refold after the writer op, the counter moves) and a routing
+assert per arm. One commit per head; row b2c after them, same-session
+off/on per switch name.
+
+### 6.4 Polymorphism and the multi-state question (rig row b2d; Revision 4 at the end of this section)
 
 - **Two-entry polymorphism is census-gated, per site.** After row b2b's
   census a batch 1 site (`IsContSite`, `IsTrueSite`, `FindMethodSite`)
@@ -478,13 +510,33 @@ off/on per switch name.
   retake shows them hot on CORE.c the remedy is an authoritative method
   cache for those types on the Rakudo side, outside this batch.
 
+#### Revision 4 (2026-09-17): the gate applied, as row b2d
+
+- **Two sites clear the 10 % rule on b2a's CORE.c census**: `IsTrueSite`
+  (32.1M pinned calls of 120M, 27 %) and `FindMethodSite` (4.4M of 8.9M,
+  49 %). `IsContSite` is 98 % pinned on 80k calls and stays monomorphic;
+  `DecontSite`, `IsTypeSite`, `IsConcreteSite` and `CreateSite` pin at or
+  near zero.
+- **The shape** is `AttrSite`'s: two captured states with their two folded
+  answers, each guarded by `valid()` and STable identity in turn; a third
+  distinct state pins the site; a republish of either state refolds that
+  entry without spending a miss. Kill-switch names unchanged (`istrue`,
+  `findmethod`), so the A/B is the existing switch.
+- **`FindMethodSite`'s second entry keeps Ruling 7**: each entry folds a
+  cache hit under any authority and a miss only under an authoritative
+  cache; the advisory probes stay on the slow path and stay counted.
+- **Measure, then keep or strike.** One commit per site, one row line each
+  (row b2d); the site's `pinned=` must fall and the sites container must
+  not grow beyond it. A second entry that does not move its site's pinned
+  count is struck.
+
 ### 6.5 Gates, rows, artefacts
 
 - **Gate per commit**: `22-classlib-road.t`, `21-op-sites.t`, the nqp
   suite, warm `t/01-sanity`, each with its wall time. No runtime-module
   change in the batch, so runtime JUnit is up to date by construction.
   Verify mode once after b2b.
-- **Rows** b2a and b2b, each: the two cold rows, the warm proxy, one
+- **Rows** b2a to b2d (Revision 4: b2b = 6.6, b2c = 6.3, b2d = 6.4), each: the two cold rows, the warm proxy, one
   knob-off CORE.c compile with JFR, one census run, and the same-session
   off/on pair under the batch's switch names.
 - **Artefacts**: this revision; the ledger's B2 section; the two tool
@@ -493,9 +545,63 @@ off/on per switch name.
 - **Out of scope for B2**: operand-side boxing on the trimmed road, the
   arity 5-6 tail, `iter`/`hlllist`/`hllhash` unless gated in, Phase C.
 
+### 6.6 The table road: the interpreted switch (Revision 4, 2026-09-17; rig row b2b)
+
+**The finding.** `NqpOps.run0`, the table road's 380-arm switch, ends at
+bytecode offset 8541 -- past HotSpot's 8000-byte `HugeMethodLimit` -- and
+no runner sets `-XX:-DontCompileHugeMethods` (default `true`, confirmed
+with `-XX:+PrintFlagsFinal`). Every table op therefore runs through a
+switch the JIT never compiles. 6.3's first wording declined a table-road
+trim on the premise that the switch was cheap; the premise was false. A
+survey of both compiled modules found `run0` the only method over the
+limit.
+
+**The spike** (same session, same jars, rakudo 4bd7117e2d / nqp
+e759c5ed2, one CORE.c JFR compile each on `rakudo-j-build`):
+
+| compile | wall | parse | table road share | `run0` self samples |
+| --- | --- | --- | --- | --- |
+| flag default | 266 s | 205.2 s | 16.1 % | 1007 |
+| `-XX:-DontCompileHugeMethods` | 246 s | 190.9 s | 10.2 % | 105 |
+
+Compiling the switch alone is worth 7.5 % of the compile, more than the
+whole classlib road trim (6.2, 5.7 %). The flag-default compile also
+repeated row b2a's 266 s from the earlier session: the CORE.c clock's
+first same-configuration repeat, cross-session, delta 0 s.
+
+**The fix** (user decision 2026-09-17: the split, not a runner flag):
+`run0` keeps the entry and switches on an id range to four sibling
+methods of about 95 arms each, roughly 2 KB apiece, the arms moved
+verbatim; no behaviour, boundary or wire change. The flag goes in no
+runner and stays the A/B knob. Acceptance: the compile under default
+flags lands within noise of the flagged 246 s and the `run0` family's
+self time collapses as the spike showed.
+
+**Row b2b carries the housekeeping** of part 1's inputs: 6.2's beneficiary
+list amended (this revision); the `dispatch-verify: on` banner leaves the
+child's stderr (into the verify log, or behind the existing trace knob)
+so the close's verify suite stops failing on `t/nqp/114-pod-panic.t`, a
+runtime-jar change with no setting recompile; a `classlibLong=` census
+header field so the long flavour is distinguishable in tests. The
+`testNqp`-through-a-harness item stays unscheduled.
+
+**The noise floor.** Row b2b takes two identical road-on CORE.c compiles
+and publishes the pair as the clock's same-session spread; until then a
+negative reading on the CORE.c clock cannot end the campaign (B2a
+ledger).
+
+**Gate and row.** Runtime and engine jar rebuild, retrain, the engine test
+files, the nqp suite, warm sanity, rig row b2b with census, the two
+CORE.c compiles with JFR and one with the census. One commit for the
+split, one per housekeeping item.
+
+**Order of rows from here: b2b (6.6), b2c (6.3 Revision 4), b2d (6.4
+Revision 4).** Two plans: plan A = b2b, written now; plan B = b2c and b2d,
+written after b2b's census settles the census-gated rows (the retake
+rule of section 4).
+
 ## What the next session does
 
-`superpowers:writing-plans` for batch 2 from section 6, from the worktree
-at rakudo `e4210e80ff` / nqp `76d88cf32`: 6.1 and 6.2 as one plan (the
-retake first, tests first), 6.3 as its own plan after row b2a is in the
-ledger; 6.4's rows only if their gate fires.
+`superpowers:writing-plans` for plan A (6.6: the split, the housekeeping,
+row b2b) from the worktree at rakudo `4bd7117e2d` / nqp `e759c5ed2`; then
+plan B (6.3 and 6.4 as revised) once row b2b's census is in the ledger.
