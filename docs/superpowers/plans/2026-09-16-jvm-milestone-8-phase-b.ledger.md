@@ -779,16 +779,36 @@ Files=154 Tests=13247, prove **528 s** / gradle **530 s** (`BUILD FAILED in 8m 5
 log, counting watched-run's echo; the only distinct value of `mismatched=` in the whole file is
 `0`). `t/nqp/023-named-args.t .................. ok` in that same run.
 
-**What that covers, stated per process.** The 256,728 is a sum over processes, not a count of
-distinct programs: the 155 `matched=` values are 1,656 on average (median 1,668, min **0**, max
-1,681), i.e. **on the order of 1,670 slots re-derived 155 times over**, not 256,728 distinct ones.
-The `min=0` is the one process that verified nothing, and it is not a test file: it is the build's
-own `> Task :trainDispatch` step at [2s] (`matched=0 byOutcome=0 mismatched=0 unseen=1730`, log
-line 77), which is why there are 155 verify lines for 154 files. And each process leaves a large
-part of the persisted set untouched: `unseen=` runs **183 to 2,430** (median 692, mean 749), so at
-the medians a process verifies 1,668 of the 2,360 slots it loaded and 1,668 of the **4,191** the
-retrain wrote -- under half of the trained set, in any one process. The verify road's reach here is
-one shallow pass over the commonly-loaded slots, repeated; it is not a sweep of the persisted set.
+**What that covers, stated per process -- and what the counters actually count.** These are
+**recording-event counts, not slot-set sizes**, and the difference decides how much the line is
+worth. `Dispatch.kt:274-275` calls `DispatchPersist.verify` **once per completed recording** at a
+site; `DispatchPersist.kt:163-177` then bumps `verifyMatched` **once per applicable kept program
+per recording** (so one recording can bump it more than once, and a hot site that records a hundred
+times contributes a hundred bumps for the one slot), `verifyByOutcome` when the texts differ but
+the outcomes agree, and `verifyUnseen` once per recording whose site has an **empty** kept list or
+no applicable kept program. Since `Dispatch.kt:123` sets `site.verifyPrograms` to whatever
+`restore` returns -- an empty list when nothing was persisted for that site -- `unseen` is
+dominated by **newly recorded sites with no persisted counterpart**, which is the opposite
+population to "persisted slots that went unexercised". The counters that would give the loaded set,
+`restored` / `restoredSites` (`DispatchPersist.kt:60-61`), are not on the verify line at all, so
+this run reports no loaded-set or distinct-slot figure and none is inferred here.
+
+So: the 256,728 is a sum of **events** over 155 processes, not 256,728 distinct programs. Per
+process, `matched=` has median **1,668** (mean 1,656, min **0**, max 1,681) and `matched+unseen`
+has median **2,350** (mean 2,405, min 1,730, max 4,100) -- and the ceiling on distinct slots behind
+any of it is what **this run's own** `> Task :trainDispatch` wrote: `dispatch-record: done 9 paths,
+**1,681 slots**, 1,709 programs, 41 unpersistable, 0 failed` (log line 97), the set the suite's
+jars carried. (Not B1's 4,191: that is the rakudo tree's retrain, a different set of paths, and it
+does not appear in this log.) A median process's 1,668 `matched=` events against 1,681 persisted
+slots is ~99 % -- of *events to slots*, a ratio that says the events are spread over roughly the
+whole persisted set rather than piled on a few, and nothing more, since the instrument cannot tell
+one slot matched 1,668 times from 1,668 slots matched once. (The observed **max** `matched=` is
+1,681, the slot count exactly. Recorded, not read as anything: with events on one side and slots on
+the other, an equality is not a correspondence, and nothing in this run distinguishes coincidence
+from a real ceiling.) The `min=0` process verified nothing
+and is not a test file: it is `> Task :trainDispatch` itself at [2s]
+(`matched=0 byOutcome=0 mismatched=0 unseen=1730`, log line 77), which is why there are 155 verify
+lines for 154 files.
 
 **The FAIL is the knob's own banner, not a red.** The single failing test is
 `t/nqp/114-pod-panic.t` (`Wstat: 0 Tests: 1 Failed: 1`), which spawns a child `nqp` and matches its
@@ -808,8 +828,9 @@ candidates is only negative: 80 runs of the file, including 20 with batch 1's si
 and 20 with persisted slots ignored, produce no failure, so no cell is implicated and none is
 cleared either -- the plan's power against a once-in-hundreds intermittent was never large. The
 one thing the verify suite does narrow is candidate (a), the misbound persisted `lang-meth-call`
-slot: every restore the run made was re-derived and compared with `mismatched=0` -- but, per the
-coverage above, that is ~1,669 slots per process over 155 processes (one of them 0), with
-`unseen=183-2,430` never exercised in any given one, so it is evidence against a *systematic*
-misbind **among the commonly-loaded slots** on this tree, and no evidence at all about the unseen
-remainder, a racing misbind or a one-shot one.
+slot: **every comparison the run made reported no mismatch** -- 257,969 of them over 155 processes
+(256,728 agreeing by text, 1,241 by outcome, 0 mismatched), median 1,668 `matched=` events per
+process against a persisted set of 1,681 slots. What that does *not* cover follows from the event
+semantics above: **a restored slot whose site never records again is never compared**, so the
+reading is evidence against a *systematic* misbind among the slots this workload re-records, and no
+evidence about the slots it does not, about a racing misbind, or about a one-shot one.
