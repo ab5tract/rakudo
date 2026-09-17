@@ -542,6 +542,15 @@ of the 28.17 MB vs 7.83 MB blob gap with the writer fix first if confirmed.
 locking paragraph, the barrier, the engine `WvalSite` and the diagnostic
 stand. Phase C's brainstorm reads the milestone 8 text as the authority.
 
+**Revision 6 (2026-09-18): superseded in full by
+`docs/superpowers/specs/2026-09-18-jvm-milestone-8-phase-c-sc-demand-design.md`.**
+The format does change (version 12: packed references, varint ints, a
+string offset table, eight-byte table rows) and stage0 regenerates once;
+nothing below "stays eager" except the header, the dependencies, the
+code-ref shells and the repossessions. The barrier, the one global lock,
+the engine `WvalSite` and the `NQP_SC_EAGER` diagnostic stand as written
+there.
+
 No format change and no stage0 step; the SC reader and runtime only.
 
 **Stays eager** in `SerializationReader.deserialize()`: header and string heap;

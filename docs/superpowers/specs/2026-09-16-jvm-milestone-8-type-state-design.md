@@ -411,6 +411,16 @@ promotion bought.
   8. **Persisted dispatch slots keep priority** over Phase C if the two
      clocks disagree: MoarVM cannot persist dispatch programs, we can.
   The analysis doc holds the file:line evidence for each point.
+- **Revision 5 (2026-09-18): Phase C brainstormed and specified** in
+  `docs/superpowers/specs/2026-09-18-jvm-milestone-8-phase-c-sc-demand-design.md`,
+  which carries out the eight items above. User decisions there: the
+  format changes once in full (packed references, varint ints, a string
+  offset table, eight-byte table rows, the index on the object; version
+  12, stage0 regenerated once and still uncommitted), before the demand
+  reader; rows c0, c1, c2; the fixups are not chased below a stated
+  threshold. **Phase B is parked at row b2b, not closed**: plan B (rows
+  b2c, b2d) and its open items wait for Phase C's close (user, 2026-09-17,
+  "let's proceed to milestone 8 phase c").
 
 **Rig:** `tools/build/m7-rig.raku` as it stands (cold rakudo-e, cold
 nqp-e, dispatch counters, warm `t/01-sanity` proxy), with the publish
