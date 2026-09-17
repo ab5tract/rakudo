@@ -602,3 +602,26 @@ Artifacts (untracked): `m7-rig/b1.md`, `m7-rig/b1-{rakudo-e,nqp-e}-{run1..5,cens
 `m7-rig/b1-sanity-census.log`, and the row appended to `m7-rig/rows.md`; logs
 `nqp-suite-b1.log` (the FAIL), `nqp-suite-b1-rerun.log` (the PASS), `sanity-b1.log`, `rig-b1.log`
 under `/home/longwalker/.claude/jobs/455b5a91/tmp/`.
+
+### B1: the same-session A/B (controller, 2026-09-17, after the fix wave; nqp 76d88cf32 / rakudo f6d8941310)
+
+The kill-switch (`NQP_SITES_OFF=iscont,istrue,findmethod,reach`) makes the batch's effect a
+same-session measurement on the same jars and the same training, which the b0 -> b1 delta was not
+(b0 was taken on a loaded machine; see "the open item" above).
+
+Cold rows, best of 5, off / on / off / on: rakudo-e 2.303 / 2.274 / 2.388 / 2.368 s;
+nqp-e 1.232 / 1.255 / 1.168 / 1.506 (the last under a load spike). Reading: batch 1 buys about
+0.02-0.03 s on cold rakudo-e (1-2 %), inside the run-to-run noise; nqp-e is inconclusive. The
+b0 -> b1 -8.6 % was machine state, not the promotion. This matches the MoarVM analysis: cold start is
+per-call cost in the interpreter, and removing 22-38 % of the classlib calls moves it little.
+
+Warm proxy (t/01-sanity on one server), off / on / off / on: 48 / 46 / 59 / 49 s. Reading: the
+sites are worth 5-10 % of the warm proxy; the b0 -> b1 -22 % (64 -> 50 s) was inflated the same way.
+
+Integration gate on the final tree (after the fix wave): runtime JUnit up to date (69), nqp suite
+Result: PASS, Files=154, Tests=13247, prove 491 s / gradle 904 s including the four warm sweeps'
+wait; the one-off `023-named-args.t` red did not recur (its settle plan stands, above).
+
+Consequence for B2: the census ranks candidates by calls, and calls are not seconds; B2's selection
+reads the JFR --ops exclusive shares (the CORE.c compile is where the classlib share is measurable)
+and takes its rows the same-session way, off/on under the kill-switch.
