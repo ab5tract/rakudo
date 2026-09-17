@@ -834,3 +834,165 @@ process against a persisted set of 1,681 slots. What that does *not* cover follo
 semantics above: **a restored slot whose site never records again is never compared**, so the
 reading is evidence against a *systematic* misbind among the slots this workload re-records, and no
 evidence about the slots it does not, about a racing misbind, or about a one-shot one.
+
+## B2a: the classlib road trim (Tasks 4-6 of the batch 2 part 1 plan)
+
+Commits: nqp `e28831fe3` (the NqpTypeOps.kt split), nqp `4ad374cdf` (the typed road), rakudo
+`11cdd3856f` (Task 1's readers), the ledger commits of Tasks 2-3 (`9e1feca15a`, `c92dc63e6a`,
+`74cdc5f495`, `cb6827d167`, `d4030c04f8`, `23464be337`), and this one. The nine
+`nqp/src/vm/jvm/stage0/*.jar` stay uncommitted (user rule).
+
+Gate: Task 4 nqp suite Result: PASS Files=154 Tests=13247 (prove 495 s / gradle 696 s); Task 5
+`22-classlib-road.t` 24/24 (RED 3/24 first, on the unchanged jars), trio
+`22 + 21-op-sites + 20-op-census` Files=3 Tests=63 Result: PASS (26 s), nqp suite Result: PASS
+Files=155 Tests=13271 (prove 501 s / gradle 699 s), `t/nqp/125-dispatch-stats.t`'s
+`NQP_CLASSLIB_INLINE=1` knob child green inside that run; warm `t/01-sanity` 25 files in 40 s on one
+server, no reds (Step 1, watched-run elapsed 41 s,
+`/home/longwalker/.claude/jobs/584f1b84/tmp/sanity-b2a.log`). File sizes after the split:
+NqpTypeOps.kt 949 lines, NqpSiteOps.kt 314, NqpClassLibRoad.kt 150.
+
+Rig rows (rig walls 123 s / 65 s; `m7-rig: DONE tag=b2a` and `tag=b2a-off`, all markers present):
+
+`| b2a | 23464be337 | 4ad374cdf | 2.267 | 1.200 | 4933 | 37077 | 46/sanity | none | typed classlib road |`
+`| b2a-off | 23464be337 | 4ad374cdf | 2.246 | 1.227 | 4933 | 37077 | 46/sanity | none | NQP_SITES_OFF=classlib, same jars |`
+
+The five walls behind them: b2a rakudo-e 2.36 2.41 2.29 2.42 2.27, nqp-e 1.20 1.28 1.24 1.27 1.21;
+b2a-off rakudo-e 2.43 2.29 2.28 2.31 2.25, nqp-e 1.29 1.25 1.23 1.30 1.28. `misses=4933` and
+`hits=37077` on both, `red=0 new-red=-` on both.
+
+Against b1r (2.274 / 1.207 / 44 s): cold rakudo-e **-0.3 %**, cold nqp-e **-0.6 %**, warm **+4.5 %**
+(44 -> 46 s) -- every one of them inside the series' spread, i.e. nothing. Same-session off/on: cold
+rakudo-e 2.246 (off) / 2.267 (on) = **+0.9 % with the road on**, nqp-e 1.227 / 1.200 = **-2.2 % with
+it on**, warm 46 / 46 s. The two cold rows disagree in sign, which is the usual verdict of this pair
+on a change that is not about load: **the cold rows say nothing here and are reported for the
+record.**
+
+### The CORE.c clock (first-class from B2)
+
+All four compiles on `/usr/bin/perl rakudo-j-build` (B0's Ruling 7), output to the job dir, one at a
+time, nothing else running:
+
+| compile | wall | parse | optimize | qast | unit |
+| --- | --- | --- | --- | --- | --- |
+| b1r JFR, before (cross-session) | 286 s | 221.950 | 23.049 | 17.814 | 21.702 |
+| b1r census, before (cross-session) | 294 s | 226.58 | 24.70 | 18.86 | 23.24 |
+| **b2a JFR, road on** | **266 s** | 205.498 | 22.083 | 17.329 | 19.993 |
+| **b2a-off JFR, road off** (`NQP_SITES_OFF=classlib`) | **282 s** | 218.710 | 22.808 | 17.648 | 21.353 |
+| b2a census, road on | 263 s | 202.456 | 22.757 | 16.950 | 20.284 |
+
+Logs: `corec-jfr-b2a.log`, `corec-jfr-b2a-off.log`, `corec-census-b2a.log` in
+`/home/longwalker/.claude/jobs/584f1b84/tmp/`. **The same-session pair is the result: 266 s against
+282 s, -16 s = -5.7 %**, and it is parse that moves (-13.2 s = -6.0 %) with unit second
+(-1.36 s = -6.4 %); optimize -3.2 % and qast -1.8 %. Cross-session against b1r the JFR clock is
+286 -> 266 s (-7.0 %) and the census clock 294 -> 263 s (-10.5 %), both in the same direction and
+both carrying B0's open machine-state item, which is why the knob pair and not the b1r pair is
+quoted as the finding. One caveat of the same-session pair itself: it is **one compile each**, and
+the only variance estimate this session offers is the 3 s between the two road-on compiles (266 JFR
+vs 263 census) under different instruments -- so 16 s is well outside what little is known of the
+noise, but it is not a repeated measurement. Incidentally the census knob's overhead is no longer
+visible at all: 263 s with the census against 266 s with JFR, the census compile the *faster* of the
+two (at b1r the same pair read 294 vs 286, at B0 356 vs 319).
+
+### JFR `--ops`, CORE.c: b1r -> b2a-off -> b2a
+
+`m7-rig/b1r-corec-jfr-full.txt` (14,181 samples: main 14,071, TruffleCompilerThread-53 105) ->
+`m7-rig/b2a-off-corec-jfr-full.txt` (13,798: main 13,676, compiler 117) ->
+`m7-rig/b2a-corec-jfr-full.txt` (14,055: main 13,901, compiler 149). Shares are of all samples.
+
+| container | b1r | b2a-off | b2a |
+| --- | --- | --- | --- |
+| table (`NqpOps.run`) | 15.6 % (2208) | 15.8 % (2182) | 16.8 % (2358) |
+| classlib, variadic (`NqpOps.classlib`) | **17.0 %** (2404; leaf `classlibInline` 61.0 % = **10.3 %** global) | **17.3 %** (2385; leaf `classlibInline` 1375 = 57.7 % = **10.0 %** global) | 1.0 % (137) |
+| classlib, typed (`NqpClassLibRoad`) | 0.0 % (0) | 0.0 % (0) | **14.8 %** (2074; the new leaf: `call1` 351 / `call2` 344 / `call3` 142 / `call4` 133 / `obj2` 65 / `obj1` 54 / `callLong1` 41 / `call0` 37 / `callLong2` 30 / `obj3` 22 / `long1` 12 / `obj0` 7 / `callLong3` 5 / `long2` 3 / `obj4` 2 / `long3` 2 = 1250 = **8.9 %** global) |
+| **classlib road, both** | **17.0 % (2404)** | **17.3 % (2385)** | **15.7 % (2211)** |
+| sites (`NqpTypeOps`) | 2.4 % (344) | 1.5 % (211) | 1.7 % (244) |
+| sites (`NqpSiteOps`, new file at b2a) | n/a (0) | 0.9 % (122) | 1.1 % (155) |
+| **sites, union** | **2.4 % (344)** | **2.3 % (317)** | **2.7 % (374)** |
+| dispatch | 16.7 % (2371) | 16.6 % (2285) | 16.8 % (2362) |
+| interpreter self | 10.5 % (1488) | 10.5 % (1450) | 11.6 % (1629) |
+| outside all | 37.8 % (5366) | 37.5 % (5180) | 36.4 % (5122) |
+
+(The union rows subtract the samples that match both site patterns: 16 at b2a-off, 25 at b2a. Over
+all six containers the double-counting is 17 and 26 samples, 0.1-0.2 %.)
+
+The kill-switch is a real A/B on the same jars: **`NqpClassLibRoad` is 2074 samples with the road on
+and exactly 0 with `NQP_SITES_OFF=classlib`**, and the variadic container is the mirror image
+(137 against 2385). The road's own entry table at b2a is
+`ClassLib2.doCall` 607 (29.3 % of the container), `ClassLib1` 560, `ClassLib3` 409, `ClassLib4` 220,
+`ClassLib0` 123, `ClassLibLong1` 76, `ClassLibLong2` 40, `ClassLibLong3` 39 -- **the long flavour is
+155 of 2074 samples, 7.5 %** (and 93 of the 1250 road leaves, 7.4 %).
+
+### The census, per workload (b1r -> b2a)
+
+| workload | classlib | classlibTyped | siteCalls | top classlib (8), b2a |
+| --- | --- | --- | --- | --- |
+| rakudo-e | 122,661 -> 124,036 | 123,996 (**99.97 %**) | 128,512 -> 129,910 | Ops.setcodeobj 27116, Ops.atkey 15692, Ops.atpos 10611, Ops.isnull 10161, Ops.how 8455, Ops.concat 8247, Ops.shift 4189, Ops.elems 3216 |
+| nqp-e | 20,146 -> 19,870 | 19,845 (**99.87 %**) | 33,453 -> 33,204 | Ops.concat 3400, Ops.shift 2260, Ops.setcodeobj 1484, Ops.push 944, Ops.iter 858, Ops.isnull 848, Ops.atpos 789, Ops.elems 726 |
+| sanity | 13,853,545 -> 13,860,998 | 13,832,376 (**99.79 %**) | 24,044,622 -> 24,036,183 | Ops.atkey 1906359, Ops.atpos 1625972, Ops.isnull 1301350, Ops.how 993508, Ops.setcodeobj 683014, Ops.elems 558999, Ops.shift 477336, Ops.eqaddr 421124 |
+| CORE.c | 478,104,209 -> **478,105,835** | **475,195,846** (**99.39 %**) | 1,610,755,139 -> 1,610,757,009 | Ops.atpos 40878245, Ops.getattr_i 37062390, Ops.bindattr_i 35763164, Ops.atkey 32043494, Ops.isnull 31766412, Ops.who 26441996, Ops.elems 25534798, Ops.shift 25260732 |
+
+Sources: `m7-rig/b2a-{rakudo-e,nqp-e}-census.err`, `m7-rig/b2a-sanity-census.log`,
+`m7-rig/b2a-corec-census.err` (303 lines, first line the header), each read with
+`raku tools/build/m7-rig.raku --parse-census=<file>` and the new header field taken from the same
+block's `op census:` line. **The call counts do not move**: on CORE.c classlib is
++1,626 calls in 478.1 M (+0.0003 %), `table` +89 in 254.0 M, `siteCalls` +1,870 in 1.61 G, and the
+top-8 names are the same eight in the same order to within a few hundred calls. That is the point of
+the trim and the check on it: the road carries the same traffic, by a different mechanism.
+**99.4 % of the CORE.c road is typed** (the 2.9 M remainder is arity >= 5 and the dedicated sites,
+which keep the variadic road by design), and the three cheap workloads are 99.8-100.0 % typed.
+
+Reading against the stop rule (spec section 4, Revision 3): **the batch MOVES, on the CORE.c
+clock.** The robust comparison is the same-session pair on the same jars and the same training --
+266 s with the road, 282 s with `NQP_SITES_OFF=classlib`, **-5.7 %**, parse -6.0 % -- not the
+cross-session b1r pair (-7.0 %), which carries B0's machine-state item; the two agree in direction
+and size, which is as much as a cross-session pair can be asked for. The warm proxy does **not**
+move (46 s against 46 s off, 44 s at b1r), and the cold rows disagree in sign and are reported only
+for the record. The sample shares agree with the wall: the classlib road is 17.3 % of the compile
+off and 15.7 % on (its leaf 10.0 % -> 8.9 % global), everything else within a point or so, with
+`interpreter self` +1.1 and `table` +1.0 -- a boundary that is crossed once per instruction instead
+of once per call moves work into the interpreter's own frames as well as removing some of it, so
+part of that 1.6-point fall is re-attribution, as the B2-opening spike warned. A share-to-seconds
+conversion is deliberately **not** done: the two recordings have 13,798 and 14,055 samples over 282
+and 266 s, so the sampler's rate does not track the wall and any such arithmetic would be invented.
+
+**The premise this result must be judged against** (plan Ruling 1, restated after Task 5's review):
+the long flavour serves **only context-free INT/UINT ops of arity 1-3** -- 69 registrations -- and
+the ops spec 6.2 named as its beneficiaries, `elems`, `existskey`, `getattr_i`, are `:tc` and
+therefore take the **Object** flavour: one exact handle and no argument array, but still a boxed
+result. The measurement above is consistent with that: the long flavour is 7.5 % of the road's
+samples, so **the -5.7 % is the exact-handle-plus-arity-node change, essentially none of it the
+primitive return**. Whatever the long flavour is worth is still unmeasured, and siting `elems` and
+friends (6.3) is what would let it apply to them.
+
+Rulings:
+1. The long flavour serves context-free INT/UINT ops of arity 1-3 only (plan Ruling 1; a deviation
+   from spec 6.2's example list -- `elems`, `existskey`, `getattr_i` are `:tc` and stay
+   Object-flavoured until 6.3 sites them). See the premise paragraph above.
+2. The typed road is Kotlin (plan Ruling 2); the variadic road stays in NqpOps.java for arity 5-6,
+   the dedicated sites and the kill-switch.
+3. A census reader takes the largest block (plan Ruling 3); every census file read or written here
+   is non-empty and begins with `op census:`.
+4. **The capture test survived.** Task 5 Step 2 ran the capture snippet on the unchanged (variadic)
+   tree and it printed `43`, so the primary branch was taken: the three capture asserts were kept
+   and `22-classlib-road.t` stayed at `plan(24)`, 24/24 green. No cut, no fallback variant, no
+   ruling was needed there.
+5. **The `--ops` preset went stale twice with this batch, and the table above does not use it.**
+   Its container patterns are `table=NqpOps.run classlib=NqpOps.classlib sites=NqpTypeOps
+   dispatch=NqpDispatch`: after Task 4's split the sites moved to `NqpSiteOps.kt` are invisible to
+   `sites=` (155 samples at b2a, 122 at b2a-off), and nothing matches `NqpClassLibRoad`, so the
+   typed road's 2074 samples fall into "outside all" -- `m7-rig/b2a-corec-jfr.txt`, the file the
+   brief asked for, duly reads `classlib 1.0 %` and `outside all 52.1 %`. All three recordings were
+   therefore re-attributed with an explicit six-container set into
+   `m7-rig/{b1r,b2a,b2a-off}-corec-jfr-full.txt`, which is what this section's table reports; the
+   `--ops` files are kept beside them, unedited, as produced. **The tool was not changed** (this
+   task writes no code); updating the `--ops` preset to name the two new patterns is left to
+   whoever next touches it.
+6. Every CORE.c compile here ran on `/usr/bin/perl rakudo-j-build` (B0's Ruling 7, as at b1r); every
+   other token of the brief's command lines is verbatim, including the file names.
+
+Open items:
+- The gradle `testNqp` task still runs the nqp suite **cold, one JVM per file** -- 486-699 s in the
+  runs of Tasks 4-5 against roughly 200 s for the same files through a warm eval server. Routing it
+  through a harness / the eval server is an **open item, unscheduled** (user request, 2026-09-17).
+- B1's non-reproducing red (`t/nqp/023-named-args.t`) did not appear in any run of this batch;
+  it stays open with no attribution.
