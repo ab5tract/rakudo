@@ -667,9 +667,9 @@ On CORE.c the eight names batch 1 moved are **0 on the classlib road** (`Ops.dec
 in b0's census file (`m7-rig/b0-corec-census.err`, 69 lines): `Ops.decont` 499,704,638,
 `Ops.isconcrete` 73,421,782, `Ops.create` 17,572,121, `Ops.istrue` 9,350,543, `Ops.can` 5,066,814
 = **605.1 M**. The remaining 0.9 M is **inference, not measurement**: `iscont`, `findmethod` and
-`isfalse` sit below that cut at b0 (bounded there at < 4,700,751 each), and cold/compile run-to-run
-variance is inside the same residual. The moved calls reappear
-on the site road: `DecontSite calls=1,213,793,356 misses=1`, `IsTypeSite 126,941,693 / 3,134`,
+`isfalse` sit below that cut at b0 (bounded there at <= 4,700,751 each -- the last visible classlib
+row, `Ops.bindkey`), and cold/compile run-to-run variance is inside the same residual. The moved
+calls reappear on the site road: `DecontSite calls=1,213,793,356 misses=1`, `IsTypeSite 126,941,693 / 3,134`,
 `IsTrueSite 119,963,760 / 3,157 slow=[pinned=32080302 method=4921532 mode6=210367 generic=4662]`,
 `IsConcreteSite 92,302,881 / 0`, `CreateSite 46,359,109 / 171`, `FindMethodSite 8,915,793 / 415
 slow=[pinned=4404075 advisory=428529 nocache=89795 generic=404]`, `IsContSite 79,959 / 45`.
@@ -686,9 +686,9 @@ job dir so the build's jar was untouched:
 
 Against B0's same two points (356 s census, 319 s JFR): -17.4 % and -10.3 %. The census knob costs
 **8 s here** (294 - 286, +2.8 %) against **37 s at B0** (356 - 319); B0's section also quotes 28 s
-for the same knob, which is its census run against the M7-close knob-off, unprofiled 296 s -- a
-third baseline, not this one. The fall in that overhead is **not attributed here**, and in
-particular not to "fewer counters": the census's total counter work went *up* between the two
+for the same knob on the parse stage alone (281.26 vs 252.80, the same pair of runs), and the b1r
+parse-stage figure is 4.6 s (226.58 vs 221.95). The fall in that overhead is **not attributed
+here**, and in particular not to "fewer counters": the census's total counter work went *up* between the two
 trees, not down. `table + classlib + siteCalls` is **2,033,427,631 at b0 against 2,342,907,872 at
 b1r (+309 M)** -- the classlib road loses 0.606 G bumps while the site road gains 0.918 G -- so any
 explanation would have to argue that a site bump is cheaper than a classlib bump, and nothing
