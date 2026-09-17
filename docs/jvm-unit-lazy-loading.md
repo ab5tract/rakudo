@@ -373,11 +373,13 @@ same. Over the nqp suite that is 1309 of 272687 comparisons.
   clear them, so a figure must name the population it covers.
 
 - `NQP_DISPATCH_PERSIST=on|off|verify` selects the mode (unset means
-  `on`; an unrecognised value also means `on`). `verify` prints
-  `dispatch-verify: on` and a
+  `on`; an unrecognised value also means `on`). `verify` prints a
   `matched=/byOutcome=/mismatched=/unseen=` summary at exit, plus one
   `MISMATCH` block per failure naming the site identity, the dispatcher,
-  and both programs' `DispatchDump` text.
+  and both programs' `DispatchDump` text. The `dispatch-verify: on`
+  banner is printed only under `NQP_DISPATCH_VERIFY_LOG` (to the log) or
+  `NQP_DISPATCH_PERSIST_TRACE` (to stderr), never to a bare stderr by
+  default; the exit summary line is unchanged.
 
 - `NQP_DISPATCH_VERIFY_LOG=<path>` sends every verify line to that file
   instead of stderr, appended and prefixed by the writing process's pid.

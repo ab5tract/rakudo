@@ -1104,9 +1104,14 @@ with nothing else running. Logs in `/home/longwalker/.claude/jobs/584f1b84/tmp/`
 | b2b census (`NQP_OP_CENSUS=1`) | 244 s | 187.717 | 22.215 | 15.699 | 17.186 |
 
 **The clock's same-session spread**: b2b-1 vs b2b-2 = **2 s (0.8 %)**, and the census compile falls
-inside it (244 s) although it carries a different instrument. From here a batch moves on this clock
-only outside that spread. What B2a could only estimate at 3 s between two differently instrumented
-runs is now measured on two identical ones, and it is smaller.
+inside it (244 s) although it carries a different instrument. What B2a could only estimate at 3 s
+between two differently instrumented runs is now measured on two identical ones, and it is smaller.
+**2 s is a measured LOWER BOUND on the spread, not the spread itself**: it is the range of **n = 2**
+identical compiles, and two draws cannot bound a distribution from above. The b2b-flag compile at
+**250 s** sits *outside* it -- exactly the region a wider true spread would swallow -- so **plan B
+takes a third identical compile** before reading b2c against this floor. From here a batch moves on
+this clock only outside the spread once plan B's third compile has bounded it; until then this pair
+is a lower bound.
 
 Against that floor, b2a -> b2b is **266 -> 243/245 s, -21 to -23 s = -7.9 to -8.6 %**, an order of
 magnitude outside the spread, and it is **parse** that carries it (205.5 -> 187.7/187.9,
@@ -1185,7 +1190,7 @@ semantics, and the census is the check on that.
 The new field prices the long flavour for the first time on a real workload: **61.3 M of the
 475.2 M typed classlib calls are `long`-flavoured, 12.9 %** -- against the **7.5 % of the typed
 container's samples** the b2a JFR attributed to `ClassLibLong1..3` (155 of 2074, i.e. 1.10 % of all
-samples; a third distinct 7.5 %, and not the spike's wall delta disambiguated above), so the long
+samples; a second distinct 7.5 %, and not the spike's wall delta disambiguated above), so the long
 arms are somewhat *cheaper per call* than the Object ones, not dearer. The rig's other three workloads (`m7-rig/b2b-{rakudo-e,nqp-e}-census.err`,
 `m7-rig/b2b-sanity-census.log`) read `classlibLong` 14,653 of 122,621 (11.9 %), 1,493 of 20,121
 (7.4 %) and 1,887,808 of 13,796,115 (13.7 %).
@@ -1253,6 +1258,9 @@ Rulings:
    split** (16.8 -> 9.9 %), so the same call counts are now worth less of the compile. On the b2a
    shares spec 6.3 Revision 4 quoted (table 16.1 %, typed classlib 15.0 %) all five of
    `atkey`/`push`/`atpos`/`shift`/`elems` were "2.5 to 3.5 % per family"; after 6.6 only three are.
+   The share model assumes a **uniform cost per call within a road** -- the road's sample share is
+   apportioned by call count alone -- and that assumption is what puts `shift`/`elems` out by
+   0.05 points rather than by a mechanism, so both stay **re-openable in plan B**.
 5. **The classlib road's share is a union of two containers here** (`NqpOps.classlib` +
    `NqpClassLibRoad`), because the census's `classlib` counter counts both flavours. Taking the
    typed container alone (16.5 % at b2b-1) moves every classlib-side share in Ruling 4 down by about
@@ -1271,3 +1279,12 @@ Open items:
   beyond "the flag now only buys compilation of methods that were left huge on purpose".
 - B1's non-reproducing red (`t/nqp/023-named-args.t`) did not appear in any run of this batch;
   it stays open with no attribution.
+- **Spec 6.5's verify-mode nqp suite after b2b is NOT RUN**; carried to plan B. (Task 3 removed the
+  banner artefact that failed the last one -- see Ruling 3 -- so the suite has a clean shot there.)
+- The gate ran **per task, not per commit** as spec 6.5 words it, per the standing
+  no-fine-grained-gating rule.
+- Plan B's two inputs from this batch's final review: (a) a `t/jvm` test asserting that every
+  `case OP_*` id lies inside its `run0` piece's id range **and** that no `run0` piece exceeds
+  8000 bytes (one `javap` on `NqpOps.class`, sub-second) -- the partition is otherwise guarded only
+  by the nqp suite; (b) a **third identical CORE.c compile at b2c**, to bound the clock's spread
+  from above (see "The CORE.c clock").
