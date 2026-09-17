@@ -89,7 +89,8 @@ sub largest-census-block(Str $text --> Str) {
 sub parse-census(Str $raw) {
     my $text = largest-census-block($raw);
     my %r;
-    # classlibTyped= is absent from pre-batch-2 census files, so it is optional.
+    # classlibTyped= and classlibLong= are absent from older census files
+    # (pre-batch-2 and batch-2-part-1 respectively), so both are optional.
     if $text ~~ / 'op census: table=' (\d+) ' classlib=' (\d+) ' siteCalls=' (\d+) ' siteMisses=' (\d+)
                   [ ' classlibTyped=' (\d+) ]? [ ' classlibLong=' (\d+) ]? / {
         %r<table> = +$0; %r<classlib> = +$1; %r<site-calls> = +$2; %r<site-misses> = +$3;
