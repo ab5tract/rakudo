@@ -149,7 +149,14 @@ $(NQP_RUNTIME_JAR): $(NQP_RUNTIME_SOURCES) @nfp(nqp/nqp-runtime/build.gradle.kts
 	@# instead of re-running Gradle on every subsequent invocation.
 	$(NOECHO)touch $(NQP_RUNTIME_JAR)
 
-$(RUNTIME_JAR): $(RUNTIME_SOURCES) @nfp(rakudo-runtime/build.gradle.kts)@ | $(NQP_RUNTIME_JAR)
+# A REAL prerequisite, not order-only: rakudo-runtime.jar is COMPILED
+# against nqp-runtime's classes, so an nqp runtime change that is only
+# source-compatible (a JvmField turned into a Kotlin property, milestone 8
+# Phase C) leaves a stale jar that dies with NoSuchFieldError on every
+# rakudo-j run. The rebuild is 2.5 s and does NOT cascade into the setting:
+# the blib jars take both runtime jars order-only (RAKUDO_DEPS_EXTRA above),
+# and only the training stamp wants them for real -- which is what it is for.
+$(RUNTIME_JAR): $(RUNTIME_SOURCES) @nfp(rakudo-runtime/build.gradle.kts)@ $(NQP_RUNTIME_JAR)
 	@echo(+++ Generating	$@ (Gradle))@
 	$(NOECHO)cd @nfp(rakudo-runtime)@ && @nfp(../nqp/gradlew)@ --console=plain jar
 	$(NOECHO)$(CP) @nfp(rakudo-runtime/build/libs/rakudo-runtime.jar)@ $(RUNTIME_JAR)
