@@ -70,6 +70,27 @@ Tree: rakudo 8ef36555eb (worktree branch, ledger commit on top) / nqp 5f0f54c6e.
 Every artifact on disk -- the nine stage0 jars, every built jar -- is format 12;
 `MIN_VERSION` is 12 and the reader is one format again.
 
+**Evidence.** Every wall below is named with the `watched-run` log it came from.
+The nine logs live in `m7-rig/c1-logs/` -- the same untracked evidence directory
+C0 cites, never committed -- and each one ends in its own
+`=== EXIT=<n> verdict=<v> elapsed=<s>s ===` line:
+
+```
+m7-rig/c1-logs/nqp-c1-window.log    m7-rig/c1-logs/regen-c1.log
+m7-rig/c1-logs/make-c1-window.log   m7-rig/c1-logs/configure-c1.log
+m7-rig/c1-logs/nqp-suite-c1.log     m7-rig/c1-logs/make-c1.log
+m7-rig/c1-logs/sanity-c1.log        m7-rig/c1-logs/rig-c1.log
+                                    m7-rig/c1-logs/corec-c1.log
+```
+
+Two caveats on that set. `make-c1-window.log` holds only the third, successful
+`make` of the window build: `watched-run` truncates its log per run, so the two
+one-second failures quoted under "A note on the window build" were overwritten
+and survive only as the quotations there. And the two *window* gate logs
+(`nqp-suite-c1-window`, `sanity-c1-window`) were not copied across; the window
+gate walls below are reported without a log to point at, while the clean-build
+gate walls all have one.
+
 | row | rakudo | nqp | cold rakudo-e | cold nqp-e | misses | hits | warm proxy | notes |
 |---|---|---|---|---|---|---|---|---|
 | c1 | 8ef36555eb | 5f0f54c6e | 2.301 | 1.220 | 4933 | 35843 | 41/sanity | rig wall 60 s |
@@ -81,21 +102,23 @@ are 2.30 2.46 2.31 2.32 2.35 (rakudo-e) and 1.28 1.32 1.27 1.30 1.22 (nqp-e).
 The first cold run's dispatch line reads `staleSchema=0 staleStamp=0` (the make
 retrained the persisted slots itself: `dispatch-record: done 21 paths, 4228
 slots, 4527 programs, 14 unpersistable, 0 failed`). The 41 s warm proxy is
-inside c0's 42 s and, per the C0 note, takes no credit.
+inside c0's 42 s and, per the C0 note, takes no credit. The rig's own log is
+`m7-rig/c1-logs/rig-c1.log` (60 s wall) and its per-run files are the
+`m7-rig/c1-*` set, where the `staleSchema=0 staleStamp=0` dispatch lines are.
 
 ### The two builds
 
-| step | wall | result |
-|---|---|---|
-| window: `./nqp/gradlew -p nqp clean` | 1 s | ok |
-| window: `./nqp/gradlew -p nqp buildJvm` (version-11 stage0, dual reader) | 186 s | BUILD SUCCESSFUL |
-| window: `make clean` + `make` | 803 s | EXIT=0, `dispatch-record: done ... 0 failed` |
-| window gate: nqp suite (sweep, 160 files) | 190 s | EXIT=0 verdict=ok |
-| window gate: warm `t/01-sanity` (25 files) | 62 s | 0 FAIL |
-| window gate: `nqp/t/jvm/23-sc-demand.t` | 3 s | 24/24 PASS |
-| regen: `./nqp/gradlew -p nqp jBootstrapFiles` | 1 s | BUILD SUCCESSFUL, nine stage0 jars modified, all `version=12` |
-| clean: `perl Configure.pl --backends=jvm --gen-nqp` | 188 s | BUILD SUCCESSFUL (bootstrapped from the version-12 stage0 under the one-format reader) |
-| clean: `make` | 800 s | EXIT=0, `dispatch-record: done 21 paths, 4228 slots, 4527 programs, 14 unpersistable, 0 failed` |
+| step | wall | result | log |
+|---|---|---|---|
+| window: `./nqp/gradlew -p nqp clean` | 1 s | ok | -- (run bare) |
+| window: `./nqp/gradlew -p nqp buildJvm` (version-11 stage0, dual reader) | 186 s | BUILD SUCCESSFUL | `m7-rig/c1-logs/nqp-c1-window.log` |
+| window: `make clean` + `make` | 803 s | EXIT=0, `dispatch-record: done ... 0 failed` | `m7-rig/c1-logs/make-c1-window.log` |
+| window gate: nqp suite (sweep, 160 files) | 190 s | EXIT=0 verdict=ok | not copied (see Evidence) |
+| window gate: warm `t/01-sanity` (25 files) | 62 s | 0 FAIL | not copied (see Evidence) |
+| window gate: `nqp/t/jvm/23-sc-demand.t` | 3 s | 24/24 PASS | -- (prove, on the terminal) |
+| regen: `./nqp/gradlew -p nqp jBootstrapFiles` | 1 s | BUILD SUCCESSFUL, nine stage0 jars modified, all `version=12` | `m7-rig/c1-logs/regen-c1.log` |
+| clean: `perl Configure.pl --backends=jvm --gen-nqp` | 188 s | BUILD SUCCESSFUL (bootstrapped from the version-12 stage0 under the one-format reader) | `m7-rig/c1-logs/configure-c1.log` |
+| clean: `make` | 800 s | EXIT=0, `dispatch-record: done 21 paths, 4228 slots, 4527 programs, 14 unpersistable, 0 failed` | `m7-rig/c1-logs/make-c1.log` |
 
 **A note on the window build.** The brief expected `gradlew clean` + `make` to
 rebuild the nqp bootstrap; it does not. The Makefile's only gradle edge is
@@ -108,33 +131,52 @@ of dependency .../stage2/NQPHLL.nqp"), `make clean` + `make`.
 
 ### Gates on the clean build
 
-| gate | wall | result |
-|---|---|---|
-| `./nqp/gradlew -p nqp :nqp-runtime:test` | 3 s | BUILD SUCCESSFUL |
-| `nqp/t/jvm/23-sc-demand.t` | 3 s | 24/24, Result: PASS |
-| nqp suite (sweep, 160 files) | 188 s | EXIT=0 verdict=ok |
-| warm `t/01-sanity` (25 files) | 60 s | 0 FAIL |
-| the rig | 60 s | `m7-rig: DONE tag=c1` |
+| gate | wall | result | log |
+|---|---|---|---|
+| `./nqp/gradlew -p nqp :nqp-runtime:test` | 3 s | BUILD SUCCESSFUL | -- (run bare) |
+| `nqp/t/jvm/23-sc-demand.t` | 3 s | 24/24, Result: PASS | -- (prove, on the terminal) |
+| nqp suite (sweep, 160 files) | 188 s | EXIT=0 verdict=ok | `m7-rig/c1-logs/nqp-suite-c1.log` |
+| warm `t/01-sanity` (25 files) | 60 s | 0 FAIL | `m7-rig/c1-logs/sanity-c1.log` |
+| the rig | 60 s | `m7-rig: DONE tag=c1` | `m7-rig/c1-logs/rig-c1.log` |
 
 ### CORE.c
 
-One compile on the idle box (load average 0.95 before it), 226 s wall, against
-row b2b's 243-245 s same-session: **-17 to -19 s, -7.0 to -7.8 %**.
+**One** compile on the idle box (load average 0.95 before it), 226 s wall
+(`m7-rig/c1-logs/corec-c1.log`), against row b2b's 243-245 s: **-17 to -19 s,
+-7.0 to -7.8 %**.
 
 | stagestat | b2b (census run) | c1 | delta |
 |---|---|---|---|
-| parse | 187.7 | 173.7 | -14.0 |
-| optimize | 22.2 | 20.4 | -1.8 |
-| qast | 15.7 | 15.2 | -0.5 |
-| unit | 17.2 | 16.0 | **-1.2** |
+| parse | 187.7 | 173.667 | -14.0 |
+| optimize | 22.2 | 20.370 | -1.8 |
+| qast | 15.7 | 15.211 | -0.5 |
+| unit | 17.2 | 16.027 | -1.2 |
 
-`unit` is the stage the writer runs inside: the format-12 writer is 1.2 s (-7 %)
-*cheaper* than the format-11 one despite the extra varint encoding, because it
-writes 52 % fewer bytes. `parse`'s -14 s is the reading side of the same move
-(this stage loads BOOTSTRAP and the settings CORE.c depends on).
+**How much weight this table carries.** One compile is one compile: it was not
+re-run (the no-re-run rule), so there is no c1 spread to put beside it, and
+b2b's column is a **cross-session** census figure -- the 2 s same-session spread
+B2 measured is the floor on what a difference has to clear before it means
+anything, and these deltas are read across sessions, where the floor is higher
+still and unmeasured. So:
 
-The in-build CORE.c of the clean `make` agrees: parse 183.4 / optimize 20.6 /
-qast 15.7 / unit 16.0.
+* **No mechanism is claimed for `parse`'s -14 s.** It is the largest delta in
+  the table and it is unexplained. The plausible story -- that stage loads
+  BOOTSTRAP and the settings CORE.c depends on, and those blobs are 52-63 %
+  smaller -- is a hypothesis this row does not test, and -14 s is far more than
+  Phase C has any business moving in a parse. It wants a second compile, or a
+  profile, before anyone builds on it.
+* `unit` is the stage the format-12 writer demonstrably runs inside, so its
+  -1.2 s is the delta with a known mechanism available. Even there, one compile
+  against a cross-session number supports "the new writer is not a compile-time
+  regression" and not a claimed -7 %.
+
+What this row does establish is the negative: **format 12 did not make the
+compile slower**, and it did that while writing 52 % fewer bytes.
+
+The in-build CORE.c of the clean `make` is a second, differently-conditioned
+data point in the same direction (`m7-rig/c1-logs/make-c1.log`, lines 71-76 --
+read from that log, not carried over from the standalone compile, which read
+16.027): parse 183.435 / optimize 20.591 / qast 15.688 / unit 16.026.
 
 ### The blob
 
@@ -186,8 +228,13 @@ Jars on disk:
 
 | artifact | before | after | delta |
 |---|---|---|---|
-| `blib/CORE.c.setting.jar` | 56,412,944 | 41,737,626 | -26.0 % |
+| `blib/CORE.c.setting.jar` | 56,412,944 (remembered, pre-c1 jar overwritten) | 41,737,626 | -26.0 % |
 | `blib/Perl6/BOOTSTRAP/v6c.jar` | -- | 9,121,372 | -- |
+
+The CORE.c "before" is carried in from the Task 5 brief, not measured in this
+tree: the c0 jar was overwritten by the window build before anyone ran `ls -l`
+on it. The blob figures above it are the ones with provenance on both sides
+(C0's section records 28,167,619 from its own run of the tool).
 
 The nine regenerated stage0 jars (working-tree change, never committed):
 ModuleLoader 24,770 / NQPCORE.setting 190,367 / NQPHLL 496,963 / nqp 903,548 /
