@@ -63,6 +63,19 @@ sub parse-cold(Str $text) {
     %r<restored> = +$0 if $text ~~ / ' restored=' (\d+) /;
     %r<recorded> = +$0 if $text ~~ / ' recorded=' (\d+) /;
     %r<publishes> = +$0 if $text ~~ / ' publishes=' (\d+) /;
+    # Phase C: the demand reader's exit line of the largest SC (CORE.c in a
+    # rakudo run, NQPCORE in an nqp run). Summary-only, like restored=.
+    my $largest = -1;
+    for $text.lines {
+        if / ^ 'sc-demand ' (\S+) ' stables=' (\d+) '/' (\d+) ' objects=' (\d+) '/' (\d+)
+              ' closures=' (\d+) '/' (\d+) ' contexts=' (\d+) '/' (\d+) ' drains=' (\d+) ' ms=' (\d+ [ '.' \d+ ]?) /
+           and +$4 > $largest {
+            $largest = +$4;
+            %r<sc-objects> = +$3; %r<sc-objects-total> = +$4;
+            %r<sc-stables> = +$1; %r<sc-stables-total> = +$2;
+            %r<sc-drains> = +$9;  %r<sc-ms> = +$10;
+        }
+    }
     for $text.lines {
         %r<by>{$1} = +$0 if / ^ '  misses ' (\d+) ' ' (\S+) /;
     }
@@ -111,6 +124,8 @@ sub census-summary(%r) {
 sub cold-summary(%r) {
     my @top = %r<by>.sort(-*.value).head(8).map({ .key ~ '=' ~ .value });
     "hits={%r<hits> // '-'} misses={%r<misses> // '-'} restored={%r<restored> // '-'} recorded={%r<recorded> // '-'} publishes={%r<publishes> // '-'} "
+      ~ "scObjects={%r<sc-objects> // '-'}/{%r<sc-objects-total> // '-'} scStables={%r<sc-stables> // '-'}/{%r<sc-stables-total> // '-'} "
+      ~ "scDrains={%r<sc-drains> // '-'} scMs={%r<sc-ms> // '-'} "
       ~ "stage-lines={%r<stage-lines>} top: @top.join(' ')"
 }
 

@@ -4,23 +4,26 @@
 #
 # Lines are "unit-load <depth> <unit> <stage> <ms> [counts]". A unit's own
 # stages print at depth d and its load-total at d-1, so a child's load-total
-# shares the depth of its parent's stages. The children (load-total, sc-stub,
-# sc-finish) that print at depth d before a container stage
+# shares the depth of its parent's stages. The children (load-total, sc-load)
+# that print at depth d before a container stage
 # (deserialize-program, load-block) at depth d ran inside it and are
 # subtracted from it. A load-total counts as a child only while a unit's stages
 # are open at that depth: a root load (loadApp at depth 0) charges nobody.
 #
-# The v2 stages are open-store, shells, sc-stub, sc-finish,
+# The v2 stages are open-store, shells, sc-load,
 # deserialize-program, static-lex-drain, load-block and load-total. v1's
 # decode stages are gone with the v1 reader: record and program decoding now
 # happens inside the ensureBody fills that run during deserialize-program and
 # load-block, which is where their time is charged. Nothing is skipped -- v1's
 # decode-total was skipped because it contained the decode leaves printed
 # before it, and there is no such aggregate any more.
+#
+# The `sc-demand` lines are not stages: demand time is charged to whichever
+# stage triggered it; they are printed after the table.
 
 sub MAIN($file, Int :$top = 12) {
     my constant CONTAINER = set <deserialize-program load-block>;
-    my constant CHILD     = set <load-total sc-stub sc-finish>;
+    my constant CHILD     = set <load-total sc-load>;
     my %acc;              # depth -> ms of children since the last container
     my %open;             # depth -> a unit's stages are open at this depth
     my %stage;            # stage -> exclusive ms
@@ -55,5 +58,10 @@ sub MAIN($file, Int :$top = 12) {
     say "largest single items:";
     for @items.sort(-*[0]).head($top) -> ($x, $unit, $st) {
         say sprintf "  %8.1f ms  %-28s %s", $x, $unit.substr(0, 28), $st;
+    }
+    my @demand = $file.IO.lines.grep(*.starts-with('sc-demand '));
+    if @demand {
+        say "demand at exit (charged above to the stages that triggered it):";
+        say "  $_" for @demand;
     }
 }
