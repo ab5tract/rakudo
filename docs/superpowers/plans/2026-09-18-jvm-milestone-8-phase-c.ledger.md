@@ -15,9 +15,16 @@ Row c0 was measured twice. The first rig run shared the box with an IntelliJ
 indexing burst (load average 11.6, ~6.5 cores taken) and read 4.436 / 1.909 /
 74 s; it is discarded, evidence kept outside the tree. The row above is the
 re-run on the idle box, whose five cold walls are 2.54 2.37 2.36 2.46 2.41
-(rakudo-e) and 1.31 1.34 1.31 1.35 1.26 (nqp-e), warm proxy `t/01-sanity` 25/25
-red=0. The rig prints the rakudo SHA it sees, `beef32d2a3` (HEAD: this plan and
-the spec, docs only); the code tree is 2338bc426c's.
+(rakudo-e) and 1.31 1.34 1.31 1.35 1.26 (nqp-e), and whose warm proxy line is
+`m7-rig: warm t/01-sanity 42s warm=42 red=0 new-red=-` (the TAP is
+`m7-rig/c0-sanity.log`). The rig prints the rakudo SHA it sees, `beef32d2a3`
+(HEAD: this plan and the spec, docs only); the code tree is 2338bc426c's.
+
+**The 42 s warm proxy is machine state, not a move.** The same proxy on the same
+shape (one 8 GB eval server, `t/01-sanity`) read 57 s at the M7 close and 73 s at
+B-pre, and nothing in this tree changed between them, so no Phase C row takes
+credit against the 42 s: warm-proxy comparisons are only meaningful against a
+proxy measured in the same session.
 
 Blob (tools/build/sc-blob-sizes.raku), CORE.c:
 
