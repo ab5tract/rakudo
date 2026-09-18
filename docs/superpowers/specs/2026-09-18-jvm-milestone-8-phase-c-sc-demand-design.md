@@ -244,13 +244,13 @@ of its own finish rather than in a pass over all contexts.
 **Lazy HOW and WHO.** An STable's finish reads the HOW and WHO references
 as (SC, index) pairs into two private fields and leaves `HOW` and `WHO`
 null. `STable.HOW` and `STable.WHO` become Kotlin properties whose getter
-demands on first read and whose setter clears the pending pair, so the
-29 Kotlin call sites keep their syntax and the one Java caller uses the
-getter; the KnowHOW bootstrap's null-then-set sequence is unchanged. A
-type reached by a type check (the `TypeState` cache) never pulls its
-metaclass, method tables or stash. WHO is included because a stash's
-hash reaches every symbol under it, which for a setting package is a
-large share of the SC; it costs the same getter.
+demands on first read and whose setter clears the pending pair, so
+all 29 call sites are Kotlin and keep their syntax; the KnowHOW
+bootstrap's null-then-set sequence is unchanged. A type reached by a
+type check (the `TypeState` cache) never pulls its metaclass, method
+tables or stash. WHO is included because a stash's hash reaches every
+symbol under it, which for a setting package is a large share of the
+SC; it costs the same getter.
 
 **Lazy strings.** `lookupString(i)` returns `sh[i]` or decodes it from
 the offset table into `sh[i]` first. `String` is immutable and safely
