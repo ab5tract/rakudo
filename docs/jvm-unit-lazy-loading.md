@@ -426,7 +426,7 @@ STable row):
 - object reference, STable reference, code reference: varint `(idx << 1)` for the current SC; varint `(idx << 1) | 1` then varint `scId` (1-based dependency index) otherwise;
 - `writeRef`: one tag byte (the `REFVAR_*` values 1..12 unchanged), then per tag: NULL/VM_NULL nothing; OBJECT a packed reference; VM_INT zigzag varint; VM_NUM 8-byte double; VM_STR varint heap index; VM_ARR_VAR varint count then refs; VM_ARR_STR varint count then varint heap indexes; VM_ARR_INT varint count then zigzag varints; VM_HASH_STR_VAR varint count then (varint key index, ref) pairs; STATIC_CODEREF/CLONED_CODEREF a packed reference;
 - `writeInt` zigzag varint; `writeInt32` zigzag varint; `writeNum` 8 bytes; `writeStr` varint heap index;
-- STable row 12 bytes as before (REPR-name index, data offset, REPR-data offset -- the third int serves `peekAttributeShape` until Task 6 deletes it; 22 KB, kept; ledger ruling);
+- STable row 12 bytes as before (REPR-name index, data offset, REPR-data offset -- the third int serves `peekAttributeShape` until Task 6 deletes it (it did not; see below); 22 KB, kept; ledger ruling);
 - object row 8 bytes: `(stableIdx << 12) | stableScId`, then `dataOffset` with bit 31 set for a type object;
 - closure row 24, context row 16, repossession row 16, dependency row 8: unchanged, raw ints;
 - string heap: `entries + 1` uint32 offsets (offsets[0] = 0, offsets[entries] = total bytes) then the UTF-8 bytes back to back; index 0 is the null string and has no offset entry; string `i` (1-based) is bytes `offsets[i-1] until offsets[i]`.

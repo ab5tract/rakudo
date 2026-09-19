@@ -290,8 +290,12 @@ across all three rows. The rig's five cold walls are 2.27 2.34 2.38 2.29
 2.31 (rakudo-e) and 1.24 1.22 1.27 1.18 1.33 (nqp-e); best runs
 `m7-rig/c2-rakudo-e-run1.err` and `m7-rig/c2-nqp-e-run4.err`. The first
 cold run's dispatch line reads `staleSchema=0 staleStamp=0`. `publishes=`
-fell 14858 (c1) -> 10280, which is the STables not finished (3901 of
-5558 read) no longer republishing. The 43 s warm proxy is inside c0's
+fell 14858 (c1) -> 10280, a drop of 4578. Summed over all 21 SCs of the
+same run, 5109 of 7398 STables are read, so 2289 are not finished, and
+2 x 2289 = 4578 exactly: consistent with two publishes per unfinished
+STable (the publish and the republish in the STable finish) no longer
+happening, not a proven mechanism. CORE.c's own unfinished STables (1657)
+do not account for the drop alone. The 43 s warm proxy is inside c0's
 42 s and c1's 41 s and, per the C0 note, takes no credit.
 
 Load before each timed step (1-min average): rig 0.95; CORE.c compile
@@ -369,8 +373,9 @@ run, 6692 of 8011 and 28.08 ms.
 
 CORE.c's own SC: c0 `sc-stub` 70.71 + `sc-finish` 158.49 = 229.2 ms; c1
 22.06 + 141.48 = 163.5 ms; c2 `sc-load` 50.20 ms plus 138.59 ms of demand at
-exit. The demand time is charged to whichever stage triggered it
-(`deserialize-program` and `load-block` above), so the c2 column is not
+exit. The demand time is charged to whichever load stage, or post-load code
+(the `say 1` itself), triggered it; the split between them is not
+measured. So the c2 column is not
 "the SC read went away": the SC work of the run is the 54.9 ms `sc-load`
 plus the 211.89 ms on the exit lines, **266.8 ms, against c1's 265.6 ms
 and c0's 329.9 ms**. The spec's C0-lite table (single run, 1382.1 ms
@@ -413,17 +418,18 @@ candidate: carry the code object in the serialized code-ref table so it
 attaches on first `getcodeobj` (as MoarVM's table does) -- compiler-side,
 a change to the fixup emission, one full build. The census fact behind it
 (spec, Baselines): `Ops.setcodeobj` 27116 calls per cold run against
-`getcodeobj` 76, each attaching a code object the reader must finish at
+`getcodeobj` 76, each attaching, by the spec's census, a code object the reader must finish at
 load. Row c2 is its baseline.
 
 What this row gained on the cold clock, best-of-5: rakudo-e **-88 ms against
 c0** (60 of them already c1's, the format) and **-28 ms against c1**, the
 latter inside c1's run-to-run spread; against the **304 ms honest ceiling**
-the row took well under a third, and on this row's own rig numbers the SC
+the row took under a third (88 ms of the wall, 60 of them c1's -- a wall
+delta set against an exclusive-time ceiling), and on this row's own rig numbers the SC
 work of a cold run (sc-load 54.9 + demand 211.89 = 266.8 ms) is level with
 c1's eager read (265.6 ms). The `deserialize-program` row's exclusive time
-is **593.3 ms** (c0 811.3, c1 733.8), with the demand it triggers counted
-inside it. CORE.c compile 231 s, one compile, against c1's 226 s, also one
+is **593.3 ms** (c0 811.3, c1 733.8); how much of the demand time falls
+inside it is not measured. CORE.c compile 231 s, one compile, against c1's 226 s, also one
 compile: no mechanism claimed either way.
 
 ## The close of Phase C (2026-09-19)

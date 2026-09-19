@@ -1942,15 +1942,16 @@ Exclusive load time of each row's best cold rakudo-e run
 (`unit-load-exclusive.raku`): 1802.1 -> 1679.0 -> 1393.8 ms;
 `deserialize-program` 811.3 -> 733.8 -> **593.3 ms**; the SC read
 (`sc-stub` + `sc-finish`) 329.9 -> 265.6 ms, and at c2 an `sc-load` of
-54.9 ms plus 211.89 ms of demand time on the exit lines (charged inside
-the stages that triggered it) = 266.8 ms. On these numbers the demand
-reader moved the SC work out of the load stages but did not shrink it
+54.9 ms plus 211.89 ms of demand time on the exit lines (charged to
+whichever load stage, or post-load code, triggered it; the split is not
+measured) = 266.8 ms. On these numbers the demand reader moved the SC
+work out of the `sc-stub`/`sc-finish` stages but did not shrink it
 against c1's eager read; the gain the spec bounded at 304 ms came mostly
 from the format (c1).
 
 ### Sizes
 
-| | format 11 (c0) | format 12 (c1, c2) | delta |
+| | format 11 (c0) | format 12 (c1) | delta |
 |---|---|---|---|
 | CORE.c `unit.serialized` | 28,167,619 | 13,488,797 | -52.1 % |
 | BOOTSTRAP `unit.serialized` | 4,216,191 | 1,563,293 | -62.9 % |
@@ -2006,6 +2007,10 @@ lists an nqp artifact as a prerequisite, so a rebuilt nqp is invisible to
 `make` and a plain `make` after an nqp change is a **0-second no-op**.
 Any measurement that changes nqp must run `Configure.pl` and `make clean`
 first, or it measures the old nqp.
+(Since rakudo `ebffa026a4`, 2026-09-18, the `nqp-runtime.jar` ->
+`rakudo-runtime.jar` edge is a real prerequisite, so a runtime-only nqp
+change does rebuild the Rakudo runtime jar; the blib jars still take both
+runtime jars order-only, and nothing rebuilds for an nqp stage change.)
 
 **Milestone 5 recorded two `make` figures** — 1054 s incremental after a
 clean nqp build, and 1133 s for `make clean && make` — and its own record
