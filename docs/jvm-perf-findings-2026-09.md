@@ -1905,6 +1905,100 @@ verdict is unchanged: **4** invalidations of installed code (2
 5. **Phase B (the promotion campaign) is next**, and it inherits
    milestone 7's empty A7 promotion list plus the third road above.
 
+## Milestone 8, Phase C: SC demand deserialization (2026-09-18/19)
+
+Spec: `docs/superpowers/specs/2026-09-18-jvm-milestone-8-phase-c-sc-demand-design.md`
+(with its "Revision 1 (as built)"); plan and ledger:
+`docs/superpowers/plans/2026-09-18-jvm-milestone-8-phase-c-sc-demand.md`
+and `2026-09-18-jvm-milestone-8-phase-c.ledger.md`; the mechanism is
+written up in `docs/jvm-unit-lazy-loading.md`, "Format 12 and the demand
+reader". Phase B is parked at row b2b (plan B open); Phase C ran from
+b2b's tree. No jar committed: the regenerated version-12 stage0 is an
+uncommitted working-tree change (user rule).
+
+**What landed.** Serialization format 12 (packed varint references, zigzag
+varint ints, varint string indexes, a string offset table, an 8-byte
+object row, the SC index on the object) and a reader that finishes an
+STable, object, closure or context on first reference instead of at load,
+with HOW/WHO pending until read and strings decoded on first lookup.
+
+### The three rows (rig best-of-5)
+
+| row | tree (rakudo / nqp) | cold rakudo-e | cold nqp-e | misses | hits | warm proxy | CORE.c compile |
+|---|---|---|---|---|---|---|---|
+| c0 (baseline, format 11, eager) | 2338bc426c / 62fa7ea9f | 2.361 | 1.264 | 4933 | 35843 | 42 s | (b2b: 243-245 s) |
+| c1 (format 12, still eager) | 8ef36555eb / 5f0f54c6e | 2.301 | 1.220 | 4933 | 35843 | 41 s | 226 s (one compile) |
+| c2 (the demand reader) | ebffa026a4 / dd159b2a7 | **2.273** | **1.183** | 4933 | 35843 | 43 s | 231 s (one compile) |
+
+c2 against c0: rakudo-e -88 ms (-3.7 %), nqp-e -81 ms (-6.4 %). Against
+c1: -28 ms and -37 ms, both inside c1's five-run spread, so the demand
+reader's own move on the cold clock is not separable from noise at this
+sample size. The warm proxy is machine state across sessions (41-43 s)
+and takes no credit. The CORE.c compiles are one each and cross-session:
+c1's -17 s against b2b carries no mechanism (the ledger's C1 hedging), and
+c2's +5 s against c1 carries none either.
+
+Exclusive load time of each row's best cold rakudo-e run
+(`unit-load-exclusive.raku`): 1802.1 -> 1679.0 -> 1393.8 ms;
+`deserialize-program` 811.3 -> 733.8 -> **593.3 ms**; the SC read
+(`sc-stub` + `sc-finish`) 329.9 -> 265.6 ms, and at c2 an `sc-load` of
+54.9 ms plus 211.89 ms of demand time on the exit lines (charged inside
+the stages that triggered it) = 266.8 ms. On these numbers the demand
+reader moved the SC work out of the load stages but did not shrink it
+against c1's eager read; the gain the spec bounded at 304 ms came mostly
+from the format (c1).
+
+### Sizes
+
+| | format 11 (c0) | format 12 (c1, c2) | delta |
+|---|---|---|---|
+| CORE.c `unit.serialized` | 28,167,619 | 13,488,797 | -52.1 % |
+| BOOTSTRAP `unit.serialized` | 4,216,191 | 1,563,293 | -62.9 % |
+| `blib/CORE.c.setting.jar` | 56,412,944 | 41,737,626 | -26.0 % |
+| nine stage0 jars (uncommitted) | -- | 3,493,625 | -- |
+
+### The exit finding and the C3 decision
+
+CORE.c after cold `rakudo-j -e 'say 1'`:
+
+```
+sc-demand 6DDBA3D53BF6003AAC5A4C4904CCCCC0E610ECAB stables=3901/5558 objects=150176/276157 closures=9059/11800 contexts=1354/2575 drains=9644 ms=138.59
+```
+
+**54.4 % of CORE.c's objects are finished by a program that prints `1`**
+(identical counts in all five runs; demand time 129-172 ms). nqp-e's
+largest SC finishes 2722 of 2989 (91.1 %). That is above the spec's
+threshold (half of CORE.c's objects), so **a C3 is proposed for the
+user's decision** -- a brainstorm the user starts, not a scheduled task.
+The known candidate: carry the code object in the serialized code-ref
+table so it attaches on first `getcodeobj`, as MoarVM's table does
+(compiler-side, a change to the fixup emission, one full build), against
+the census fact that the deserialize program calls `setcodeobj` 27116
+times per cold run and `getcodeobj` 76. Row c2 is its baseline.
+
+### Gates at c2
+
+`:nqp-runtime:test` green; `23-sc-demand.t` 31/31 (7 s); nqp suite 160
+files in 197 s, green; warm `t/01-sanity` 25/25 in 45 s; the rig 63 s. The
+nqp suite under `NQP_SC_EAGER=1` (199 s) is green in 159 of 160 files; the
+one red is `23-sc-demand.t` test 28, whose "lazy" child inherits the
+suite-wide eager knob and so cannot finish fewer than all objects -- a
+one-line test fix, not a reader fault (ledger, C2).
+
+### What Phase C leaves
+
+1. **The C3 decision** above, the user's.
+2. The eager-gate test fix in `23-sc-demand.t` (drop `NQP_SC_EAGER` from
+   the lazy child's environment).
+3. The `sh` parameter of `Ops.deserialize` / `SerializationReader`, now
+   unused (a cleanup).
+4. `NQP_SC_EAGER` and `NQP_SC_VERIFY` go at the milestone close, after the
+   whole-`t/` gate.
+5. `Configure.pl --no-clean` does not prevent the clean (stored as
+   `no-clean`, tested as `clean`).
+6. Phase B's plan B (rows b2c, b2d) and its three open items, parked at
+   b2b; plan B against the milestone close is the user's decision.
+
 ## Things that cost time to learn
 
 **The build graph does not express the nqp dependency.** No rakudo target

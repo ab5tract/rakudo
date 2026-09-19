@@ -149,6 +149,26 @@ changed -- the user's call), and `dedicatedClasslib` is a third promotion
 road, engine-only and without an encoder row. **Phase B (the promotion
 campaign) is next.**
 
+**Milestone 8, Phase B parked at row b2b; Phase C closed 2026-09-19**
+(rakudo `ebffa026a4` / nqp `dd159b2a7`; ledger
+`docs/superpowers/plans/2026-09-18-jvm-milestone-8-phase-c.ledger.md`).
+Phase B landed batch 1, the typed classlib road (row b2a) and the run0
+split (row b2b: CORE.c 243-245 s) and was parked there with plan B (rows
+b2c, b2d) and three items open. Phase C is lazy-loading phase 2: format 12
+halved the SC blob (CORE.c 28.2 -> 13.5 MB, the setting jar 56.4 -> 41.7
+MB) and a demand reader finishes SC entries on first reference. Cold
+`rakudo -e` 2.361 (c0) -> 2.301 (c1) -> **2.273 s** (c2), cold `nqp -e`
+1.264 -> 1.220 -> **1.183 s**; the c2 step alone is inside the run-to-run
+spread, and the SC work of a cold run (load plus demand, 266.8 ms) is level
+with c1's eager read. **The exit finding:** after `-e 'say 1'` CORE.c has
+150176 of its 276157 objects finished (54.4 %), above the spec's threshold,
+so a C3 (the code object carried in the serialized code-ref table,
+attached on first `getcodeobj`; compiler-side, one full build) is proposed.
+CORE.c compile 231 s (one compile). Numbers:
+`docs/jvm-perf-findings-2026-09.md`, "Milestone 8, Phase C". **The two
+decisions that are the user's:** whether to brainstorm the C3, and Phase
+B's plan B against the milestone close.
+
 | item | state on 2026-09-13, cold start updated 2026-09-15 |
 |---|---|
 | 1 plain call | unchanged: partial, paused (per-call `Object[]`, mainline OSR shape) |

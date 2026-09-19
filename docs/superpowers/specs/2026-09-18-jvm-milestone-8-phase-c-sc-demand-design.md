@@ -402,3 +402,54 @@ the index-on-object; the window build, regen, version-11 removal and
 row c1; the demand reader with the barrier and batch publication; lazy
 HOW, WHO and strings; the knobs, the exit line, the test and the rig
 parse; row c2 and the ledger.
+
+## Revision 1 (as built, 2026-09-19)
+
+Phase C closed at rakudo `ebffa026a4` / nqp `dd159b2a7` (ledger:
+`docs/superpowers/plans/2026-09-18-jvm-milestone-8-phase-c.ledger.md`,
+rows c0-c2). Where the implementation departs from the text above:
+
+- **The STable table row stays 12 bytes**, not the 8 Section 1 names: the
+  third int (the REPR-data offset) serves `peekAttributeShape`. 22 KB of
+  CORE.c's 13.5 MB; ledger ruling at C1.
+- **The header stays 18 ints**; there is no new header field for the
+  string offset table: `stringHeapOffset` points at the offset table,
+  and the string bytes follow it.
+- **Counts on the wire are zigzag varints** (`writeCount` =
+  `writeInt32`), not unsigned: `writeRef` delegates container bodies to
+  the REPRs, which read their counts through the signed readers, so one
+  encoding serves both.
+- **`peekAttributeShape` and the three-argument RakuObject
+  `deserialize_stub` are kept**, where Section 2 deleted them: a
+  self-referential STable (its HOW, WHAT, WHO or method cache names an
+  instance of itself) is still reading when its own stash instance is
+  stubbed, so the layout is not yet in hand and the shape comes from the
+  serialized REPR-data header.
+- **`repossess` registers every slot before finishing any**, and skips
+  slots already published, so a repossessed entry that references another
+  repossessed entry resolves to the one identity.
+- **`deserialize()` drains under the global lock**, and a drain that
+  throws rolls its entries back (stubs dropped, never published), so a
+  later demand starts from an unread slot.
+- **The eager drain and the stub roads peek the root slot first.** The
+  eager-mode failure found in Task 6 was a second identity for a
+  repossessed slot: stubbing an entry already published built a new
+  object and published it over the first.
+- **HOW/WHO resolution uses volatile pairs and never caches inside a
+  drain**: the field and the pending SC are volatile (the index is
+  written before the SC is set, the field before the SC is cleared), and
+  a getter reached from inside a drain returns the stub without caching
+  it or clearing the pair -- a rolled-back stub would otherwise stay
+  cached -- so the first read outside a drain caches the published
+  object.
+- **The Makefile's `nqp-runtime.jar` -> `rakudo-runtime.jar` edge is a
+  real prerequisite** (rakudo `ebffa026a4`): a plain `make` after an nqp
+  runtime change rebuilds the Rakudo runtime jar, without a setting
+  recompile.
+- **`Configure.pl --no-clean` does not prevent the clean**: the option is
+  stored as `no-clean` and tested as `clean` (`Configure.pl` lines 100 and
+  158), so the clean always runs. Found, not fixed in this phase.
+
+Row c2's finding (ledger, "The C3 decision"): CORE.c's exit line reads
+`objects=150176/276157` (54.4 %) after `-e 'say 1'`, above the Section 3
+threshold; the C3 is proposed for the user's decision, not scheduled.
