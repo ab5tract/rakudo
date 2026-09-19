@@ -274,6 +274,7 @@ per-run files are the `m7-rig/c2-*` set.
 m7-rig/c2-logs/nqp-suite-c2.log        m7-rig/c2-logs/rig-c2.log
 m7-rig/c2-logs/nqp-suite-c2-eager.log  m7-rig/c2-logs/corec-c2.log
 m7-rig/c2-logs/sanity-c2.log           m7-rig/c2-logs/sc-demand-eager-verbose.log
+m7-rig/c2-logs/nqp-suite-c2-eager-fix.log
 ```
 
 | row | rakudo | nqp | cold rakudo-e | cold nqp-e | misses | hits | warm proxy | notes |
@@ -307,7 +308,9 @@ under both timed steps and is named here rather than silently re-run.
 | `./nqp/gradlew -p nqp :nqp-runtime:test` | 1 s | BUILD SUCCESSFUL (up to date: nothing changed since Task 7's green run) | -- (run bare) |
 | `nqp/t/jvm/23-sc-demand.t` | 7 s | 31/31, Result: PASS | -- (prove, on the terminal) |
 | nqp suite (sweep, 160 files) | 197 s | `160 files in 197s`, EXIT=0 verdict=ok, no `not ok` | `m7-rig/c2-logs/nqp-suite-c2.log` |
-| nqp suite, `NQP_SC_EAGER=1` (sweep, 160 files) | 199 s | **EXIT=1**: 159 of 160 files green (Files=158 + 2, Tests=13343 + 16); `t/jvm/23-sc-demand.t` fails test 28 | `m7-rig/c2-logs/nqp-suite-c2-eager.log` |
+| nqp suite, `NQP_SC_EAGER=1` (sweep, 160 files), first run | 199 s | EXIT=1: 159 of 160 files green (Files=158 + 2, Tests=13343 + 16); `t/jvm/23-sc-demand.t` fails test 28 (the test's inherited env, below) | `m7-rig/c2-logs/nqp-suite-c2-eager.log` |
+| `23-sc-demand.t` after nqp `629212cb1`, plain / under `NQP_SC_EAGER=1` | 7 s / 8 s | 31/31 / 31/31, Result: PASS | -- (prove, on the terminal) |
+| nqp suite, `NQP_SC_EAGER=1` (sweep, 160 files), re-run after nqp `629212cb1` | 196 s | **`160 files in 196s`, EXIT=0 verdict=ok, no `not ok`** | `m7-rig/c2-logs/nqp-suite-c2-eager-fix.log` |
 | warm `t/01-sanity` (25 files) | 45 s | `25 files in 45s`, 0 FAIL | `m7-rig/c2-logs/sanity-c2.log` |
 | the rig | 63 s | `m7-rig: DONE tag=c2` | `m7-rig/c2-logs/rig-c2.log` |
 
@@ -320,11 +323,15 @@ Test 28 is `and fewer than all of them`: the test's "lazy" child takes
 finished` under the knob) passes in the same run. The other 159 files --
 `t/serialization/*` included -- are green under both modes, which is what
 the gate exists to show (spec risk 2, demand order changing behaviour).
-The spec's gate reads "no `not ok` in either", so as written it is red by
-this one test; the fix is one line in the test (drop `NQP_SC_EAGER` from
-the lazy child's environment) and is not made in this task. A green sweep
-prints no `Files=`/`Tests=` totals, so the plain run's test count is not
-on record to compare against the eager run's 13359.
+The first eager run's one red was that inherited env. nqp `629212cb1`
+("Tests: the demand test's children do not inherit the suite's SC knobs")
+makes each child explicit: the lazy child drops `NQP_SC_EAGER` and
+`NQP_SC_VERIFY`, the eager child drops `NQP_SC_VERIFY`, the verify child
+drops `NQP_SC_EAGER`. After it the eager suite re-run is green (196 s, the
+gate row above), so the spec's c2 gate -- the suite with and without
+`NQP_SC_EAGER=1`, no `not ok` in either -- holds. A green sweep prints no
+`Files=`/`Tests=` totals, so the two runs agree at the file level (160
+each), not on a test count.
 
 ### The exit finding
 
@@ -430,8 +437,7 @@ uncommitted working-tree change (the jar rule). Documents written:
 `docs/jvm-truffle-only-plan.md` (the position paragraph) and the spec's
 "Revision 1 (as built)".
 
-Open at the close: the eager-gate red above (one line in
-`23-sc-demand.t`); the `sh` parameter of `Ops.deserialize` /
+Open at the close (the eager-gate red is closed by nqp `629212cb1`): the `sh` parameter of `Ops.deserialize` /
 `SerializationReader`, now unused (a cleanup); the eager and verify knobs,
 removed at the milestone close after the whole-`t/` gate (spec Section 2).
 Phase B stays parked at row b2b with plan B (b2c, b2d) and its three items
