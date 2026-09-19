@@ -1981,23 +1981,24 @@ times per cold run and `getcodeobj` 76. Row c2 is its baseline.
 
 `:nqp-runtime:test` green; `23-sc-demand.t` 31/31 (7 s); nqp suite 160
 files in 197 s, green; warm `t/01-sanity` 25/25 in 45 s; the rig 63 s. The
-nqp suite under `NQP_SC_EAGER=1` (199 s) is green in 159 of 160 files; the
-one red is `23-sc-demand.t` test 28, whose "lazy" child inherits the
-suite-wide eager knob and so cannot finish fewer than all objects -- a
-one-line test fix, not a reader fault (ledger, C2).
+first nqp suite run under `NQP_SC_EAGER=1` (199 s) was red on
+`23-sc-demand.t` test 28 alone, because the test's "lazy" child inherited
+the suite's eager knob and so could not finish fewer than all objects --
+the test's construction, not a reader fault. Fixed in nqp `629212cb1`
+(each child sets or drops the SC knobs itself); the re-run is green,
+`160 files in 196s`, EXIT=0 (`m7-rig/c2-logs/nqp-suite-c2-eager-fix.log`;
+ledger, C2).
 
 ### What Phase C leaves
 
 1. **The C3 decision** above, the user's.
-2. The eager-gate test fix in `23-sc-demand.t` (drop `NQP_SC_EAGER` from
-   the lazy child's environment).
-3. The `sh` parameter of `Ops.deserialize` / `SerializationReader`, now
+2. The `sh` parameter of `Ops.deserialize` / `SerializationReader`, now
    unused (a cleanup).
-4. `NQP_SC_EAGER` and `NQP_SC_VERIFY` go at the milestone close, after the
+3. `NQP_SC_EAGER` and `NQP_SC_VERIFY` go at the milestone close, after the
    whole-`t/` gate.
-5. `Configure.pl --no-clean` does not prevent the clean (stored as
+4. `Configure.pl --no-clean` does not prevent the clean (stored as
    `no-clean`, tested as `clean`).
-6. Phase B's plan B (rows b2c, b2d) and its three open items, parked at
+5. Phase B's plan B (rows b2c, b2d) and its three open items, parked at
    b2b; plan B against the milestone close is the user's decision.
 
 ## Things that cost time to learn
