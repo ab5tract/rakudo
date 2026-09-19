@@ -323,8 +323,11 @@ same. Over the nqp suite that is 1309 of 272687 comparisons.
 
 - `NQP_UNIT_LOAD_STATS=1` prints `unit-load: stats on` and then
   `unit-load <depth> <unit> <stage> <ms> [counts]` for the v2 stages
-  `open-store`, `shells`, `sc-stub`, `sc-finish`, `deserialize-program`,
-  `static-lex-drain`, `load-block`, `load-total`.
+  `open-store`, `shells`, `sc-load`, `deserialize-program`,
+  `static-lex-drain`, `load-block`, `load-total`, and at exit one
+  `sc-demand` line per SC (see "Format 12 and the demand reader" below).
+  Before milestone 8 Phase C the SC read was two stages, `sc-stub` and
+  `sc-finish`; `sc-load` replaces both and holds only the eager part.
 - `NQP_CODE_WHY=1` makes `UnitWriter.write` print one line per artifact:
   `unit artifact <id> -> <file> (N programs, N qbids, N dispatch slots,
   N nested)`. It also gates the line that reports static lexical rows
@@ -402,15 +405,122 @@ same. Over the nqp suite that is 1309 of 272687 comparisons.
   that training deduplicates by and verify compares with.
   `tools/build/dispatch-dump-diff.raku` diffs two dumps.
 
-## What phase 2 will do
+## Format 12 and the demand reader (milestone 8, Phase C)
 
-Phase 2 of the lazy-loading design is SC demand deserialization: today
-the whole `unit.serialized` blob is read at load, and it is the largest
-entry of a big artifact (28.2 MB of CORE.c's 56.1 MB). v2 already hands
-that entry to `SerializationReader` as a mapped slice
-(`ProgramUnit.serializedBlob()` -> `UnitStore.serialized`; the reader
-sets its own byte order and never calls `array()`), so the bytes a
-demand-driven reader needs are mapped and addressable without another
-format change. See
-`docs/superpowers/specs/2026-09-13-jvm-lazy-unit-loading-design.md`,
-"Phase 2".
+Landed 2026-09-18/19 (closed at rakudo `ebffa026a4` / nqp `dd159b2a7`).
+Spec: `docs/superpowers/specs/2026-09-18-jvm-milestone-8-phase-c-sc-demand-design.md`
+and its "Revision 1 (as built)"; plan and ledger:
+`docs/superpowers/plans/2026-09-18-jvm-milestone-8-phase-c-sc-demand.md`
+and `2026-09-18-jvm-milestone-8-phase-c.ledger.md`. Numbers:
+`docs/jvm-perf-findings-2026-09.md`, "Milestone 8, Phase C". This is
+phase 2 of the lazy-loading design (SC demand deserialization); the
+`unit.serialized` entry is still handed to `SerializationReader` as a
+mapped slice, and the reader now keeps it for the SC's life.
+
+### The version-12 layout
+
+Little-endian; header unchanged: 18 ints, `stringHeapOffset` now points at
+the offset table (the Task 4 list, verbatim, with the as-built note on the
+STable row):
+
+- object reference, STable reference, code reference: varint `(idx << 1)` for the current SC; varint `(idx << 1) | 1` then varint `scId` (1-based dependency index) otherwise;
+- `writeRef`: one tag byte (the `REFVAR_*` values 1..12 unchanged), then per tag: NULL/VM_NULL nothing; OBJECT a packed reference; VM_INT zigzag varint; VM_NUM 8-byte double; VM_STR varint heap index; VM_ARR_VAR varint count then refs; VM_ARR_STR varint count then varint heap indexes; VM_ARR_INT varint count then zigzag varints; VM_HASH_STR_VAR varint count then (varint key index, ref) pairs; STATIC_CODEREF/CLONED_CODEREF a packed reference;
+- `writeInt` zigzag varint; `writeInt32` zigzag varint; `writeNum` 8 bytes; `writeStr` varint heap index;
+- STable row 12 bytes as before (REPR-name index, data offset, REPR-data offset -- the third int serves `peekAttributeShape` until Task 6 deletes it; 22 KB, kept; ledger ruling);
+- object row 8 bytes: `(stableIdx << 12) | stableScId`, then `dataOffset` with bit 31 set for a type object;
+- closure row 24, context row 16, repossession row 16, dependency row 8: unchanged, raw ints;
+- string heap: `entries + 1` uint32 offsets (offsets[0] = 0, offsets[entries] = total bytes) then the UTF-8 bytes back to back; index 0 is the null string and has no offset entry; string `i` (1-based) is bytes `offsets[i-1] until offsets[i]`.
+
+As built, Task 6 did **not** delete `peekAttributeShape`: a
+self-referential STable is still reading when its own stash instance is
+stubbed, so the STable row stays 12 bytes and the three-argument RakuObject
+`deserialize_stub` stays with it. Counts written by `writeCount` are the
+same zigzag varint as `writeInt32`, because `writeRef` hands container
+bodies to the REPRs, which read them with the signed readers.
+
+The index lives on the entry: `SixModelObject.scIdx`, `STable.scIdx`, and
+`CodeRef.scCodeIdx` (a code ref is in the code root set and may also be an
+object root); `getObjectIndex` and friends read the field and check it
+against the root slot. There are no index caches on the SC any more.
+
+### The barrier, the drain, publication
+
+A null root slot demands: `SerializationContext.getObject`, `getSTable`
+and `getCodeRef` return the slot when it is set and otherwise call the
+reader's `demandObject`/`demandSTable`/`demandCodeRef`. A demand takes the
+one process-wide `SerializationReader.LOCK` and runs a drain that finishes
+the transitive closure of what it stubs -- across SCs, on one worklist --
+before it returns. Publication is per drain: the entries a drain finished
+move into their root slots together when the outermost drain completes, so
+no thread sees a published entry whose graph still holds a stub; a drain
+that throws rolls its entries back instead, and a later demand starts again
+from the unread slot.
+
+**STables are finished immediately, objects are queued.** Stubbing an
+STable finishes it on the spot (its REPR data included; a cycle through
+its own REPR data gets the partly built STable, as before, with
+`peekAttributeShape` supplying a RakuObject stub's shape). An object's stub
+needs its STable finished first; a concrete object's body is then queued on
+the drain, and a type object is done at its stub. A closure clones its
+static code ref at its stub and attaches its code object and outer context
+through the barrier; a context's lexicals are queued. Every stub road peeks
+the root slot first: stubbing an already-published entry would build a
+second identity for it (the eager-mode bug Task 6 found, on a repossessed
+slot).
+
+**Eager at load** (`sc-load`): the header and its corruption checks, the
+dependency resolution, the static code-ref shells, the root arrays sized
+and left null, and the repossessions -- every repossessed slot registered
+before any is finished, slots already published skipped -- all under the
+lock.
+
+**HOW and WHO pending.** A finished STable holds its HOW and WHO as
+(SC, index) pairs; `STable.HOW`/`STable.WHO` are properties whose getter
+resolves the pair on first read, so a type reached only by a type check
+never pulls its metaclass or stash. The pair and the field are volatile; a
+getter reached from inside a drain returns the stub without caching it (a
+rolled-back stub would stay cached), and the first read outside a drain
+caches the published object.
+
+**Lazy strings.** `deserializeStringHeap` reads nothing; `lookupString(i)`
+decodes string `i` from the offset table on its first lookup and keeps it.
+
+### Knobs and the exit line
+
+- `NQP_SC_EAGER=1` drains every SC in full at the end of `deserialize()`,
+  the pre-Phase-C order, for bisecting a demand-order bug.
+- `NQP_SC_VERIFY=1` makes a top-level demand assert that nothing it
+  returns is a stub, and the fast path that the slot it returns is not
+  pending.
+- Under `NQP_UNIT_LOAD_STATS=1` the SC's load is one `sc-load` stage line
+  (the eager part only), and a shutdown hook prints one line per SC:
+
+  ```
+  sc-demand <handle> stables=<f>/<t> objects=<f>/<t> closures=<f>/<t> contexts=<f>/<t> drains=<n> ms=<demand time>
+  ```
+
+  The demand time is charged to whichever stage triggered it, so
+  `tools/build/unit-load-exclusive.raku` prints these lines after its
+  table rather than in it, and `tools/build/m7-rig.raku` reports CORE.c's
+  as `scObjects= scStables= scDrains= scMs=`. Cold `rakudo-j -e 'say 1'`
+  (row c2): `stables=3901/5558 objects=150176/276157 closures=9059/11800
+  contexts=1354/2575 drains=9644 ms=138.59` -- 54.4 % of CORE.c's objects
+  finished by the time the program exits.
+
+The eager and verify knobs are removed at the milestone close, after the
+whole-`t/` gate.
+
+### Sizes before and after
+
+`tools/build/sc-blob-sizes.raku` reads a jar's `unit.serialized` header.
+
+| | format 11 | format 12 | delta |
+|---|---|---|---|
+| CORE.c `unit.serialized` | 28,167,619 | 13,488,797 | -52.1 % |
+| BOOTSTRAP `unit.serialized` | 4,216,191 | 1,563,293 | -62.9 % |
+| `blib/CORE.c.setting.jar` | 56,412,944 | 41,737,626 | -26.0 % |
+
+CORE.c by segment: STable data 4.84 -> 1.76 MB, object table 4.42 ->
+2.21 MB (16-byte rows became 8), object data 14.61 -> 5.34 MB, context data
+176 -> 65 KB, strings unchanged (3.72 MB, the length prefixes became a
+53.6 KB offset table). Every count is unchanged.
