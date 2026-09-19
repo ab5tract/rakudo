@@ -499,7 +499,8 @@ decodes string `i` from the offset table on its first lookup and keeps it.
   sc-demand <handle> stables=<f>/<t> objects=<f>/<t> closures=<f>/<t> contexts=<f>/<t> drains=<n> ms=<demand time>
   ```
 
-  The demand time is charged to whichever stage triggered it, so
+  The demand time is charged to whichever load stage, or post-load code,
+  triggered it (the split is not measured), so
   `tools/build/unit-load-exclusive.raku` prints these lines after its
   table rather than in it, and `tools/build/m7-rig.raku` reports CORE.c's
   as `scObjects= scStables= scDrains= scMs=`. Cold `rakudo-j -e 'say 1'`
