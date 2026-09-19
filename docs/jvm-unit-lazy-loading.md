@@ -470,9 +470,24 @@ slot).
 
 **Eager at load** (`sc-load`): the header and its corruption checks, the
 dependency resolution, the static code-ref shells, the root arrays sized
-and left null, and the repossessions -- every repossessed slot registered
-before any is finished, slots already published skipped -- all under the
-lock.
+and left null, and the repossessions, all under the lock. Repossession is
+ONE drain for both kinds (final-review fix wave): every original is
+demanded and the drain run, so an original is whole under its original
+layout before anything is swapped; then every row of both kinds is
+registered (the original installed into this SC and the pending tables,
+so a repossessed STable whose method cache names a repossessed object of
+the same SC finds the original, not a fresh copy); then the repossessed
+STables are finished; then each repossessed object takes its row's
+STable (a mixin) and is queued. Registration decides identity; the
+root-slot peek stays only as a guard (`nqp/t/jvm/24-sc-repossess.t`).
+
+**Whose thread.** A top-level demand resolves the demanding thread's
+`ThreadContext` once and the drain carries it; every reader the drain
+crosses uses it for its stub and finish roads, so a demand from another
+thread never touches the loader's context. A closure or context without
+a serialized outer resolves it against the invocation live at first
+demand, not at load (`NQP_SC_EAGER=1` restores load time). The demand
+roads and the HOW/WHO pending resolve are `@TruffleBoundary`.
 
 **HOW and WHO pending.** A finished STable holds its HOW and WHO as
 (SC, index) pairs; `STable.HOW`/`STable.WHO` are properties whose getter
@@ -488,10 +503,15 @@ decodes string `i` from the offset table on its first lookup and keeps it.
 ### Knobs and the exit line
 
 - `NQP_SC_EAGER=1` drains every SC in full at the end of `deserialize()`,
-  the pre-Phase-C order, for bisecting a demand-order bug.
-- `NQP_SC_VERIFY=1` makes a top-level demand assert that nothing it
-  returns is a stub, and the fast path that the slot it returns is not
-  pending.
+  in one drain, for bisecting a demand-order bug. It is not the
+  pre-Phase-C order: rows are stubbed in table order but finished in
+  demand order (an STable when stubbed, an object or context when the
+  drain's queue reaches it).
+- `NQP_SC_VERIFY=1` checks that the entry a top-level `demandObject`,
+  `demandSTable` or `demandCodeRef` returns is the one now published in
+  that root slot. That is all: it does not test a stub for being
+  finished, and it cannot see a stub a getter hands out inside a drain
+  that a caller stores elsewhere.
 - Under `NQP_UNIT_LOAD_STATS=1` the SC's load is one `sc-load` stage line
   (the eager part only), and a shutdown hook prints one line per SC:
 
@@ -510,6 +530,18 @@ decodes string `i` from the offset table on its first lookup and keeps it.
 
 The eager and verify knobs are removed at the milestone close, after the
 whole-`t/` gate.
+
+### Stage0 and a stale artifact
+
+The format-12 stage0 (the nine `nqp/src/vm/jvm/stage0/*.jar`, regenerated
+once in Phase C) is an uncommitted working-tree change under the jar rule.
+A copy is archived outside both trees at
+`/home/longwalker/code/raku/x.core/stage0-archive/format12-nqp-629212cb1/`
+with a `SHA256SUMS` file (`sha256sum -c SHA256SUMS` from the stage0
+directory checks a tree against it). An artifact or stage0 of another
+format now fails with "Serialization format version N is not 12: a stale
+artifact or stage0 (rebuild it; the format-12 stage0 is archived at
+stage0-archive/format12-*)".
 
 ### Sizes before and after
 

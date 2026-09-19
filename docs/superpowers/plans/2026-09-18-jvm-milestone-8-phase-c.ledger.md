@@ -449,3 +449,73 @@ removed at the milestone close after the whole-`t/` gate (spec Section 2).
 Phase B stays parked at row b2b with plan B (b2c, b2d) and its three items
 open. **The two decisions that are the user's:** the C3 brainstorm, and
 Phase B's plan B against the milestone close.
+
+## Final-review fix wave (2026-09-19)
+
+The whole-branch review found one Critical and eight Important issues;
+all fixed in one wave, nqp `dc6e358f4`..`70c0a349b` (six commits):
+
+- **C1** `repossess()` ran two passes (STables, then objects), each its
+  own drain: a repossessed STable whose data named a repossessed object of
+  the same SC stubbed a fresh copy of it and published it into the slot
+  the original owns. Now one drain, four steps (demand originals and run;
+  register every row of both kinds; finish the STables; swap to the row's
+  STable and queue). nqp `dc6e358f4`.
+- **I1** the step-1 run: an original its own SC had not finished is
+  finished under its original layout before any STable swap. Same commit.
+- **I2** `setPendingHow`/`setPendingWho` write index, SC, then clear the
+  field. nqp `164e76e77`.
+- **I3** a drain carries the demanding thread's `ThreadContext`
+  (`gc.getCurrentThreadContext()`, loader's on null); every reader road
+  reads `tc` through it. nqp `4a329d5fa`.
+- **I4** no code change: spec Revision 1 bullet (outers resolve at first
+  demand); warm `t/01-sanity` under `NQP_SC_EAGER=1` run once (below).
+- **I5** `NQP_SC_VERIFY` also checks `demandSTable` and `demandCodeRef`;
+  docs narrowed to what it checks; the `drainAll` comment no longer
+  claims the pre-Phase-C order. nqp `02453e636`.
+- **I6** `@TruffleBoundary` on the three `demand*` roads and
+  `resolvePendingHow`/`resolvePendingWho`. nqp `41ac2fbe5`.
+- **I7** the format-12 stage0 archived at
+  `/home/longwalker/code/raku/x.core/stage0-archive/format12-nqp-629212cb1/`
+  (nine jars + `SHA256SUMS`, verified with `sha256sum -c` against the
+  working tree); the version error names the archive. nqp `02453e636`.
+- **I8** tests: `nqp/t/jvm/24-sc-repossess.t` (12 tests; RED on nqp
+  `629212cb1`: tests 2-5 fail -- the slot held a copy, the original kept
+  `'old'` -- and block 2 died `Unimplemented case of read_ref`; block 2
+  also dies with only the step-1 run removed; GREEN 12/12 after),
+  in nqp `dc6e358f4`; `DrainTest` (2) and `RootSetTest` (4) in nqp
+  `70c0a349b`.
+
+### Gates
+
+Load (1-min) before the timed steps: 0.29 (unit tests), 3.36 (nqp suite,
+decaying from the builds), 6.65-6.99 during/after the sanity pair (own
+runs; `idea` at ~33 % CPU the only other consumer), 1.84 before the rig
+(waited for it to fall under 2).
+
+| gate | wall | result | log |
+|---|---|---|---|
+| `./nqp/gradlew -p nqp :nqp-runtime:test` | 12 s | BUILD SUCCESSFUL, 83 tests (77 + 6), 0 failures | -- |
+| runtime jars + sync | 4 s | BUILD SUCCESSFUL | -- |
+| `rakudo-runtime` jar + copy | 3 s | BUILD SUCCESSFUL | -- |
+| retrain (`NQP_DISPATCH_RECORD=all`) | 2 s | `dispatch-record: done 21 paths, 4190 slots, 4489 programs, 14 unpersistable, 0 failed` | -- |
+| `23-sc-demand.t` plain / eager | 7.0 s / 7.0 s | 31/31 / 31/31 | -- |
+| `24-sc-repossess.t` plain / eager | 2.3 s / 2.4 s | 12/12 / 12/12 | -- |
+| `rakudo-j -e 'say 1'` plain / `NQP_SC_VERIFY=1` / `NQP_SC_EAGER=1` | 2.21 / 2.20 / 2.27 s | `1`, EXIT=0 each | -- |
+| nqp suite (sweep, 161 files) | 193 s | `161 files in 192s`, EXIT=0 verdict=ok, no `not ok` | `~/.claude/jobs/a46e5ea6/tmp/nqp-suite-fixwave.log` |
+| nqp suite, `NQP_SC_EAGER=1` (161 files) | 193 s | `161 files in 193s`, EXIT=0 verdict=ok, no `not ok` | `.../nqp-suite-fixwave-eager.log` |
+| warm `t/01-sanity` (25 files) | 46 s | EXIT=0, 0 FAIL | `.../sanity-fixwave.log` |
+| warm `t/01-sanity`, `NQP_SC_EAGER=1` (the I4 check) | 48 s | EXIT=0, 0 FAIL | `.../sanity-fixwave-eager.log` |
+| the rig, cold rows only | 18 s | `m7-rig: DONE tag=c2f` | `.../rig-c2f.log` |
+
+The suite count is 161: c2's 160 plus `24-sc-repossess.t`.
+
+| row | rakudo | nqp | cold rakudo-e | cold nqp-e | misses | hits | warm proxy | notes |
+|---|---|---|---|---|---|---|---|---|
+| c2 | ebffa026a4 | dd159b2a7 | 2.273 | 1.183 | 4933 | 35843 | 43/sanity | rig wall 63 s |
+| c2f, after the final-review fix wave | (this commit) | 70c0a349b | 2.248 | 1.229 | 4933 | 35843 | not gathered (`--/warm`) | rig wall 18 s |
+
+Five cold walls: 2.27 2.30 2.28 2.25 2.42 (rakudo-e), 1.27 1.27 1.34 1.23
+1.32 (nqp-e); both bests inside c2's five-run spread, no move claimed.
+Misses, hits and `publishes=10280` identical to c2; CORE.c's exit line
+`objects=150176/276157 stables=3901/5558` unchanged (`drains=9643` vs 9644).

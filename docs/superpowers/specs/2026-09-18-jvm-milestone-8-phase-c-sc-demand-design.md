@@ -267,10 +267,12 @@ clone (a Truffle frame, not an SC), and the writer (`writeObjRef` needs
 rewritten). `disclaim*` walks a root array whose unread slots are null.
 
 **Diagnostics.** `NQP_SC_EAGER=1` drains every SC in full at the end of
-`deserialize()`, the old behaviour, for bisecting a demand-order bug.
+`deserialize()`, the old behaviour, for bisecting a demand-order bug
+(as built it finishes in demand order, not the old one: Revision 1).
 `NQP_SC_VERIFY=1` makes a top-level demand assert that nothing it
 returns is a stub and the fast path assert the slot it returns is not
-pending. Under `NQP_UNIT_LOAD_STATS=1`, a shutdown hook prints one line
+pending (as built it checks less: Revision 1 states exactly what).
+Under `NQP_UNIT_LOAD_STATS=1`, a shutdown hook prints one line
 per SC: `sc-demand <handle> stables=<finished>/<total>
 objects=<f>/<t> closures=<f>/<t> contexts=<f>/<t> drains=<n>
 ms=<demand time>`, the row's core evidence. All three are env-gated,
@@ -425,9 +427,55 @@ rows c0-c2). Where the implementation departs from the text above:
   instance of itself) is still reading when its own stash instance is
   stubbed, so the layout is not yet in hand and the shape comes from the
   serialized REPR-data header.
-- **`repossess` registers every slot before finishing any**, and skips
-  slots already published, so a repossessed entry that references another
-  repossessed entry resolves to the one identity.
+- **`repossess` is one drain for both kinds, and registration decides
+  identity** (rewritten in the final-review fix wave, nqp tree; the
+  first cut ran two passes, STables then objects, each its own drain, and
+  a repossessed STable whose data named a repossessed object of the same
+  SC -- a precompiled `augment class Int { multi method ... }` -- stubbed
+  a fresh copy of that object from the row and published it before the
+  object pass ran, so the SC's slot held a copy and the original never
+  got the new data). In one `topLevel`: (1) demand every original and
+  run the drain, so an original its own SC had not finished yet is
+  finished whole, under its original layout, before anything is swapped
+  (the pre-Phase-C order); (2) register every row of both kinds -- the
+  original installed into this SC (`sc`, `scIdx`) and into the pending
+  tables, concrete objects held on the drain (rolled back on a throw, not
+  run); (3) finish the repossessed STables; (4) give each repossessed
+  object its row's STable (a mixin may have changed it) and queue it. The
+  root-slot peek stays as a defensive guard only. `nqp/t/jvm/24-sc-repossess.t`
+  covers both shapes (the split, and a mixin original never read before
+  the repossession).
+- **A drain runs on the demanding thread's context**: `topLevel`
+  resolves `gc.getCurrentThreadContext()` once (the loader's context when
+  that is null) and the drain carries it; every stub and finish road, of
+  any reader the drain crosses, reads its `tc` through the drain, so a
+  demand from another thread never writes the loader's `nativeI/N/S`,
+  builds frames on it, or raises against its frame chain. `deserialize()`
+  itself (repossession, the eager drain) runs on the loader's context.
+- **Closure and context outers resolve at first demand, not at load.**
+  A context without a serialized outer (`resolveDeserializedOuter`) and
+  a closure whose static code falls back to
+  `outerStaticInfo.priorInvocation` in `clone` now resolve against the
+  invocation live when the entry is first demanded rather than the one
+  live at load. `NQP_SC_EAGER=1` restores load-time resolution for
+  bisecting; warm `t/01-sanity` under it was run once as the check
+  (ledger, "Final-review fix wave").
+- **`NQP_SC_VERIFY=1` checks one thing**: that the entry a TOP-LEVEL
+  demand (`demandObject`, `demandSTable`, `demandCodeRef`) returns is the
+  entry now published in that root slot, i.e. that the drain published
+  what it handed out. It does not test a stub for being finished, and it
+  is blind to a stub a getter hands out INSIDE a drain that a caller then
+  stores somewhere else (the drain publishes the same entry later, but
+  nothing checks where the caller put it).
+- **The demand roads and the HOW/WHO pending resolve are Truffle
+  boundaries** (`demandObject`/`demandSTable`/`demandCodeRef`,
+  `STable.resolvePendingHow`/`resolvePendingWho`): `NqpDispatch.HowSrc`
+  reads `st.HOW` inside partially evaluated code, and the lock and the
+  deserializer must stay out of it; the getters' `howField ?: ...` fast
+  path stays inlineable. `setPendingHow`/`setPendingWho` write the index,
+  then the SC, and only then clear the field: on the repossess road the
+  STable is already published, so a concurrent getter sees either the old
+  HOW or the pending pair, never null for a live type.
 - **`deserialize()` drains under the global lock**, and a drain that
   throws rolls its entries back (stubs dropped, never published), so a
   later demand starts from an unread slot.
@@ -437,7 +485,8 @@ rows c0-c2). Where the implementation departs from the text above:
   object and published it over the first.
 - **HOW/WHO resolution uses volatile pairs and never caches inside a
   drain**: the field and the pending SC are volatile (the index is
-  written before the SC is set, the field before the SC is cleared), and
+  written before the SC is set, the field before the SC is cleared; on
+  the way in the field is cleared last, see the boundary bullet above), and
   a getter reached from inside a drain returns the stub without caching
   it or clearing the pair -- a rolled-back stub would otherwise stay
   cached -- so the first read outside a drain caches the published
