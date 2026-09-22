@@ -1,0 +1,321 @@
+# Review package: da7b413cca..3f14c9c6ed
+
+## Commits
+3f14c9c6ed Tools: parse the real Truffle failure line, and never fail quietly
+
+## Files changed
+ ...-12-jvm-milestone-6-compiler-workload.ledger.md | 77 ++++++++++++++++++++++
+ tools/build/t/fixtures/trace-noreason.log          |  1 +
+ tools/build/t/fixtures/trace-sample.log            |  5 +-
+ tools/build/t/truffle-trace-summary.rakutest       | 35 +++++++++-
+ tools/build/truffle-trace-summary.raku             | 71 +++++++++++++++++---
+ 5 files changed, 177 insertions(+), 12 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md b/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md
+index 725ff67699..9cd98a5175 100644
+--- a/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md
++++ b/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md
+@@ -328,10 +328,87 @@ top-roots table count non-NQP roots too — the polyglot entry point is half of
+ the smoke run's two events — so a Task 3 reading of "compiler time" should say
+ whether it means all roots or only the bracketed (NQP program) ones. (c) `Time`
+ is read as the total, not the `(a+b)` split. (d) `getName()` is at
+ `nqp/nqp-truffle/src/main/java/org/raku/nqp/truffle/NqpRootNode.java:90-94`; the
+ brief cites 91-93, off by one line at each end and immaterial.
+ 
+ Task 2: the entry above was first written against the pre-amend hash
+ `4d9012b443`; `d92d405b80` is the same tree after one amend that only filled in
+ that hash, and this follow-up commit corrects the citation. The tool commit to
+ quote is `d92d405b80`.
++
++Task 2: implementer DONE — rakudo `d92d405b80` (tool, tests, fixture, ledger) and
++`da7b413cca` (ledger-only, fixing a self-citation: a ledger cannot cite its own
++pre-amend hash). 8/8 tests pass, red stage verified first at 7/8 failing. Smoke
++on a real short workload: events=2, done=2, marker met. Controller provenance
++check: the committed tool is byte-identical to the copy validated before the plan
++was committed, apart from its comment block; the fixture is byte-identical.
++Report: task-2-report.md.
++
++Task 2: review (opus) — Spec ✅, quality NEEDS WORK, **1 Critical**, 3 Important,
++4 Minor. Two commits ruled correct; explicitly do NOT squash, as squashing
++re-breaks the self-citation the second commit exists to fix.
++
++**Ruling 6 — the Critical defect is MINE, in the fixture, and it would have
++silently skipped the milestone's largest lever.** I wrote the two `opt failed`
++fixture lines from Truffle's documented layout rather than from this tree, and
++recorded in the plan that Task 3 would verify them. The reviewer did better than
++verify: it decompiled `TraceCompilationListener` out of this tree's own
++`nqp/build/jvm/share/truffle/truffle-runtime-25.2.4.jar` and read the format
++string. `FAILED_FORMAT` is `... |Tier %d|Time %18s|Reason: %s|UTC %s|Src %s` —
++**with a colon** — while `DEOPT_FORMAT`, `INV_FORMAT` and `UNQUEUED_FORMAT` use
++`|Reason %s` without one. The colon falls on exactly the verb that matters. The
++parser required whitespace after `Reason`, so against a real trace it would have
++parsed no reason at all and printed `min-too-large-size=none`. Task 4 would have
++read that as "no root was too large" and set no threshold, on a compile carrying
++roughly 114 of them — a plausible number, not a crash, which is the worst
++failure mode an instrument has. The field-by-leading-word property protected
++against field RE-ORDERING but not against a field NAME carrying punctuation.
++Fixed in the loop: optional colon, a real-format fixture line, and a loud
++`(failed=N, reasons-parsed=0)` annotation so a silent `none` can never again be
++mistaken for "nothing was too large". Plan Task 3 Step 4 rewritten from a repair
++step into a confirmation step that says STOP on that signature. Costs if wrong:
++none — the parser now accepts both spellings, which is strictly wider than
++either alone.
++
++Task 2: minor (deferred): `tier 0` / `ms 0` defaults make deopt and invalidation
++lines (which legitimately carry no Tier or Time) indistinguishable from a parse
++miss.
++Task 2: minor (deferred): the test writes `fixtures/empty.log` into the repo and
++unlinks it at the end; a mid-test failure leaves it behind. `$*TMPDIR` is the fix.
++Task 2: minor (deferred): report and ledger cite `NqpRootNode.java:91-93`; the
++method is 91-94. Immaterial, self-noted by the implementer.
++
++Task 2: fix round 1/5 (4 addressed, 0 open — commit stamped 19:25, the third on
++top of `d92d405b80` / `da7b413cca`). CRITICAL 1: the colon is now optional
++(`^ 'Reason' ':'? \s+ (.+) $`); fixture lines 4-5 rewritten into the real
++`|Reason: %s|` spelling and a new `opt deopt` line carries the colon-free
++spelling so both stay covered; and a failed-but-unreasoned run now prints
++`min-too-large-size=none  (failed=N, reasons-parsed=0)`, with a second fixture
++`fixtures/trace-noreason.log` pinning exactly that string. The red run is on the
++record: against the shipped tool, assertions 4 and 5 failed with the reason lost
++and `none` printed — the defect reproduced live before it was fixed, it was not
++taken on faith. IMPORTANT 2: the head is cut at the first whitespace-then-`|`
++(the format's `%-50s |` separator; a `|` inside a root name is never preceded by
++whitespace), so `infix:<+|>[12345]` survives whole, and both discard paths are
++tallied — `unparsed=` for `[engine] opt ` lines that fail the head match,
++`non-trace-lines=` for the rest. IMPORTANT 3: the minimum now prints its
++population — `too-large roots: N (S sized, U unsized)`, the sized names in size
++order, and an explicit `UNSIZED (excluded, so the minimum above reads high)`
++line when U > 0. IMPORTANT 4: `nqp-root-ms=` added alongside an unchanged
++`total-compiler-ms=`. Test gap closed: `events=5` pins the accepted-line count,
++which is structurally why the colon got through.
++
++Task 2: fix round 1/5 verified against reality, not only against the fixture.
++16/16 pass. The Step 6 smoke log still parses (`events=2 done=2 unparsed=0
++non-trace-lines=11 nqp-root-ms=33` of `total-compiler-ms=93`). And a line built
++by `sprintf` from the reviewer's verbatim `FAILED_FORMAT` — not hand-padded —
++now yields `reasons-parsed=1`, the full reason text, and
++`min-too-large-size=31337`: a number, where the shipped tool gave `none`.
++
++Task 2: fix round 1/5 note. This commit also carries the controller's own
++uncommitted ledger additions (the Critical 1 write-up and the three deferred
++minors), because the ledger is one blob and the fix entry had to append to it.
++Nothing above the appended lines was touched. The plan file
++`2026-09-12-jvm-milestone-6-compiler-workload.md` has uncommitted controller
++edits too and was deliberately LEFT uncommitted, being outside the
++implementer's commit scope.
+diff --git a/tools/build/t/fixtures/trace-noreason.log b/tools/build/t/fixtures/trace-noreason.log
+new file mode 100644
+index 0000000000..c612b0b848
+--- /dev/null
++++ b/tools/build/t/fixtures/trace-noreason.log
+@@ -0,0 +1 @@
++[engine] opt failed engine=1  id=77    parse_stmt[48213]                                  |Tier 2|Time  6400(6100+300 )ms|Why: code installation failed: code is too large|UTC 2026-09-12T09:47:56.100|Src n/a
+diff --git a/tools/build/t/fixtures/trace-sample.log b/tools/build/t/fixtures/trace-sample.log
+index fe85327583..917ab813b4 100644
+--- a/tools/build/t/fixtures/trace-sample.log
++++ b/tools/build/t/fixtures/trace-sample.log
+@@ -1,6 +1,7 @@
+ NOTE: Picked up JDK_JAVA_OPTIONS: -Dpolyglot.engine.TraceCompilation=true
+ [engine] opt done   engine=1  id=34    org.graalvm.polyglot.Value<Program>.execute        |Tier 1|Time    72(  63+9   )ms|AST    3|Inlined   0Y   0N|IR    309/   639|CodeSize    3948|Addr 0x7f0412473f00|CompId 2010   |UTC 2026-09-12T09:47:49.972|Src n/a
+ [engine] opt done   engine=1  id=2     <anon>[0]                                          |Tier 1|Time    37(  31+6   )ms|AST    2|Inlined   0Y   0N|IR    103/   184|CodeSize     711|Addr 0x7f041246c280|CompId 2011   |UTC 2026-09-12T09:47:49.972|Src n/a
+-[engine] opt failed engine=1  id=77    parse_stmt[48213]                                  |Tier 2|Time  6400(6100+300 )ms|Reason code installation failed: code is too large|UTC 2026-09-12T09:47:56.100|Src n/a
+-[engine] opt failed engine=1  id=78    parse_expr[91002]                                  |Tier 2|Time  6600(6300+300 )ms|Reason code installation failed: code is too large|UTC 2026-09-12T09:47:57.100|Src n/a
++[engine] opt failed engine=1  id=77    parse_stmt[48213]                                  |Tier 2|Time  6400(6100+300 )ms|Reason: code installation failed: code is too large|UTC 2026-09-12T09:47:56.100|Src n/a
++[engine] opt failed engine=1  id=78    parse_expr[91002]                                  |Tier 2|Time  6600(6300+300 )ms|Reason: code installation failed: code is too large|UTC 2026-09-12T09:47:57.100|Src n/a
++[engine] opt deopt  engine=1  id=90    infix:<+|>[12345]                                  |Reason Transferred to interpreter|UTC 2026-09-12T09:47:58.200|Src n/a
+ ok - warm add
+diff --git a/tools/build/t/truffle-trace-summary.rakutest b/tools/build/t/truffle-trace-summary.rakutest
+index d27298fd37..7d05a9bec2 100644
+--- a/tools/build/t/truffle-trace-summary.rakutest
++++ b/tools/build/t/truffle-trace-summary.rakutest
+@@ -1,28 +1,61 @@
+ use Test;
+ 
+ my $tool = $*PROGRAM.parent(2).add('truffle-trace-summary.raku');
+ my $fix  = $*PROGRAM.parent.add('fixtures/trace-sample.log');
+ 
+-plan 8;
++plan 16;
+ 
+ my $out = run($*EXECUTABLE, $tool, $fix, :out).out.slurp(:close);
+ 
+ ok  $out.contains('done=2'),   'counts the two successful compilations';
+ ok  $out.contains('failed=2'), 'counts the two failed compilations';
+ nok $out.contains('ok - warm add'),
+     'ignores lines that are not engine trace lines';
+ ok  $out.contains('code installation failed: code is too large'),
+     'groups failures by their reason text';
+ ok  $out ~~ / 'min-too-large-size=48213' /,
+     'reports the smallest wire size among too-large roots';
+ ok  $out.contains('parse_expr'),
+     'names the roots in the top-roots table';
+ ok  $out ~~ / 'mean=6500' /,
+     'reports the mean time of a reason group in ms';
+ 
++# Pins the accepted-line count. Without this nothing noticed that a whole
++# class of lines had stopped parsing -- which is how the "Reason:" colon in
++# TraceCompilationListener.FAILED_FORMAT got through as a silent zero.
++ok  $out.contains('events=5'), 'accepts every trace line in the fixture';
++ok  $out.contains('unparsed=0'),
++    'no [engine] opt line is dropped without a tally';
++
++# FAILED_FORMAT writes "|Reason: %s|" with a colon; DEOPT/INV/UNQUEUED write
++# "|Reason %s|" without one. Three of the five events carry a reason, and all
++# three must parse -- two with the colon, one without.
++ok  $out.contains('reasons-parsed=3'),
++    'parses Reason with and without the colon';
++
++# infix:<|> and infix:<+|> are real Rakudo operators, so a root name can
++# contain the field separator. The name must survive whole.
++ok  $out.contains('infix:<+|>[12345]'),
++    'a root name containing | is not split mid-name';
++
++ok  $out.contains('too-large roots: 2 (2 sized, 0 unsized)'),
++    'shows the population behind the minimum, not just the minimum';
++
++ok  $out.contains('total-compiler-ms=13109'),
++    'totals every root';
++ok  $out.contains('nqp-root-ms=13037'),
++    'totals the bracketed (NQP) roots separately';
++
++# A failure whose reason field is named something else must be loud, never a
++# bare "none" that Task 4 would read as "nothing was too large".
++my $noreason = $*PROGRAM.parent.add('fixtures/trace-noreason.log');
++my $out3 = run($*EXECUTABLE, $tool, $noreason, :out).out.slurp(:close);
++ok $out3.contains('min-too-large-size=none  (failed=1, reasons-parsed=0)'),
++   'says so loudly when failures parsed but their reasons did not';
++
+ my $empty = $*PROGRAM.parent.add('fixtures/empty.log');
+ $empty.spurt('');
+ my $out2 = run($*EXECUTABLE, $tool, $empty, :out).out.slurp(:close);
+ ok $out2.contains('min-too-large-size=none'),
+    'says none when no root failed for size';
+ $empty.unlink;
+diff --git a/tools/build/truffle-trace-summary.raku b/tools/build/truffle-trace-summary.raku
+index a4c86af226..3a39af9d8f 100755
+--- a/tools/build/truffle-trace-summary.raku
++++ b/tools/build/truffle-trace-summary.raku
+@@ -1,60 +1,113 @@
+ #!/usr/bin/env raku
+ 
+ # Summarizes a Truffle compilation trace (-Dpolyglot.engine.TraceCompilation=true).
+ #
+ # A trace line looks like:
+ #   [engine] opt done   engine=1  id=2  <anon>[0]  |Tier 1|Time  37(  31+6 )ms|...
+ # The root name carries the program's wire-word count in brackets, because
+ # NqpRootNode.getName() appends it. Fields after the name are split on '|'
+ # and matched by their leading word, never by position, so a field order
+ # change in a future GraalVM does not silently mis-parse.
++#
++# Two shapes of the real format bite, and both are guarded here:
++#
++#   * TraceCompilationListener.FAILED_FORMAT (decompiled from the
++#     truffle-runtime jar this tree runs) is
++#       opt failed engine=%-2d id=%-5d %-50s |Tier %d|Time %18s|Reason: %s|UTC %s|Src %s
++#     with a COLON after Reason, while DEOPT/INV/UNQUEUED write "|Reason %s|"
++#     without one. The colon therefore lands on exactly the verb whose reason
++#     decides NQP_CODE_MAX_COMPILE, so the field match treats it as optional.
++#
++#   * A root name can itself contain '|': infix:<|> and infix:<+|> are real
++#     Rakudo operators. Splitting the whole line on '|' cuts such a name in
++#     half and loses its size. The head is cut instead at the first
++#     whitespace-then-'|', which is how the format separates the %-50s name
++#     from the fields (a '|' inside a name is never preceded by whitespace),
++#     and only the tail is split.
++#
++# Nothing is discarded silently: every [engine] opt line that fails the head
++# match is counted in unparsed=, and a failure whose reason did not parse is
++# announced on the min-too-large-size line itself rather than passing for
++# "nothing was too large".
+ 
+ sub MAIN($log, Int :$top = 20) {
+     my @events;
++    my $unparsed  = 0;
++    my $non-trace = 0;
+     for $log.IO.lines -> $line {
+-        next unless $line.starts-with('[engine] opt ');
+-        my ($head, @fields) = $line.split('|');
++        unless $line.starts-with('[engine] opt ') {
++            $non-trace++;
++            next;
++        }
++        # Cut the head at the first whitespace-then-'|' so that a '|' inside
++        # the root name stays with the name.
++        my $head = $line;
++        my $tail = '';
++        if $line ~~ / ^ .+? \s '|' / {
++            $head = $line.substr(0, $/.to - 1);
++            $tail = $line.substr($/.to);
++        }
+         $head ~~ / ^ '[engine] opt ' $<verb>=(\S+) \s+ 'engine=' \d+ \s+ 'id=' \d+ \s+ $<name>=(.+?) \s* $ /
+-            or next;
++            or do { $unparsed++; next };
+         # Read both captures BEFORE any further match: the next ~~ replaces
+         # $/, and $<verb> would then resolve against the wrong match.
+         my $verb = ~$<verb>;
+         my $name = ~$<name>;
+         my $size = $name ~~ / '[' $<n>=(\d+) ']' $ / ?? +$<n> !! Int;
+         my %f;
+-        for @fields -> $f {
++        for $tail.split('|') -> $f {
+             my $t = $f.trim;
+             %f<tier>   = +$0 if $t ~~ / ^ 'Tier' \s+ (\d+) /;
+             %f<ms>     = +$0 if $t ~~ / ^ 'Time' \s+ (\d+) /;
+-            %f<reason> = ~$0 if $t ~~ / ^ 'Reason' \s+ (.+) $ /;
++            %f<reason> = ~$0 if $t ~~ / ^ 'Reason' ':'? \s+ (.+) $ /;
+         }
+         @events.push: {
+             :$verb, :$name, :$size,
+             tier => %f<tier> // 0, ms => %f<ms> // 0,
+             reason => %f<reason> // '',
+         };
+     }
+ 
+-    my %by-verb = @events.classify(*<verb>);
++    my @reasoned = @events.grep({ .<reason>.chars });
++    my %by-verb  = @events.classify(*<verb>);
+     say "events=@events.elems()";
+     say "$_=%by-verb{$_}.elems()" for %by-verb.keys.sort;
++    say "unparsed=$unparsed";
++    say "non-trace-lines=$non-trace";
++    say "reasons-parsed={ @reasoned.elems }";
+ 
+     my @failed = @events.grep(*<verb> eq 'failed');
+     if @failed {
+         say "\n--- failures by reason ---";
+         for @failed.classify(*<reason>).sort(-*.value.elems) -> $g {
+             my $mean = ($g.value.map(*<ms>).sum / $g.value.elems).round;
+-            say "  count={ $g.value.elems }  mean={ $mean }ms  { $g.key }";
++            my $what = $g.key.chars ?? $g.key !! '(no Reason field parsed)';
++            say "  count={ $g.value.elems }  mean={ $mean }ms  { $what }";
+         }
+     }
+ 
+-    my @too-large = @failed.grep({ .<reason>.contains('code is too large') && .<size>.defined });
+-    say "\nmin-too-large-size={ @too-large ?? @too-large.map(*<size>).min !! 'none' }";
++    my @too-large = @failed.grep({ .<reason>.contains('code is too large') });
++    my @sized     = @too-large.grep({ .<size>.defined });
++    my @unsized   = @too-large.grep({ !.<size>.defined });
++    # A bare "none" must never be mistakable for "nothing was too large" when
++    # the real story is that the reason field itself stopped parsing.
++    my $note = @failed && !@reasoned
++        ?? "  (failed={ @failed.elems }, reasons-parsed=0)" !! '';
++    say "\nmin-too-large-size={ @sized ?? @sized.map(*<size>).min !! 'none' }$note";
++    if @too-large {
++        say "  too-large roots: { @too-large.elems } ({ @sized.elems } sized, { @unsized.elems } unsized)";
++        say "  by size: { @sized.sort(*<size>).map(*<name>).join(', ') }" if @sized;
++        # An unsized too-large root is EXCLUDED from the minimum, which pushes
++        # the threshold UP and makes the knob miss the roots it exists to skip.
++        say "  UNSIZED (excluded, so the minimum above reads high): { @unsized.map(*<name>).join(', ') }"
++            if @unsized;
++    }
+ 
+     say "\n--- top $top roots by compile time ---";
+     for @events.sort(-*<ms>).head($top) -> $e {
+         say sprintf('  %7dms  %-6s  tier %d  %s', $e<ms>, $e<verb>, $e<tier>, $e<name>);
+     }
+ 
+     say "\ntotal-compiler-ms={ @events.map(*<ms>).sum }";
++    say "nqp-root-ms={ @events.grep({ .<size>.defined }).map(*<ms>).sum }";
+ }

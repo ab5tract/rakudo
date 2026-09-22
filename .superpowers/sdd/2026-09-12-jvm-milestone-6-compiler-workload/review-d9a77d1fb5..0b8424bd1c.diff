@@ -1,0 +1,271 @@
+# Review package: d9a77d1fb5..0b8424bd1c
+
+## Commits
+0b8424bd1c Tools: drop the guessed 'exceeds' size-bailout spelling
+
+## Files changed
+ ...-12-jvm-milestone-6-compiler-workload.ledger.md | 89 ++++++++++++++++++++++
+ tools/build/t/fixtures/trace-sample.log            |  1 +
+ tools/build/t/truffle-trace-summary.rakutest       | 26 +++++--
+ tools/build/truffle-trace-summary.raku             | 23 +++++-
+ 4 files changed, 127 insertions(+), 12 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md b/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md
+index 8691bfb5ed..578f5db46f 100644
+--- a/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md
++++ b/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md
+@@ -483,10 +483,99 @@ number, with the 900- and 1500-word roots silently absent — and the reason
+ `inlining of infix:<+` truncated at the pipe. After the fix, 21/21, and the same
+ mixed-spelling trace reports **min-too-large-size=900**.
+ 
+ Task 2: fix round 2/5 reality checks unchanged from round 1. The Step 6 smoke
+ log still parses (`events=2 done=2 unparsed=0`), and the round-1 line built by
+ `sprintf` from the verbatim `FAILED_FORMAT` still gives `min-too-large-size=31337`.
+ The new `trace-unknown-bailout.log` prints an honest `min-too-large-size=none`
+ with `count=1  sizes: 555  graph too chunky for the backend` underneath it.
+ The plan file is no longer modified in the working tree; this commit carries
+ the controller's round-2 ledger additions, appended-to and otherwise untouched.
++
++Task 2: fix round 2/5 (2 addressed, 0 open — `@SIZE-BAILOUT-SPELLINGS` alternation
++plus an `unclassified failure reasons` block printing count, sizes and reason
++text; tail pieces that do not look like a field start rejoined with their pipe,
++tested by SHAPE rather than by a name list, so the worst misfire is an over-long
++value and never a truncated one. Suite 16 -> 21. Commit rakudo `d9a77d1fb5`.)
++Both symptoms were reproduced against the round-1 tool first: `min-too-large-size`
++48213 with the 900- and 1500-word roots absent, and the reason truncated at the
++pipe; six assertions failed.
++Task 2: re-review round 2 (opus) — both ADDRESSED, verified on the reviewer's own
++five-event mixed trace (`min-too-large-size=900`, all four roots listed), no
++regression on the lone real-format line (31337), suite OBSERVED 21/21, ledger
++hunk 78 insertions / 0 deletions so controller content is provably unaltered.
++The field-start shape rule was probed against all eight formats decompiled from
++`TraceCompilationListener`: exactly one legitimate field fails it, `Count/Thres`
++(`\w*` stops at the slash), and that is harmless because the tier match is
++anchored and nothing reads Count/Thres. A reason containing `|Foo ` still
++truncates, but then matches no spelling and surfaces in the unclassified block
++with its size, so it is visible rather than absent.
++
++**Ruling 8 — `exceeds` was my guess and it is worse than no guess at all.** I
++supplied three spellings in the round-2 brief; only two were ever verified to
++exist in this tree. The re-reviewer observed a small root failing with
++`inlining of foo exceeds the inlining budget` being classified as a size bailout,
++giving `min-too-large-size=40` with `by size: tiny[40], big[48213]`. A threshold
++of 40 wire words would refuse essentially every compilation on the 460 s run,
++which does not bias Task 4's measurement but destroys it. Worse, the misfire is
++invisible to the tool's own alarm BY CONSTRUCTION: a reason that matched a
++spelling is by definition not unclassified. Round 3 removes `exceeds`, keeping
++only `code is too large` (the trace) and `too big to safely compile`
++(libjvmcicompiler.so). The general lesson is recorded beside the list in the
++code: the unclassified block IS the mechanism for unknown spellings, and it
++works; a guessed-at loose substring does not extend the tool's reach, it
++bypasses that mechanism and turns a loud unknown into a silent wrong answer.
++Plan Task 4 Step 1 now requires reading the failures-by-reason, `by size:` and
++unclassified blocks beside the number, with two named plausibility checks.
++Costs if wrong: a genuine size bailout under a third spelling now lands in the
++unclassified block instead of the population, so the minimum reads high — but
++loudly, with the reason and its size printed for a human to act on.
++
++Task 2: PARKED residual — a partial reason-parse leaves a silent too-high
++minimum. With one failure whose reason parses and one whose does not, the
++`(failed=N, reasons-parsed=0)` note does not fire (it requires zero parsed) and
++`@unclassified` skips empty reasons, so the unparsed group appears in
++failures-by-reason with a count but without its sizes. Ruling: park. It needs two
++different shapes among `opt failed` lines, and `FAILED_FORMAT` is a single
++constant in `TraceCompilationListener`, so every such line shares one shape.
++Costs if wrong: a too-high threshold on a trace whose failure lines are somehow
++heterogeneous — which Task 4 Step 1's new plausibility checks would surface.
++
++Task 2: fix round 3/5 (1 addressed, 0 open — commit stamped 19:40, the fifth;
++nothing squashed). `exceeds` is deleted from `@SIZE-BAILOUT-SPELLINGS`, which
++now holds only the two spellings verified to exist in this tree: `code is too
++large` from the compilation trace and `too big to safely compile` from
++libjvmcicompiler.so. The reasoning is in a comment beside the list, in the
++controller's own terms: a guessed spelling does not extend the tool's reach, it
++BYPASSES the mechanism that already covers the unknown. The unclassified block
++prints an unmatched reason with its count and sizes, loudly, for a human. A
++loose entry converts that loud unknown into a silent wrong answer — and the
++wrong answer is invisible to the tool's own alarm by construction, since a
++reason that matched a spelling is by definition not unclassified. The comment
++ends with the rule for next time: when a real trace shows a bailout this list
++does not know, it lands in that block; add it here THEN, with the trace that
++proves it.
++
++Task 2: fix round 3/5 red run. A `tiny[40]` line was added to the fixture in the
++`FAILED_FORMAT`, reason `inlining of foo exceeds the inlining budget`. Against
++the round-2 tool, four assertions failed and the misfire printed exactly as the
++re-reviewer described it: `min-too-large-size=40` over
++`by size: tiny[40], graph_bail[900], inline_pipe[1500], parse_stmt[48213],
++parse_expr[91002]`. After the deletion, 22/22 and
++**min-too-large-size=900**, with `count=1  sizes: 40  inlining of foo exceeds
++the inlining budget` in the unclassified block where a human will read it. Only
++one assertion was added, as directed; the "must NOT enter the population" half
++is carried by the three assertions that already existed (min=900, the by-size
++membership line, and `too-large roots: 4`), all three of which failed in the red
++run and pass now.
++
++Task 2: NEW OBSERVATION from round 3, NOT fixed, controller's call. Round 3's
++fixture created the first tie in a `.classify(...).sort(-*.value.elems)` group,
++and tied groups reorder between runs: five consecutive runs of the same trace
++printed the two count=1 unclassified reasons in a different order twice.
++`classify` returns a Hash and the sort is stable, so ties inherit MoarVM's hash
++iteration order. It affects the `failures by reason` block equally. No assertion
++is at risk (all use `contains`) and no number is wrong, but two runs of one
++trace produce textually different reports, which will be a nuisance the moment
++Task 3 diffs them. The fix is a tiebreak key on the sorts, roughly
++`.sort({ (-.value.elems, .key) })`. Left alone because this round was scoped to
++one line plus a test, and scope is the controller's to set.
+diff --git a/tools/build/t/fixtures/trace-sample.log b/tools/build/t/fixtures/trace-sample.log
+index 352b97f8a6..7c0fe41ecb 100644
+--- a/tools/build/t/fixtures/trace-sample.log
++++ b/tools/build/t/fixtures/trace-sample.log
+@@ -1,10 +1,11 @@
+ NOTE: Picked up JDK_JAVA_OPTIONS: -Dpolyglot.engine.TraceCompilation=true
+ [engine] opt done   engine=1  id=34    org.graalvm.polyglot.Value<Program>.execute        |Tier 1|Time    72(  63+9   )ms|AST    3|Inlined   0Y   0N|IR    309/   639|CodeSize    3948|Addr 0x7f0412473f00|CompId 2010   |UTC 2026-09-12T09:47:49.972|Src n/a
+ [engine] opt done   engine=1  id=2     <anon>[0]                                          |Tier 1|Time    37(  31+6   )ms|AST    2|Inlined   0Y   0N|IR    103/   184|CodeSize     711|Addr 0x7f041246c280|CompId 2011   |UTC 2026-09-12T09:47:49.972|Src n/a
+ [engine] opt failed engine=1  id=77    parse_stmt[48213]                                  |Tier 2|Time  6400(6100+300 )ms|Reason: code installation failed: code is too large|UTC 2026-09-12T09:47:56.100|Src n/a
+ [engine] opt failed engine=1  id=78    parse_expr[91002]                                  |Tier 2|Time  6600(6300+300 )ms|Reason: code installation failed: code is too large|UTC 2026-09-12T09:47:57.100|Src n/a
+ [engine] opt deopt  engine=1  id=90    infix:<+|>[12345]                                  |Reason Transferred to interpreter|UTC 2026-09-12T09:47:58.200|Src n/a
+ [engine] opt failed engine=1  id=91    graph_bail[900]                                    |Tier 2|Time  5200(5000+200 )ms|Reason: too big to safely compile. Node count: 41234|UTC 2026-09-12T09:47:59.100|Src n/a
+ [engine] opt failed engine=1  id=92    inline_pipe[1500]                                  |Tier 2|Time  5100(4900+200 )ms|Reason: inlining of infix:<+|> failed: code is too large|UTC 2026-09-12T09:47:59.400|Src n/a
+ [engine] opt failed engine=1  id=93    misc_fail[700]                                     |Tier 2|Time   300( 280+20  )ms|Reason: inlining budget exhausted|UTC 2026-09-12T09:47:59.700|Src n/a
++[engine] opt failed engine=1  id=94    tiny[40]                                           |Tier 2|Time   120( 110+10  )ms|Reason: inlining of foo exceeds the inlining budget|UTC 2026-09-12T09:48:00.100|Src n/a
+ ok - warm add
+diff --git a/tools/build/t/truffle-trace-summary.rakutest b/tools/build/t/truffle-trace-summary.rakutest
+index ec45ee88fa..e74bc8464e 100644
+--- a/tools/build/t/truffle-trace-summary.rakutest
++++ b/tools/build/t/truffle-trace-summary.rakutest
+@@ -1,43 +1,43 @@
+ use Test;
+ 
+ my $tool = $*PROGRAM.parent(2).add('truffle-trace-summary.raku');
+ my $fix  = $*PROGRAM.parent.add('fixtures/trace-sample.log');
+ 
+-plan 21;
++plan 22;
+ 
+ my $out = run($*EXECUTABLE, $tool, $fix, :out).out.slurp(:close);
+ 
+ ok  $out.contains('done=2'),   'counts the two successful compilations';
+-ok  $out.contains('failed=5'), 'counts the failed compilations';
++ok  $out.contains('failed=6'), 'counts the failed compilations';
+ nok $out.contains('ok - warm add'),
+     'ignores lines that are not engine trace lines';
+ ok  $out.contains('code installation failed: code is too large'),
+     'groups failures by their reason text';
+ ok  $out ~~ / 'min-too-large-size=900' /,
+     'reports the smallest wire size among too-large roots';
+ ok  $out.contains('parse_expr'),
+     'names the roots in the top-roots table';
+ ok  $out ~~ / 'mean=6500' /,
+     'reports the mean time of a reason group in ms';
+ 
+ # Pins the accepted-line count. Without this nothing noticed that a whole
+ # class of lines had stopped parsing -- which is how the "Reason:" colon in
+ # TraceCompilationListener.FAILED_FORMAT got through as a silent zero.
+-ok  $out.contains('events=8'), 'accepts every trace line in the fixture';
++ok  $out.contains('events=9'), 'accepts every trace line in the fixture';
+ ok  $out.contains('unparsed=0'),
+     'no [engine] opt line is dropped without a tally';
+ 
+ # FAILED_FORMAT writes "|Reason: %s|" with a colon; DEOPT/INV/UNQUEUED write
+-# "|Reason %s|" without one. Six of the eight events carry a reason, and all
+-# six must parse -- five with the colon, one without.
+-ok  $out.contains('reasons-parsed=6'),
++# "|Reason %s|" without one. Seven of the nine events carry a reason, and all
++# seven must parse -- six with the colon, one without.
++ok  $out.contains('reasons-parsed=7'),
+     'parses Reason with and without the colon';
+ 
+ # infix:<|> and infix:<+|> are real Rakudo operators, so a root name can
+ # contain the field separator. The name must survive whole.
+ ok  $out.contains('infix:<+|>[12345]'),
+     'a root name containing | is not split mid-name';
+ 
+ # ... and so can a reason text, because operator names turn up in inlining
+ # failures. Truncating at the pipe drops the root from the population AND
+ # defeats the size-bailout match, since a cut reason matches no spelling.
+@@ -51,23 +51,33 @@ ok  $out.contains('by size: graph_bail[900], inline_pipe[1500], parse_stmt[48213
+     'every spelling of a size bailout joins the population';
+ ok  $out.contains('too-large roots: 4 (4 sized, 0 unsized)'),
+     'shows the population behind the minimum, not just the minimum';
+ 
+ # The part that outlives any list of spellings I can write today: a failure
+ # reason nobody classified is printed with its size, so a fourth spelling
+ # shows up named rather than silently leaving the population.
+ ok  $out.contains('sizes: 700  inlining budget exhausted'),
+     'prints unclassified failure reasons with the sizes behind them';
+ 
+-ok  $out.contains('total-compiler-ms=23709'),
++# A loose substring is worse than no spelling at all. "inlining of foo exceeds
++# the inlining budget" is a 40-word root reporting an inlining decision, not a
++# size bailout; classifying it would set min-too-large-size=40 and a threshold
++# of 40 wire words refuses essentially every compilation. It must land in the
++# unclassified block instead -- where a human reads it -- and the three
++# assertions above (min=900, the by-size line, and the population count) are
++# what hold it out of the population.
++ok  $out.contains('sizes: 40  inlining of foo exceeds the inlining budget'),
++    'an inlining-budget message is unclassified, never a size bailout';
++
++ok  $out.contains('total-compiler-ms=23829'),
+     'totals every root';
+-ok  $out.contains('nqp-root-ms=23637'),
++ok  $out.contains('nqp-root-ms=23757'),
+     'totals the bracketed (NQP) roots separately';
+ 
+ # A trace where EVERY failure is an unrecognised spelling: the minimum is
+ # honestly none, but the reason and its size must still be on screen.
+ my $unknown = $*PROGRAM.parent.add('fixtures/trace-unknown-bailout.log');
+ my $out4 = run($*EXECUTABLE, $tool, $unknown, :out).out.slurp(:close);
+ ok $out4.contains('min-too-large-size=none'),
+    'an unrecognised bailout spelling does not invent a minimum';
+ ok $out4.contains('sizes: 555  graph too chunky for the backend'),
+    'an unrecognised bailout spelling is named and sized, never silent';
+diff --git a/tools/build/truffle-trace-summary.raku b/tools/build/truffle-trace-summary.raku
+index 5284f5474f..cec9cd7caa 100755
+--- a/tools/build/truffle-trace-summary.raku
++++ b/tools/build/truffle-trace-summary.raku
+@@ -30,24 +30,39 @@
+ # Nothing is discarded silently: every [engine] opt line that fails the head
+ # match is counted in unparsed=, a failure whose reason did not parse is
+ # announced on the min-too-large-size line itself rather than passing for
+ # "nothing was too large", and a failure reason that parsed but matched no
+ # known size-bailout spelling is printed with the sizes behind it rather than
+ # quietly leaving the population.
+ 
+ # The spellings of "this root was too large to compile". They are not one
+ # message: "code is too large" is the code-installation limit, while "too big
+ # to safely compile. Node count: N" is the PermanentBailoutException on graph
+-# size in libjvmcicompiler.so. Substring matches, never exact ones -- and the
+-# unclassified-reasons report below is what covers the spellings not listed
+-# here, which matters more than the list, because the list will go stale.
+-my @SIZE-BAILOUT-SPELLINGS = 'code is too large', 'too big to safely compile', 'exceeds';
++# size in libjvmcicompiler.so. Substring matches, never exact ones.
++#
++# ONLY SPELLINGS VERIFIED TO EXIST IN THIS TREE BELONG HERE. Nothing guessed,
++# and in particular nothing as loose as a bare 'exceeds': "inlining of foo
++# exceeds the inlining budget" is an inlining decision about a 40-word root,
++# not a size bailout, and classifying it sets min-too-large-size=40 -- a
++# threshold that would refuse essentially every compilation and destroy the
++# measurement rather than merely bias it.
++#
++# A guessed spelling does not extend this tool's reach; it bypasses the
++# mechanism that already covers the unknown. The unclassified-reasons report
++# below prints any unmatched failure reason with its count and its sizes,
++# loudly, for a human to read. A too-loose entry here converts that loud
++# unknown into a silent wrong answer, and a wrong threshold is invisible to
++# the tool's own alarm by construction: a reason that matched a spelling is,
++# by definition, not unclassified. When a real trace shows a size bailout this
++# list does not know, it will appear in that block -- add it here THEN, with
++# the trace that proves it.
++my @SIZE-BAILOUT-SPELLINGS = 'code is too large', 'too big to safely compile';
+ 
+ sub size-bailout($reason --> Bool) {
+     so @SIZE-BAILOUT-SPELLINGS.first({ $reason.contains($_) });
+ }
+ 
+ # A field starts with a capitalised word then whitespace, optionally with a
+ # colon: Tier, Time, AST, Inlined, IR, CodeSize, Addr, CompId, UTC, Src,
+ # "Reason:". Anything else is the continuation of a value that contained a
+ # '|'. This is deliberately a SHAPE test and not a list of known field names,
+ # so an unfamiliar future field still reads as a field; and if it ever guesses

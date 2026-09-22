@@ -1,0 +1,122 @@
+# Review package: 0a43dbed1e..aa0169ed5a
+
+## Commits
+aa0169ed5a M6 Task 1: the clean build at HEAD is the milestone baseline
+
+## Files changed
+ ...-12-jvm-milestone-6-compiler-workload.ledger.md | 97 ++++++++++++++++++++++
+ 1 file changed, 97 insertions(+)
+
+## Diff
+diff --git a/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md b/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md
+index c6e53b88af..b15700225f 100644
+--- a/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md
++++ b/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md
+@@ -55,10 +55,107 @@ in the history instead of a tidy amend.
+ dispatch.** The plan said `./nqp/gradlew -p nqp test`. That is Gradle's
+ Java and Kotlin unit-test task. The 151-file nqp suite is **`testNqp`**
+ (t/nqp, t/hll, t/qregex, t/p5regex, t/qast, t/jvm, t/serialization,
+ t/nativecall). Left alone, both gates would have passed while running
+ nothing that could see the nine known reds. Plan corrected at both sites.
+ Costs if wrong: none — `testNqp` is the task whose 151-file / 614 s run
+ the engine-merge ledger recorded as the baseline.
+ 
+ ## Task loop
+ 
++Task 1: implementer dispatched (opus); BASE rakudo `0a43dbed1e`, nqp `41c294b02`.
++Ruling: the implementer writes its own numbers into this ledger, so controller
++lines for a task go in AFTER its report arrives, to avoid a concurrent-write
++race on one file. Costs if wrong: nothing; the ordering of lines within a task
++block is cosmetic.
++
++### Task 1 — the clean build at HEAD (implementer)
++
++**Toolchain (Step 1).** `Oracle GraalVM 25.2.4+7.1 (build 25.0.4+7-LTS-jvmci-25.2-b20)`. Confirmed; the numbers below stand.
++
++**Pre-build state (Step 2).**
++
++| | value |
++|---|---|
++| rakudo HEAD | `0a43dbed1e` |
++| nqp HEAD | `41c294b02` |
++| `blib/CORE.c.setting.jar` | 2026-09-11 21:34:27 |
++| `nqp/build/jvm/share/lib/nqp.jar` | 2026-09-11 21:16:33 |
++
++The brief's diagnosis held, and the tree was staler than the brief knew.
++
++**Finding — `make` at HEAD was a no-op, and the Makefile itself predated
++milestone 5.** Step 4's `make` finished in **0 s**, printing only
++`+++ Setting up JVM runner`. Two independent causes:
++
++1. *make's graph never sees nqp.* No rakudo target lists
++   `nqp/build/jvm/share/lib/nqp.jar` (or any nqp artifact) as a
++   prerequisite, and the three commits between the last build and HEAD
++   are rakudo docs-only. So the freshly clean-built nqp of Step 3 left
++   every rakudo target looking up to date, and a plain `make` would have
++   measured nothing and handed milestone 6 a baseline built against the
++   *previous* nqp — the exact trap the task exists to avoid.
++2. *The generated Makefile was from 2026-09-11 02:19*, before milestone 5.
++   Its `NQP_JARS` / `BLD_NQP_JARS` still listed `asm-9.10.1.jar` and
++   `asm-tree-9.10.1.jar` (both deleted from nqp; the paths no longer
++   exist, and a missing classpath entry is silently ignored by the JVM)
++   and did **not** list `nqp-truffle.jar`. This is the same staleness the
++   brief spotted in `rakudo-j-build`; the runner inherits it from here,
++   which is why the no-op `make`'s "Setting up JVM runner" step did not
++   clear it.
++
++**Repair (inside the task, per Step 4's instruction).** No source
++changed. Three generated-state commands, in order:
++
++```
++perl Configure.pl --backends=jvm --prefix=<worktree>/install --silent-build
++make clean
++make        # via watched-run
++```
++
++Configure regenerated the Makefile from the current
++`nqp/build/jvm/share/lib/jvmconfig.properties`: `grep -c asm Makefile`
++went 2 -> **0** and `nqp-truffle.jar` is now on the classpath.
++`make clean` removed `blib/*.jar` and `gen/`, so the rebuild is a true
++clean build at HEAD. After it, `grep -c asm rakudo-j-build` is **0** and
++the runner carries `nqp-truffle.jar` — the brief's staleness evidence is
++gone.
++
++**Baseline numbers (Steps 3-5).**
++
++| clock | milestone 5 | milestone 6 baseline |
++|---|---|---|
++| nqp clean buildJvm | 256 s | **244 s** |
++| make from the top | 1054 s | **1122 s** |
++| CORE.c total | 464 s | **457 s** |
++| CORE.c parse | 352.4 s | **344.1 s** |
++| CORE.c optimize | 36.6 s | **36.6 s** |
++
++`CORE.c total` is recipe wall clock, marker `[583s] +++ Compiling
++blib/CORE.c.setting.jar` to `[1040s] +++ Compiling
++blib/Perl6/BOOTSTRAP/v6d.jar`; the stage lines themselves sum to 439.9 s,
++the difference being JVM start and jar write. The other CORE.c stages:
++qast 32.6 s, unit 26.6 s, syntaxcheck/ast/jar 0.0 s. CORE.d 8.8 s,
++CORE.e 41.2 s. The `make` figure is up 68 s on milestone 5's; this run
++includes the Configure regeneration's downstream effects and a fully cold
++`gen/`, and `v6c` BOOTSTRAP alone took 398 s of it ([185s] -> [583s]).
++Treat 1122 s as the number to compare against, not 1054 s.
++
++**Gates.**
++
++- **Sanity (Step 6):** `evalserver-sweep --chunk=25 --jobs=1 --heap=8
++  t/01-sanity` — 25 files, 1 chunk, **ok**, 97 s. Zero failures.
++- **nqp suite (Step 7):** `./nqp/gradlew -p nqp testNqp` — 151 files,
++  13185 tests, 599 s (engine-merge baseline 614 s). Exactly the **nine
++  known reds and no tenth**: `t/nqp/021` 6/33, `t/nqp/022` 1/7,
++  `t/nqp/044` 1/62, `t/nqp/112` 2/26, `t/qregex` 21/845, `t/p5regex`
++  3/182, `t/qast` bad plan at test 10 of 184, `t/jvm/01-continuations`
++  3/22, `t/jvm/11-dispatch` 140 of 160 planned. Gradle exits 1 on the
++  reds, as it did at the engine merge; the file list is the gate.
++- **Jar census (Step 8):** `CENSUS: all 10 jars are unit artifacts` —
++  every jar `meta=1 class=0`.
++
++**Ruling (Task 1).** A plain `make` is not sufficient to build this tree
++at HEAD after an nqp rebuild, and any later task that rebuilds (T14's
++post-rebase build in particular) must run Configure + `make clean` +
++`make`, not `make` alone. Costs if wrong: a wasted clean build, ~19 min.
++Costs if ignored: a measurement against the previous nqp, silently.

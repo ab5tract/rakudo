@@ -1,0 +1,184 @@
+# Review package: 32f3800ee0..da7b413cca
+
+## Commits
+da7b413cca Ledger: cite the Task 2 tool commit by its final hash
+d92d405b80 Tools: summarize a Truffle compilation trace
+
+## Files changed
+ ...-12-jvm-milestone-6-compiler-workload.ledger.md | 43 ++++++++++++++++
+ tools/build/t/fixtures/trace-sample.log            |  6 +++
+ tools/build/t/truffle-trace-summary.rakutest       | 28 ++++++++++
+ tools/build/truffle-trace-summary.raku             | 60 ++++++++++++++++++++++
+ 4 files changed, 137 insertions(+)
+
+## Diff
+diff --git a/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md b/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md
+index 47fe700b81..725ff67699 100644
+--- a/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md
++++ b/docs/superpowers/plans/2026-09-12-jvm-milestone-6-compiler-workload.ledger.md
+@@ -285,10 +285,53 @@ implementer's.
+ Task 1: minor (deferred): the deferred-minor line about the unreported `cp`
+ message is now stale — the fix added exactly that sentence. Left standing
+ because it is a controller line and the record of what the review found.
+ Task 1: minor (deferred): the baseline table's column header is a bare
+ "milestone 5"; it is unambiguous only because the make row carries its method in
+ the row label. Other rows state no method. A future table should put the method
+ in the header.
+ 
+ Task 1: complete (commits `0a43dbed1e`..`1477806f7b`, review clean; plus
+ controller commit `98f2db7132` correcting the plan and the spec at source).
++
++Task 2: implementer dispatched (opus); BASE rakudo `32f3800ee0`. Test-first:
++fixture, failing test, tool, passing test, then a real short-workload smoke whose
++required positive marker is a `done=` count above zero.
++
++Task 2: complete (commit rakudo `d92d405b80`). Test-first order honoured:
++fixture (6 lines, verbatim from the brief) → test (8 assertions, verbatim) → RUN
++AND SEE IT FAIL (7 of 8 failed; only the `nok` "ignores non-trace lines"
++assertion passed, vacuously, against the empty output of a missing tool) → tool
++(verbatim from the brief) → 8/8 pass. Nothing in the brief was altered; both
++files and the fixture were transcribed straight out of it by line range rather
++than retyped, so the asserted values (`done=2`, `failed=2`, `mean=6500`,
++`min-too-large-size=48213`, `min-too-large-size=none` on an empty log) all
++reproduced on the first run of the finished tool.
++
++Task 2: the field-driven property is intact. The parser splits the tail on `|`
++and matches `Tier`/`Time`/`Reason` by each field's leading word, so the two
++unverified `opt failed` fixture lines commit the tool to nothing but the
++presence of a field named `Reason` — which is what Task 3 Step 4 goes and
++confirms against a real failing trace.
++
++Task 2: smoke test PASSED the required positive marker. `NqpCheck` under
++`-Dpolyglot.engine.TraceCompilation=true` (java exit 0, "# Truffle runtime:
++Oracle GraalVM", `ok - add` / `ok - fib`) produced
++`events=2 / done=2 / min-too-large-size=none / total-compiler-ms=93`, the two
++roots being `org.graalvm.polyglot.Value<Program>.execute` (60ms) and
++`<anon>[0]` (33ms). `done=` above zero: the instrument sees real data.
++
++Task 2: notes for Task 3, none of them defects. (a) The brief's Step 6 command
++is one shell statement mixing `$CLAUDE_JOB_DIR` into a `raku` invocation, which
++this worktree-isolated harness refuses to run; it works split into two plain
++commands with the job path written out. (b) `total-compiler-ms` and the
++top-roots table count non-NQP roots too — the polyglot entry point is half of
++the smoke run's two events — so a Task 3 reading of "compiler time" should say
++whether it means all roots or only the bracketed (NQP program) ones. (c) `Time`
++is read as the total, not the `(a+b)` split. (d) `getName()` is at
++`nqp/nqp-truffle/src/main/java/org/raku/nqp/truffle/NqpRootNode.java:90-94`; the
++brief cites 91-93, off by one line at each end and immaterial.
++
++Task 2: the entry above was first written against the pre-amend hash
++`4d9012b443`; `d92d405b80` is the same tree after one amend that only filled in
++that hash, and this follow-up commit corrects the citation. The tool commit to
++quote is `d92d405b80`.
+diff --git a/tools/build/t/fixtures/trace-sample.log b/tools/build/t/fixtures/trace-sample.log
+new file mode 100644
+index 0000000000..fe85327583
+--- /dev/null
++++ b/tools/build/t/fixtures/trace-sample.log
+@@ -0,0 +1,6 @@
++NOTE: Picked up JDK_JAVA_OPTIONS: -Dpolyglot.engine.TraceCompilation=true
++[engine] opt done   engine=1  id=34    org.graalvm.polyglot.Value<Program>.execute        |Tier 1|Time    72(  63+9   )ms|AST    3|Inlined   0Y   0N|IR    309/   639|CodeSize    3948|Addr 0x7f0412473f00|CompId 2010   |UTC 2026-09-12T09:47:49.972|Src n/a
++[engine] opt done   engine=1  id=2     <anon>[0]                                          |Tier 1|Time    37(  31+6   )ms|AST    2|Inlined   0Y   0N|IR    103/   184|CodeSize     711|Addr 0x7f041246c280|CompId 2011   |UTC 2026-09-12T09:47:49.972|Src n/a
++[engine] opt failed engine=1  id=77    parse_stmt[48213]                                  |Tier 2|Time  6400(6100+300 )ms|Reason code installation failed: code is too large|UTC 2026-09-12T09:47:56.100|Src n/a
++[engine] opt failed engine=1  id=78    parse_expr[91002]                                  |Tier 2|Time  6600(6300+300 )ms|Reason code installation failed: code is too large|UTC 2026-09-12T09:47:57.100|Src n/a
++ok - warm add
+diff --git a/tools/build/t/truffle-trace-summary.rakutest b/tools/build/t/truffle-trace-summary.rakutest
+new file mode 100644
+index 0000000000..d27298fd37
+--- /dev/null
++++ b/tools/build/t/truffle-trace-summary.rakutest
+@@ -0,0 +1,28 @@
++use Test;
++
++my $tool = $*PROGRAM.parent(2).add('truffle-trace-summary.raku');
++my $fix  = $*PROGRAM.parent.add('fixtures/trace-sample.log');
++
++plan 8;
++
++my $out = run($*EXECUTABLE, $tool, $fix, :out).out.slurp(:close);
++
++ok  $out.contains('done=2'),   'counts the two successful compilations';
++ok  $out.contains('failed=2'), 'counts the two failed compilations';
++nok $out.contains('ok - warm add'),
++    'ignores lines that are not engine trace lines';
++ok  $out.contains('code installation failed: code is too large'),
++    'groups failures by their reason text';
++ok  $out ~~ / 'min-too-large-size=48213' /,
++    'reports the smallest wire size among too-large roots';
++ok  $out.contains('parse_expr'),
++    'names the roots in the top-roots table';
++ok  $out ~~ / 'mean=6500' /,
++    'reports the mean time of a reason group in ms';
++
++my $empty = $*PROGRAM.parent.add('fixtures/empty.log');
++$empty.spurt('');
++my $out2 = run($*EXECUTABLE, $tool, $empty, :out).out.slurp(:close);
++ok $out2.contains('min-too-large-size=none'),
++   'says none when no root failed for size';
++$empty.unlink;
+diff --git a/tools/build/truffle-trace-summary.raku b/tools/build/truffle-trace-summary.raku
+new file mode 100755
+index 0000000000..a4c86af226
+--- /dev/null
++++ b/tools/build/truffle-trace-summary.raku
+@@ -0,0 +1,60 @@
++#!/usr/bin/env raku
++
++# Summarizes a Truffle compilation trace (-Dpolyglot.engine.TraceCompilation=true).
++#
++# A trace line looks like:
++#   [engine] opt done   engine=1  id=2  <anon>[0]  |Tier 1|Time  37(  31+6 )ms|...
++# The root name carries the program's wire-word count in brackets, because
++# NqpRootNode.getName() appends it. Fields after the name are split on '|'
++# and matched by their leading word, never by position, so a field order
++# change in a future GraalVM does not silently mis-parse.
++
++sub MAIN($log, Int :$top = 20) {
++    my @events;
++    for $log.IO.lines -> $line {
++        next unless $line.starts-with('[engine] opt ');
++        my ($head, @fields) = $line.split('|');
++        $head ~~ / ^ '[engine] opt ' $<verb>=(\S+) \s+ 'engine=' \d+ \s+ 'id=' \d+ \s+ $<name>=(.+?) \s* $ /
++            or next;
++        # Read both captures BEFORE any further match: the next ~~ replaces
++        # $/, and $<verb> would then resolve against the wrong match.
++        my $verb = ~$<verb>;
++        my $name = ~$<name>;
++        my $size = $name ~~ / '[' $<n>=(\d+) ']' $ / ?? +$<n> !! Int;
++        my %f;
++        for @fields -> $f {
++            my $t = $f.trim;
++            %f<tier>   = +$0 if $t ~~ / ^ 'Tier' \s+ (\d+) /;
++            %f<ms>     = +$0 if $t ~~ / ^ 'Time' \s+ (\d+) /;
++            %f<reason> = ~$0 if $t ~~ / ^ 'Reason' \s+ (.+) $ /;
++        }
++        @events.push: {
++            :$verb, :$name, :$size,
++            tier => %f<tier> // 0, ms => %f<ms> // 0,
++            reason => %f<reason> // '',
++        };
++    }
++
++    my %by-verb = @events.classify(*<verb>);
++    say "events=@events.elems()";
++    say "$_=%by-verb{$_}.elems()" for %by-verb.keys.sort;
++
++    my @failed = @events.grep(*<verb> eq 'failed');
++    if @failed {
++        say "\n--- failures by reason ---";
++        for @failed.classify(*<reason>).sort(-*.value.elems) -> $g {
++            my $mean = ($g.value.map(*<ms>).sum / $g.value.elems).round;
++            say "  count={ $g.value.elems }  mean={ $mean }ms  { $g.key }";
++        }
++    }
++
++    my @too-large = @failed.grep({ .<reason>.contains('code is too large') && .<size>.defined });
++    say "\nmin-too-large-size={ @too-large ?? @too-large.map(*<size>).min !! 'none' }";
++
++    say "\n--- top $top roots by compile time ---";
++    for @events.sort(-*<ms>).head($top) -> $e {
++        say sprintf('  %7dms  %-6s  tier %d  %s', $e<ms>, $e<verb>, $e<tier>, $e<name>);
++    }
++
++    say "\ntotal-compiler-ms={ @events.map(*<ms>).sum }";
++}
