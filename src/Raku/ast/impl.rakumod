@@ -79,10 +79,10 @@ class RakuAST::IMPL::QASTContext {
     # that either node's finalize call clears.
     has Hash $!stubbed-code-objects;
 
-    method new(Mu :$sc!, int :$precompilation-mode, :$setting, :$language-revision) {
+    method new(Mu :$sc!, Bool :$precompilation-mode, :$setting, :$language-revision) {
         my $obj := nqp::create(self);
         nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!sc', $sc);
-        nqp::bindattr_i($obj, RakuAST::IMPL::QASTContext, '$!precompilation-mode', $precompilation-mode);
+        nqp::bindattr_i($obj, RakuAST::IMPL::QASTContext, '$!precompilation-mode', ?$precompilation-mode);
         nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!post-deserialize', []);
         nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!code-ref-blocks', []);
         nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!sub-id-to-code-object', {});
@@ -403,7 +403,7 @@ class RakuAST::IMPL::InterpContext {
 # through these helpers keeps callers from having to remember the
 # argument form.
 class RakuAST::IMPL::Archetypes {
-    method is-generic(Mu $v) {
+    method generic(Mu $v) {
         nqp::can($v.HOW, 'archetypes')
             && $v.HOW.archetypes($v).generic
     }

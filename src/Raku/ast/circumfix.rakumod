@@ -1,7 +1,6 @@
 # Marker for all kinds of circumfix.
 class RakuAST::Circumfix
-  is RakuAST::Term
-  is RakuAST::Contextualizable { }
+  is RakuAST::Term { }
 
 # Grouping parentheses circumfix.
 class RakuAST::Circumfix::Parentheses
@@ -126,10 +125,9 @@ class RakuAST::Exception::TooComplex {
 # Array composer circumfix.
 class RakuAST::Circumfix::ArrayComposer
   is RakuAST::Circumfix
-  is RakuAST::Lookup
-  is RakuAST::ParseTime
-  is RakuAST::CheckTime
-  is RakuAST::ColonPairish
+  does RakuAST::Lookup
+  does RakuAST::ParseTime
+  does RakuAST::ColonPairish
 {
     has RakuAST::SemiList $.semilist;
 
@@ -207,17 +205,16 @@ class RakuAST::Circumfix::ArrayComposer
 # on it for performing this disambiguation.
 class RakuAST::Circumfix::HashComposer
   is RakuAST::Circumfix
-  is RakuAST::Lookup
-  is RakuAST::ParseTime
-  is RakuAST::CheckTime
+  does RakuAST::Lookup
+  does RakuAST::ParseTime
 {
     has RakuAST::Expression $.expression;
-    has int $.object-hash;
+    has Bool $.object-hash;
 
-    method new(RakuAST::Expression $expression?, int :$object-hash) {
+    method new(RakuAST::Expression $expression?, Bool :$object-hash) {
         my $obj := nqp::create(self);
         $obj.set-expression($expression);
-        nqp::bindattr_i($obj, RakuAST::Circumfix::HashComposer, '$!object-hash', $object-hash ?? 1 !! 0);
+        nqp::bindattr($obj, RakuAST::Circumfix::HashComposer, '$!object-hash', $object-hash // False);
         $obj
     }
 

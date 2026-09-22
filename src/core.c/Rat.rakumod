@@ -26,7 +26,7 @@ my class Rat is Cool does Rational[Int, Int] {
             if $d == 1 and (my $b := self.base(10,*)).Numeric === self {
                 $b;
             }
-            elsif Raku.legacy {
+            elsif Rakudo::Internals.client-language-revision < 3 {
                 '<' ~ $!numerator ~ '/' ~ $!denominator ~ '>'
             }
             else {
@@ -113,7 +113,7 @@ multi sub CREATE_RATIONAL_FROM_INTS(Int:D $nu, Int:D $de, Any, Any) is raw {
            nqp::p6bindattrinvres(nqp::create(Rat),Rat,'$!numerator',$nu),
            Rat,'$!denominator',$de
          )
-      !! $*RAT-OVERFLOW.UPGRADE-RAT($nu, $de)
+      !! Rakudo::Internals.UPGRADE-OVERFLOWING-RAT($nu, $de)
 }
 
 # already a FatRat, so keep that

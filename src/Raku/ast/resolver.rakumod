@@ -85,7 +85,7 @@ class RakuAST::Resolver {
         0
     }
 
-    method declare-our-package(Mu $target, str $final, RakuAST::Package $pkg) {
+    method declare-our-package(Mu $target, str $final, RakuAST::Declaration $pkg) {
         # Skip the 6.d `module Foo::Bar { class Foo::Bar { } }`
         # pattern: silent-replace at install time, no tracker entry.
         # Canonical name is only needed when we have an enclosing
@@ -181,8 +181,9 @@ class RakuAST::Resolver {
     # or no targets left for the given name.
     method find-attach-target(str $name, Bool :$skip-first) {
         my @stack := $!attach-targets{$name};
-        nqp::isconcrete(@stack) && nqp::elems(@stack) > +$skip-first
-          ?? @stack[nqp::elems(@stack) - (1 + $skip-first)]
+        my int $skip := ?$skip-first;
+        nqp::isconcrete(@stack) && nqp::elems(@stack) > $skip
+          ?? @stack[nqp::elems(@stack) - (1 + $skip)]
           !! Nil
     }
 
@@ -343,7 +344,7 @@ class RakuAST::Resolver {
     }
 
     # Resolve a RakuAST::Name to a constant.
-    method resolve-name-constant(RakuAST::Name $Rname, str :$sigil, :$current-scope-only) {
+    method resolve-name-constant(RakuAST::Name $Rname, str :$sigil, Bool :$current-scope-only) {
         self.IMPL-RESOLVE-NAME-CONSTANT($Rname, :$sigil, :$current-scope-only)
           // ($current-scope-only ?? Nil !! self.IMPL-RESOLVE-NAME-IN-PACKAGES($Rname, :$sigil))
     }
@@ -793,6 +794,11 @@ class RakuAST::Resolver {
     method add-node-with-check-time-problems(RakuAST::CheckTime $node) {
         unless $!nodes-with-check-time-problems {
             nqp::bindattr(self, RakuAST::Resolver, '$!nodes-with-check-time-problems', []);
+        }
+        # A node's sorries and worries are gathered once per entry, so a node
+        # more than one check reaches is listed once.
+        for $!nodes-with-check-time-problems {
+            return Nil if nqp::eqaddr($_, $node);
         }
         nqp::push($!nodes-with-check-time-problems, $node);
         Nil
@@ -1347,14 +1353,17 @@ class RakuAST::Resolver::EVAL
     }
 
     # Whether the nearest active scope declaring the name is the outermost
-    # one and declares it as the given declaration.
+    # one and declares it as the given declaration. A routine's own scope
+    # finding the routine itself is skipped, since that lookup runs in the
+    # enclosing frame.
     method IMPL-DECLARED-ONLY-IN-OUTERMOST-SCOPE(Str $name, Mu $decl) {
         my @scopes := $!scopes;
         my int $i := nqp::elems(@scopes);
         while $i-- {
             my $found := @scopes[$i].find-lexical($name);
             return nqp::eqaddr(@scopes[$i], @scopes[0]) && nqp::eqaddr($found, $decl) ?? 1 !! 0
-                if nqp::isconcrete($found);
+                if nqp::isconcrete($found)
+                && !(nqp::eqaddr($found, $decl) && nqp::eqaddr(@scopes[$i], $decl));
         }
         0
     }
@@ -1708,14 +1717,17 @@ class RakuAST::Resolver::Compile
     # parsed answers from its live declaration map, so its AST lexical
     # lookup table is not cached before its declarations are complete.
     # The outermost scope can be on the stack twice, entered by the parse
-    # and pushed again by a batch walk, so scopes compare by node.
+    # and pushed again by a batch walk, so scopes compare by node. A
+    # routine's own scope finding the routine itself is skipped, since
+    # that lookup runs in the enclosing frame.
     method IMPL-DECLARED-ONLY-IN-OUTERMOST-SCOPE(Str $name, Mu $decl) {
         my @scopes := $!scopes;
         my int $i := nqp::elems(@scopes);
         while $i-- {
             my $found := @scopes[$i].find-lexical($name);
             return nqp::eqaddr(@scopes[$i].scope, @scopes[0].scope) && nqp::eqaddr($found, $decl) ?? 1 !! 0
-                if nqp::isconcrete($found);
+                if nqp::isconcrete($found)
+                && !(nqp::eqaddr($found, $decl) && nqp::eqaddr(@scopes[$i].scope, $decl));
         }
         0
     }
@@ -1729,7 +1741,7 @@ class RakuAST::Resolver::Compile
     # Add a lexical declaration. Used when the compiler produces the
     # declaration, so that we can resolve it without requiring it to be
     # linked into the tree.
-    method declare-lexical(RakuAST::Declaration $decl) {
+    method declare-lexical(RakuAST::Node $decl) {
         CATCH {
             if nqp::istype(nqp::getpayload($_), RakuAST::Exception::TooComplex) {
                 self.build-exception('X::Syntax::Extension::TooComplex', name => nqp::getpayload($_).name).throw;
@@ -1959,7 +1971,7 @@ class RakuAST::Resolver::Compile::Scope
         @declarations
     }
 
-    method declare-lexical(RakuAST::Declaration $decl) {
+    method declare-lexical(RakuAST::Node $decl) {
         nqp::die('Should not be calling declare-lexical in batch mode')
           if $!batch-mode;
         my $name    := $decl.lexical-name;

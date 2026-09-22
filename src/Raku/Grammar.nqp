@@ -1,6 +1,3 @@
-#?if !jvm
-use NQPP5QRegex;
-#?endif
 use Raku::Actions;
 
 sub p6ize_recursive($x) {
@@ -159,17 +156,7 @@ role Raku::Common {
 #-------------------------------------------------------------------------------
 # Quote parsing
 
-#?if jvm
-    # The JVM backend does not build NQPP5QRegex, so there is no P5Regex slang.
-    method Regex($P5?) {
-        self.panic('Perl 5 regexes (:P5 / :Perl5) are not supported on the JVM backend')
-          if $P5;
-        self.slang_grammar('Regex')
-    }
-#?endif
-#?if !jvm
-    method Regex($P5?) { self.slang_grammar($P5 ?? 'P5Regex' !! 'Regex') }
-#?endif
+    method Regex() { self.slang_grammar('Regex') }
 
     method Quote() { self.slang_grammar('Quote') }
 
@@ -1212,9 +1199,6 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
         nqp::hash(
           'Quote',   [Raku::QGrammar,       Raku::QActions],
           'Regex',   [Raku::RegexGrammar,   Raku::RegexActions],
-#?if !jvm
-          'P5Regex', [Raku::P5RegexGrammar, Raku::P5RegexActions],
-#?endif
         )
     }
 
@@ -1624,7 +1608,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
     token unit-block($decl, $kind = 'Block', :$parameterization) {
         :my $*BLOCK;
         {                                           # entry check
-            $/.typed_panic("X::UnitScope::MustHaveUnit",:what($decl))
+            $/.typed-panic("X::UnitScope::MustHaveUnit",:what($decl))
               unless $*SCOPE eq 'unit';
         }
         { $*IN-DECL := ''; }                        # not inside declaration
@@ -4276,7 +4260,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
                 }
                 my $canname := $category
                   ~ ':sym'
-                  ~ self.Nodify('ColonPairish').IMPL-QUOTE-VALUE(~$opname);
+                  ~ self.Nodify('ColonPair').IMPL-QUOTE-VALUE(~$opname);
 
                 $/.add-categorical(
                   $category, $opname, $canname, $name.ast.canonicalize, $*BLOCK
@@ -4292,7 +4276,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
              {
                  # Allow all subs with ; but require "unit" scope from 6.e
                  if $*LANGUAGE-REVISION >= 3 {
-                     $/.typed_panic("X::UnitScope::MustHaveUnit","sub")
+                     $/.typed-panic("X::UnitScope::MustHaveUnit","sub")
                        unless $*SCOPE eq 'unit';
                  }
 
@@ -4407,7 +4391,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
           <trait($*BLOCK)>*
           '{'<.regex-whitespace>[
             | ['*'|'<...>'|'<*>'] <?{ $*MULTINESS eq 'proto' }> $<onlystar>={1}
-            | <nibble(self.quote-lang(self.Regex(%*RX<P5>), '{', '}'))>
+            | <nibble(self.quote-lang(self.Regex, '{', '}'))>
           ]
           '}'<!RESTRICTED><?end-statement>
           <.leave-block-scope>
@@ -4420,7 +4404,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
         my $categorical := $name ~~ /^'&'((\w+) [ ':<'\s*(\S+?)\s*'>' | ':«'\s*(\S+?)\s*'»' ])$/;
         my $cat := ~$categorical[0][0];
         if $categorical && nqp::can(self, $cat) {
-            my $canop := self.Nodify('ColonPairish').IMPL-QUOTE-VALUE($categorical[0][1]);
+            my $canop := self.Nodify('ColonPair').IMPL-QUOTE-VALUE($categorical[0][1]);
             my $canname := $cat ~ ':sym' ~ $canop;
             self.add-categorical($cat, ~$categorical[0][1], $canname, ~$categorical[0], :current-scope);
         }
@@ -4835,7 +4819,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
         {}  # make sure $/ gets set
         <.qok($/)>
         <rx-adverbs>
-        <quibble(self.Regex(%*RX<P5>))>
+        <quibble(self.Regex)>
         <!old-rx-modifiers>
     }
 
@@ -4846,7 +4830,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
         {}  # make sure $/ gets set
         <.qok($/)>
         <rx-adverbs>
-        <quibble(self.Regex(%*RX<P5>))>
+        <quibble(self.Regex)>
         <!old-rx-modifiers>
     }
 
@@ -4857,7 +4841,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
         { %*RX<s> := 1; %*RX<sigspace> := 1 }
         <.qok($/)>
         <rx-adverbs>
-        <quibble(self.Regex(%*RX<P5>))>
+        <quibble(self.Regex)>
         <!old-rx-modifiers>
     }
 
@@ -4868,7 +4852,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
         {}  # make sure $/ gets set
         <.qok($/)>
         <rx-adverbs>
-        <sibble(self.Regex(%*RX<P5>), self.Quote, 'qq')>
+        <sibble(self.Regex, self.Quote, 'qq')>
         [ <?{ $<sibble><infixish> }> || <.old-rx-modifiers>? ]
     }
 
@@ -4879,7 +4863,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
         { %*RX<s> := 1; %*RX<sigspace> := 1 }
         <.qok($/)>
         <rx-adverbs>
-        <sibble(self.Regex(%*RX<P5>), self.Quote, 'qq')>
+        <sibble(self.Regex, self.Quote, 'qq')>
         [ <?{ $<sibble><infixish> }> || <.old-rx-modifiers>? ]
     }
 
@@ -4890,7 +4874,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
         {}  # make sure $/ gets set
         <.qok($/)>
         <rx-adverbs>
-        <sibble(self.Regex(%*RX<P5>), self.Quote, 'qq')>
+        <sibble(self.Regex, self.Quote, 'qq')>
         [ <?{ $<sibble><infixish> }> || <.old-rx-modifiers>? ]
     }
 
@@ -4901,7 +4885,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
         { %*RX<s> := 1; %*RX<sigspace> := 1 }
         <.qok($/)>
         <rx-adverbs>
-        <sibble(self.Regex(%*RX<P5>), self.Quote, 'qq')>
+        <sibble(self.Regex, self.Quote, 'qq')>
         [ <?{ $<sibble><infixish> }> || <.old-rx-modifiers>? ]
     }
 
@@ -5462,7 +5446,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
                           ?? $nibble.ast.literal-value(:stringify) // ~$nibble
                           !! $ccf<semilist>;
                     }
-                    my $canop := self.Nodify('ColonPairish').IMPL-QUOTE-VALUE(~$opname);
+                    my $canop := self.Nodify('ColonPair').IMPL-QUOTE-VALUE(~$opname);
                     my $canname := $category ~ ':sym' ~ $canop;
                     my $termname := $category ~ ':' ~ $canop;
                     $/.add-categorical($category, $opname, $canname, $termname, :defterm, :current-scope);
@@ -6830,29 +6814,3 @@ grammar Raku::RegexGrammar is QRegex::P6Regex::Grammar does Raku::Common {
         <arglist=.LANG('MAIN','arglist')>
     }
 }
-
-#-------------------------------------------------------------------------------
-# Grammar to parse PCRE like regexes
-
-#?if !jvm
-grammar Raku::P5RegexGrammar is QRegex::P5Regex::Grammar does Raku::Common {
-    token rxstopper { <stopper> }
-
-    token p5metachar:sym<(?{ })> {
-        '(?' <?[{]> <codeblock> ')'
-    }
-
-    token p5metachar:sym<(??{ })> {
-        '(??' <?[{]> <codeblock> ')'
-    }
-
-    token p5metachar:sym<var> {
-        <?[$]> <var=.LANG('MAIN', 'variable')>
-    }
-
-    token codeblock {
-        :my $*ESCAPEBLOCK := 1;
-        <block=.LANG('MAIN','block')>
-    }
-}
-#?endif

@@ -21,12 +21,13 @@ grammar RakuASTParser {
 
     proto rule package {*}
     rule package:sym<class> { <sym> <package-def('class')> }
+    rule package:sym<role> { <sym> <package-def('role')> }
 
     rule package-def($*PKGDECL) {
         <name> {}
         :my $*PACKAGE-NAME := ~$<name>;
         :my %*ATTRS;
-        [ 'is' <parent=.name> ]*
+        [ 'is' <parent=.name> | 'does' <role=.name> ]*
         [ '{' || <.panic("Missing block in $*PKGDECL $*PACKAGE-NAME declaration")> ]
         [ <attribute-decl> | <method-decl> ]*
         [ '}' || <.panic("Missing '}' in $*PKGDECL $*PACKAGE-NAME declaration")> ]
@@ -55,7 +56,7 @@ grammar RakuASTParser {
     }
 
     rule signature {
-        '(' <parameter>* % [',' ] ')'
+        '(' <parameter>* % [',' ] [ '-->' <returns=.name> ]? ')'
     }
 
     rule parameter {
@@ -133,13 +134,17 @@ class CompUnit does Node {
 }
 
 class Package does Node {
-    has $!type; # only 'class' for now, could be 'role' too
+    has $!type; # 'class' or 'role'
     has $!name;
     has @!parents;
+    has @!roles;
     has @!attributes;
     has @!methods;
+    method type() { $!type }
+    method is-role() { $!type eq 'role' }
     method name() { $!name }
     method parents() { @!parents }
+    method roles() { @!roles }
     method attributes() { @!attributes }
     method methods() { @!methods }
 }
@@ -162,9 +167,11 @@ class Attribute does Node {
 class Method does Node {
     has $!name;
     has @!parameters;
+    has $!returns;
     has $!body;
     method name() { $!name }
     method parameters() { @!parameters }
+    method returns() { $!returns }
     method body() { $!body }
 }
 
@@ -185,7 +192,9 @@ class Parameter does Node {
 
 class NQPCode does Node {
     has $!body;
+    has $!is-stub;
     method body() { $!body }
+    method is-stub() { $!is-stub }
     method Str() { $!body }
 }
 
@@ -206,12 +215,20 @@ class RakuASTActions {
     }
 
     method package:sym<class>($/) { make $<package-def>.ast }
+    method package:sym<role>($/) { make $<package-def>.ast }
 
     method package-def($/) {
         my $name := ~$<name>;
         my @parents;
         for $<parent> {
             nqp::push(@parents, ~$_);
+        }
+        if @parents && $*PKGDECL eq 'role' {
+            $/.panic("A role cannot inherit; $*PACKAGE-NAME can only do other roles");
+        }
+        my @roles;
+        for $<role> {
+            nqp::push(@roles, ~$_);
         }
         my @attributes;
         for $<attribute-decl> {
@@ -221,7 +238,7 @@ class RakuASTActions {
         for $<method-decl> {
             @methods.push($_.ast);
         }
-        self.attach($/, Package.new(:type($*PKGDECL), :$name, :@parents, :@attributes, :@methods));
+        self.attach($/, Package.new(:type($*PKGDECL), :$name, :@parents, :@roles, :@attributes, :@methods));
     }
 
     method attribute-decl($/) {
@@ -242,8 +259,9 @@ class RakuASTActions {
     method method-decl($/) {
         my $name := ~$<name>;
         my @parameters := $<signature> ?? $<signature>.ast !! [];
+        my $returns := $<signature> && $<signature><returns> ?? ~$<signature><returns> !! NQPMu;
         my $body := $<method-body>.ast;
-        self.attach($/, Method.new(:$name, :@parameters, :$body));
+        self.attach($/, Method.new(:$name, :@parameters, :$returns, :$body));
     }
 
     method method-body($/) {
@@ -272,7 +290,13 @@ class RakuASTActions {
 
     method nqp-code($/) {
         my @chunks;
-        for $/[0] -> $/ {
+        my @code;
+        my @tokens := $/[0];
+        my int $n := nqp::elems(@tokens);
+        my int $i := -1;
+        while ++$i < $n {
+            my $/ := @tokens[$i];
+            nqp::push(@code, ~$/) unless $<ws>;
             if $<name> {
                 # Rewrite `self` into `$SELF`, and True/False also.
                 my $name := ~$<name>;
@@ -311,7 +335,10 @@ class RakuASTActions {
                 @chunks.push(~$/);
             }
         }
-        self.attach($/, NQPCode.new(:body(nqp::join("", @chunks))));
+        # A body of just ... is a stub, which a role requires the class
+        # doing it to provide.
+        my $is-stub := nqp::elems(@code) == 1 && @code[0] eq '...';
+        self.attach($/, NQPCode.new(:body(nqp::join("", @chunks)), :$is-stub));
     }
 
     method string($/) {
@@ -335,38 +362,114 @@ sub MAIN(*@files) {
         @compunits.push(RakuASTParser.parse($source, actions => RakuASTActions).ast);
     }
 
+    # Every type name a declaration may use: the classes and roles declared
+    # here plus the natives, bootstrap types and QAST types their
+    # signatures name.
+    my %*KNOWN-TYPES;
+    my %*PACKAGES;
+    my %files;
+    for @compunits -> $cu {
+        for $cu.packages -> $package {
+            if %*PACKAGES{$package.name} {
+                nqp::die($package.name ~ " is declared twice (" ~ %files{$package.name}
+                    ~ " and " ~ $cu.filename ~ ")");
+            }
+            %*KNOWN-TYPES{$package.name} := 1;
+            %*PACKAGES{$package.name} := $package;
+            %files{$package.name} := $cu.filename;
+        }
+    }
+    for <Mu Any str int num Str Int Bool Code List Array Hash Scalar Signature ContainerDescriptor QAST::Node QAST::Block QAST::Op QAST::Stmts> {
+        %*KNOWN-TYPES{$_} := 1;
+    }
+
+    # An unknown type name would otherwise compile to a lookup that yields
+    # NQPMu. All names are checked before anything is emitted, so one run
+    # reports every unknown name.
+    my @*UNKNOWN-TYPES;
+    for @compunits {
+        my $*CU := $_;
+        for $_.packages {
+            check-package-types($_);
+        }
+    }
+    if @*UNKNOWN-TYPES {
+        nqp::die("Unknown types in RakuAST declarations:\n  " ~ nqp::join("\n  ", @*UNKNOWN-TYPES));
+    }
+
     # Geneate code
     say('# Generated by tools/build/raku-ast-compiler.nqp');
     say('');
     emit-stubs(@compunits);
     # One BEGIN block per handful of packages, not one for the whole
     # tree: BEGIN blocks run in parse order, so the statements execute
-    # exactly as they would in a single block, but no block's mainline
-    # grows to the ~500k JVM instructions the one-block form reached --
-    # method compilation there needs per-instruction frame tables, and
-    # the single block could not compile inside a 14GB heap. The
-    # prologue's helper subs are lexical to a block, so each block
+    # exactly as they would in a single block -- including the
+    # composition order order-packages establishes -- but no block's
+    # mainline grows to the ~500k JVM instructions the one-block form
+    # reached; method compilation there needs per-instruction frame
+    # tables, and the single block could not compile inside a 14GB heap.
+    # The prologue's helper subs are lexical to a block, so each block
     # includes its own copy.
     my int $per-block := 16;
     my int $in-block  := 0;
-    for @compunits {
-        my $*CU := $_;
-        for $_.packages {
-            if $in-block == 0 {
-                say('BEGIN {');
-                emit-nqp('src/Raku/ast/rakuast-prologue.nqp');
-            }
-            emit-package($_);
-            if ++$in-block == $per-block {
-                say('}');
-                $in-block := 0;
-            }
+    for order-packages(@compunits) {
+        my $*CU := $_[0];
+        if $in-block == 0 {
+            say('BEGIN {');
+            emit-nqp('src/Raku/ast/rakuast-prologue.nqp');
+        }
+        emit-package($_[1]);
+        if ++$in-block == $per-block {
+            say('}');
+            $in-block := 0;
         }
     }
     say('}') if $in-block;
     say('BEGIN {');
     emit-nqp('src/Raku/ast/rakuast-epilogue.nqp');
     say('}');
+}
+
+# The packages, each paired with its compilation unit, in the order they
+# are composed. A role's methods are instantiated for a class when that
+# class is composed, so every role comes before every class, a role after
+# the roles it does, and a class after its parents.
+sub order-packages(@compunits) {
+    my @packages;
+    my %by-name;
+    for @compunits -> $cu {
+        for $cu.packages -> $package {
+            my @pair := [$cu, $package];
+            nqp::push(@packages, @pair);
+            %by-name{$package.name} := @pair;
+        }
+    }
+    my @ordered;
+    my %done;
+    my %visiting;
+    sub visit(@pair) {
+        my $package := @pair[1];
+        my $name := $package.name;
+        unless %done{$name} {
+            if %visiting{$name} {
+                nqp::die("$name is declared in terms of itself (" ~ @pair[0].filename ~ ")");
+            }
+            %visiting{$name} := 1;
+            for $package.is-role ?? $package.roles !! $package.parents {
+                visit(%by-name{$_}) if nqp::existskey(%by-name, $_);
+            }
+            nqp::deletekey(%visiting, $name);
+            %done{$name} := 1;
+            nqp::push(@ordered, @pair);
+        }
+    }
+    for @packages {
+        visit($_) if $_[1].is-role;
+    }
+    for @packages {
+        visit($_);
+    }
+    @ordered
 }
 
 # Code-gen.
@@ -376,7 +479,8 @@ sub emit-stubs(@compunits) {
     say('BEGIN { Perl6::Metamodel::PackageHOW.add_stash(RakuAST); }');
     for @compunits -> $cu {
         for $cu.packages -> $package {
-            say('stub ' ~ $package.name ~ ' metaclass Perl6::Metamodel::ClassHOW { ... };');
+            say('stub ' ~ $package.name ~ ' metaclass Perl6::Metamodel::'
+                ~ ($package.is-role ?? 'ParametricRoleHOW' !! 'ClassHOW') ~ ' { ... };');
         }
     }
     say('');
@@ -387,12 +491,139 @@ sub emit-nqp($nqp-file) {
     say(slurp($nqp-file));
 }
 
+sub check-type-name($type, $where) {
+    unless %*KNOWN-TYPES{$type} {
+        nqp::push(@*UNKNOWN-TYPES, "$type in $where (" ~ $*CU.filename ~ ")");
+    }
+}
+
+sub check-package-types($package) {
+    my $name := $package.name;
+    for $package.parents {
+        check-type-name($_, "parent of $name");
+        if %*PACKAGES{$_} && %*PACKAGES{$_}.is-role {
+            nqp::die("$name inherits from $_, which is a role, so it must do it (" ~ $*CU.filename ~ ")");
+        }
+    }
+    my %named;
+    for $package.roles {
+        check-type-name($_, "role of $name");
+        unless %*PACKAGES{$_} && %*PACKAGES{$_}.is-role {
+            nqp::die("$name does $_, which is not a role (" ~ $*CU.filename ~ ")");
+        }
+        if %named{$_} {
+            nqp::die("$name does $_ twice (" ~ $*CU.filename ~ ")");
+        }
+        %named{$_} := 1;
+    }
+    # A class doing a role an ancestor already does is only noise, and
+    # so is a role with attributes that reaches a class a second way. A
+    # role without attributes may be reached through more than one
+    # parent, as a marker can be.
+    for $package.roles -> $role {
+        for $package.roles -> $other {
+            if $other ne $role && %*PACKAGES{$other} && role-does(%*PACKAGES{$other}, $role) {
+                nqp::die("$name does $role, which it already does through $other (" ~ $*CU.filename ~ ")");
+            }
+        }
+    }
+    unless $package.is-role {
+        my %composers;
+        collect-roles($package, %composers);
+        my %direct;
+        for $package.roles {
+            %direct{$_} := 1;
+        }
+        for sorted_keys(%composers) -> $role {
+            my @composers := %composers{$role};
+            if nqp::elems(@composers) > 1 {
+                if %direct{$role} {
+                    nqp::die("$name does $role, which it already does through " ~ @composers[1] ~ " (" ~ $*CU.filename ~ ")");
+                }
+                if has-attributes(%*PACKAGES{$role}) {
+                    nqp::die("$name gets $role from both " ~ @composers[0] ~ " and " ~ @composers[1] ~ " (" ~ $*CU.filename ~ ")");
+                }
+            }
+        }
+    }
+    for $package.attributes -> $attr {
+        check-type-name($attr.type, "attribute " ~ $attr.name ~ " of $name");
+    }
+    for $package.methods -> $method {
+        for $method.parameters {
+            check-type-name($_.type || 'Any', "parameter " ~ $_.name ~ " of $name." ~ $method.name);
+        }
+        if $method.returns {
+            check-type-name($method.returns, "return type of $name." ~ $method.name);
+        }
+        # An attribute is keyed on the package that declares it, for a
+        # role's attribute the role, whether the access is in the role
+        # or in a class that does it.
+        for match(~$method.body, / (<[\w:]>+) \s* ',' \s* <['"]> ('$!' <[\w-]>+) <['"]> /, :global) -> $access {
+            my $handle := ~$access[0];
+            my $attr := ~$access[1];
+            if %*PACKAGES{$handle} && !declares-attribute(%*PACKAGES{$handle}, $attr) {
+                nqp::die("$name." ~ $method.name ~ " keys $attr on $handle, which does not declare it (" ~ $*CU.filename ~ ")");
+            }
+        }
+    }
+}
+
+# Every role a class composes, directly or through the roles those do,
+# keyed to the classes that compose it, for the class and its ancestors.
+sub collect-roles($class, %composers) {
+    sub composed-by($role) {
+        %composers{$role} := [] unless %composers{$role};
+        my @composers := %composers{$role};
+        my $seen := 0;
+        for @composers { $seen := 1 if $_ eq $class.name }
+        nqp::push(@composers, $class.name) unless $seen;
+        for %*PACKAGES{$role}.roles {
+            composed-by($_) if %*PACKAGES{$_};
+        }
+    }
+    for $class.roles {
+        composed-by($_) if %*PACKAGES{$_};
+    }
+    for $class.parents {
+        collect-roles(%*PACKAGES{$_}, %composers) if %*PACKAGES{$_};
+    }
+}
+
+# Whether $role does $name, directly or through the roles it does.
+sub role-does($role, $name) {
+    for $role.roles {
+        return 1 if $_ eq $name
+            || %*PACKAGES{$_} && role-does(%*PACKAGES{$_}, $name);
+    }
+    0
+}
+
+sub declares-attribute($package, $name) {
+    for $package.attributes {
+        return 1 if $_.name eq $name;
+    }
+    0
+}
+
+sub has-attributes($role) {
+    return 1 if nqp::elems($role.attributes);
+    for $role.roles {
+        return 1 if %*PACKAGES{$_} && has-attributes(%*PACKAGES{$_});
+    }
+    0
+}
+
 sub emit-package($package) {
     my $name := $package.name;
 
-    my @parents := $package.parents;
-    for @parents || ['Any'] {
-        say("    parent($name, $_);");
+    unless $package.is-role {
+        for $package.parents || ['Any'] {
+            say("    parent($name, $_);");
+        }
+    }
+    for $package.roles {
+        say("    does($name, $_);");
     }
 
     my %need-accessor;
@@ -407,7 +638,7 @@ sub emit-package($package) {
 
     for $package.methods -> $method {
         nqp::deletekey(%need-accessor, $method.name);
-        emit-method($name, $method);
+        emit-method($package, $method);
     }
 
     for sorted_keys(%need-accessor) -> $method-name {
@@ -416,42 +647,154 @@ sub emit-package($package) {
         my $decl-line := $attr-node.line;
         my $op := $attr-node.getattr-op;
         say("#line ", $decl-line, " ", $*CU.filename);
+        my $attr-type := $attr-node.type;
         say("    add-method($name, '$method-name', [], anon sub $method-name (\$self) \{",
             " nqp::" ~ $op ~ "(nqp::decont(\$self), $name, '$attr-name')",
-            " });");
+            " }" ~ (type-is-native($attr-type) ?? '' !! ", $attr-type") ~ ");");
     }
 
     say("    compose($name);");
 }
 
+sub type-is-native($type) {
+    $type eq 'str' || $type eq 'int' || $type eq 'num'
+}
+
+# Whether a declared type needs an object type check. Mu and Any accept
+# anything, including NQP values, and a native parameter is enforced by the
+# unbox when the argument is bound.
+sub type-is-checked($type) {
+    !($type eq 'Any' || $type eq 'Mu' || type-is-native($type))
+}
+
+# The compiler passes VM strings, integers, arrays, hashes and closures
+# where user code passes Str, Int, List, Hash and Code objects, and a bare
+# adverb, which is a VM integer, where user code passes a Bool. NQP cannot
+# know those satisfy the type, so these checks are emitted here. A VM integer
+# for a Bool becomes a Bool on entry, and NQPMu for an optional flag becomes
+# the Bool type object. An omitted optional of the other five stays
+# undefined, which the bodies treat as absent. Every other type goes on the
+# NQP parameter itself, and NQP checks it, deconts the argument and gives an
+# omitted optional the type object. NQP does not check a slurpy, so the
+# elements of a typed slurpy are checked here too.
+sub type-is-vm-shaped($type) {
+    $type eq 'Str' || $type eq 'Int' || $type eq 'Bool' || $type eq 'Code' || $type eq 'List' || $type eq 'Hash'
+}
+
+# The NQP expression that decides whether a value satisfies a declared type,
+# for the checks emitted here. For the types type-is-vm-shaped names, an
+# undefined value passes only as the type object itself, or as the NQPMu
+# that NQP code passes for an absent value. A required flag refuses NQPMu,
+# which is also what a name NQP cannot resolve evaluates to.
+sub type-check-expr($type, $value, $absent-ok = 1) {
+    return "nqp::istype($value, $type)" unless type-is-vm-shaped($type);
+    my $concrete :=
+      $type eq 'Str'  ?? "nqp::isstr($value) || nqp::istype($value, Str)" !!
+      $type eq 'Int'  ?? "nqp::isint($value) || nqp::istype($value, Int)" !!
+      $type eq 'Bool' ?? "nqp::isint($value) || nqp::istype($value, Bool)" !!
+      $type eq 'Code' ?? "nqp::isinvokable($value)" !!
+      $type eq 'List' ?? "nqp::islist($value) || nqp::istype($value, List)" !!
+                         "nqp::ishash($value) || nqp::istype($value, Hash)";
+    my $absent := $absent-ok ?? "nqp::eqaddr($value, NQPMu) || " !! '';
+    "(nqp::isconcrete($value) ?? ($concrete) !! ({$absent}nqp::istype($value, $type)))"
+}
+
+# The call that reports a failed check, through the hook NQP uses for the
+# parameters it checks itself.
+sub type-check-fail($name, $type, $value) {
+    "nqp::gethllsym('nqp', 'parameter-type-check-failure')($value, $type, '$name', nqp::curcode())"
+}
+
 sub emit-method($package, $method) {
+    my $package-name := $package.name;
     my @parameters := $method.parameters;
     my @params-in;
-    my @params-desc := ["$package, '', 0, 0"];
+    my @params-desc := ["$package-name, '', 0, 0"];
     my @params-decont;
+    my $name := $method.name;
     for @parameters {
         my $param-name := $_.name;
         my $type := $_.type || 'Any';
         my $named := $_.named ?? ':' !! '';
         my $slurpy := $_.slurpy ?? '*' !! '';
         my $opt := $slurpy ?? '' !! ($_.optional ?? '?' !! '!');
-        @params-in.push(", $named$slurpy$param-name$opt");
+        my $checked := type-is-checked($type);
+        my $here := $checked && (type-is-vm-shaped($type) || $slurpy);
+        # The type goes on the NQP parameter unless it is checked here. A
+        # native one makes binding unbox the argument and refuse one that
+        # cannot be unboxed.
+        my $typed := type-is-native($type) || ($checked && !$here) ?? "$type " !! '';
+        if $type eq 'Bool' && ($slurpy || $_.raw) {
+            nqp::die("A Bool parameter cannot be slurpy or raw: $param-name of $package-name.$name (" ~ $*CU.filename ~ ")");
+        }
+        my $raw := $_.raw && $typed ?? ' is raw' !! '';
+        my $default := $type eq 'Bool' && !$slurpy && $_.optional ?? ' = Bool' !! '';
+        @params-in.push(", $typed$named$slurpy$param-name$opt$raw$default");
         @params-desc.push("$type, '$param-name', " ~ ($_.named ?? '1, ' !! '0, ') ~
             ($_.optional ?? '1' !! '0'));
-        unless $_.raw {
+        unless $_.raw || $typed {
             @params-decont.push("$param-name := nqp::decont($param-name);");
+        }
+        if $here && $slurpy {
+            my $value := $_.named ?? 'nqp::decont(nqp::iterval($_))' !! 'nqp::decont($_)';
+            @params-decont.push("for $param-name \{ " ~ type-check-expr($type, $value)
+                ~ " || " ~ type-check-fail($param-name, $type, $value) ~ " }");
+        }
+        elsif $here {
+            my $value := $_.raw ?? "nqp::decont($param-name)" !! $param-name;
+            @params-decont.push(type-check-expr($type, $value, $type ne 'Bool' || $_.optional)
+                ~ " || " ~ type-check-fail($param-name, $type, $value) ~ ";");
+        }
+        if $type eq 'Bool' {
+            @params-decont.push("$param-name := nqp::isint($param-name) ?? (nqp::unbox_i($param-name) ?? (Bool.WHO)<True> !! (Bool.WHO)<False>) !! nqp::eqaddr($param-name, NQPMu) ?? Bool !! $param-name;");
         }
     }
     my $params-in := nqp::join("", @params-in);
     my $params-desc := nqp::join(", ", @params-desc);
+    my $yada := $method.body.is-stub ?? ', :yada' !! '';
 
-    my $name := $method.name;
-    say("    add-method($package, '$name', [$params-desc], anon sub $name (\$SELF_CONT$params-in) \{");
+    say("    add-method($package-name, '$name', [$params-desc], anon sub $name (\$SELF_CONT$params-in) \{");
     say("        my \$SELF := nqp::decont(\$SELF_CONT);");
     for @params-decont {
         say("        $_");
     }
-    say("#line " ~ $method.body.line ~ " " ~ $*CU.filename);
-    say("        " ~ $method.body);
-    say("    });");
+    my $returns := $method.returns;
+    my $is-stub := $method.body.is-stub;
+    if $returns && type-is-checked($returns) && !$is-stub {
+        # A return statement would bypass the check.
+        if ~$method.body ~~ / <!after <[\w$.-]>> 'return' <!before <[\w-]>> / {
+            nqp::die("Method $package-name.$name declares a return type, so it cannot use return (" ~ $*CU.filename ~ ")");
+        }
+        # A body that is one expression is checked in place. Any other body
+        # runs as a block to give it a value, and taking that closure keeps
+        # the method from being inlined. The closing paren goes on its own
+        # line so a trailing comment in the body cannot swallow it.
+        my $expression := !(~$method.body ~~ / <[;{]> /);
+        my $open  := $expression ?? '(' !! '{';
+        my $close := $expression ?? ')' !! '}()';
+        if $returns eq 'Bool' {
+            say("        ReturnCheck.bool($open");
+            say("#line " ~ $method.body.line ~ " " ~ $*CU.filename);
+            say("        " ~ $method.body);
+            say("        $close, '$name')");
+        }
+        else {
+            say("        my \$RESULT := $open");
+            say("#line " ~ $method.body.line ~ " " ~ $*CU.filename);
+            say("        " ~ $method.body);
+            say("        $close;");
+            say("        " ~ type-check-expr($returns, '$RESULT')
+                ~ " || ReturnCheck.failure(\$RESULT, $returns, '$name');");
+            say("        \$RESULT");
+        }
+        say("    }, $returns);");
+    }
+    else {
+        if $returns && !type-is-checked($returns) {
+            nqp::die("Method $package-name.$name declares a return type the generator does not check (" ~ $*CU.filename ~ ")");
+        }
+        say("#line " ~ $method.body.line ~ " " ~ $*CU.filename);
+        say("        " ~ ($is-stub ?? "nqp::die('Stub code executed: $name of $package-name')" !! $method.body));
+        say("    }" ~ ($returns ?? ", $returns" !! '') ~ "$yada);");
+    }
 }

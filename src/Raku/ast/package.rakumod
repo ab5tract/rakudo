@@ -3,19 +3,19 @@
 # itself
 
 class RakuAST::Package
-  is RakuAST::PackageInstaller
-  is RakuAST::StubbyMeta
   is RakuAST::Term
-  is RakuAST::IMPL::ImmediateBlockUser
-  is RakuAST::Declaration
-  is RakuAST::AttachTarget
-  is RakuAST::ParseTime
-  is RakuAST::BeginTime
-  is RakuAST::TraitTarget
-  is RakuAST::ImplicitBlockSemanticsProvider
-  is RakuAST::LexicalScope
-  is RakuAST::Lookup
-  is RakuAST::Doc::DeclaratorTarget
+  does RakuAST::Declaration
+  does RakuAST::LexicalScope
+  does RakuAST::PackageInstaller
+  does RakuAST::Lookup
+  does RakuAST::StubbyMeta
+  does RakuAST::TraitTarget
+  does RakuAST::ImplicitBlockSemanticsProvider
+  does RakuAST::Doc::DeclaratorTarget
+  does RakuAST::ParseTime
+  does RakuAST::BeginTime
+  does RakuAST::IMPL::ImmediateBlockUser
+  does RakuAST::AttachTarget
 {
     has RakuAST::Name $.name;
     has RakuAST::Code $.body;
@@ -65,7 +65,7 @@ class RakuAST::Package
     RakuAST::Doc::Declarator :$WHY
     ) {
         my $obj := nqp::create(self);
-        nqp::bindattr_s($obj, RakuAST::Declaration, '$!scope', $scope);
+        $obj.replace-scope($scope);
         nqp::bindattr($obj, RakuAST::Package, '$!name', $name // RakuAST::Name);
         nqp::bindattr($obj, RakuAST::Package, '$!attribute-type', $attribute-type);
         nqp::bindattr($obj, RakuAST::Package, '$!how', $how);
@@ -246,7 +246,7 @@ class RakuAST::Package
 
     method attach-target-names() { ['package', 'also'] }
 
-    method IMPL-GENERATE-LEXICAL-DECLARATION(RakuAST::Name $name, Mu $type-object) {
+    method IMPL-GENERATE-LEXICAL-DECLARATION(str $name, Mu $type-object) {
         $type-object := self.stubbed-meta-object if nqp::eqaddr($type-object, Mu);
         my $package := RakuAST::Declaration::LexicalPackage.new:
             :lexical-name($name),
@@ -383,6 +383,7 @@ class RakuAST::Package
             }
         }
 
+        self.IMPL-COMPOSE-AT-CHECK($resolver, $context);
         if $!compose-exception {
             self.add-sorry: $resolver.convert-exception($!compose-exception)
         }
@@ -405,7 +406,7 @@ class RakuAST::Package
             self.add-sorry: $resolver.build-exception: 'X::TooLateForREPR', type => self.stubbed-meta-object;
         }
 
-        nqp::findmethod(RakuAST::LexicalScope, 'PERFORM-CHECK')(self, $resolver, $context);
+        self.IMPL-CHECK-DECLARATIONS($resolver, $context);
     }
 
     method install-extra-declarations(RakuAST::Resolver $resolver) {
@@ -542,11 +543,16 @@ class RakuAST::Package
         Nil
     }
 
+    # A failed compose still produces the type. A CATCH directly in the
+    # method body would make the method return when it handles the
+    # exception, so the compose sits in its own block.
     method PRODUCE-META-OBJECT(:$resolver, :$context) {
         my $type := self.stubbed-meta-object(:$resolver, :$context);
-        self.IMPL-COMPOSE-TYPE($type, :$resolver, :$context);
-        CATCH {
-            nqp::bindattr(self, RakuAST::Package, '$!compose-exception', $_)
+        {
+            self.IMPL-COMPOSE-TYPE($type, :$resolver, :$context);
+            CATCH {
+                nqp::bindattr(self, RakuAST::Package, '$!compose-exception', $_)
+            }
         }
         $type
     }
@@ -620,6 +626,37 @@ class RakuAST::Package
         self.IMPL-MAYBE-REGISTER-INSTANTIATION-LEXICAL;
     }
 
+    # A tree built by hand composes when its meta-object is first made,
+    # which has to happen during CHECK for a failed compose to be reported.
+    # A stub stays uncomposed for the stubbed package check. A pending BEGIN
+    # time error leaves the package uncomposed, as the parser does after an
+    # error in a package body, so that its compose adds no further error.
+    method IMPL-COMPOSE-AT-CHECK(RakuAST::Resolver $resolver,
+                        RakuAST::IMPL::QASTContext $context) {
+        self.meta-object(:$resolver, :$context)
+          unless $!is-stub || $resolver.deferred-begin-sorries;
+        Nil
+    }
+
+    # A package documents the type its compose produced, so a package
+    # whose compose failed or never ran has no type to document. A stub
+    # has no compose of its own. A class stub is documented once its
+    # definition composed the type. A role stub is documented as it is,
+    # since its type stays uncomposed when the role is defined.
+    method IMPL-DOC-META-OBJECT(RakuAST::Resolver $resolver,
+                       RakuAST::IMPL::QASTContext $context) {
+        self.IMPL-COMPOSE-AT-CHECK($resolver, $context);
+        my $type := self.stubbed-meta-object;
+        if $!is-stub {
+            nqp::istype(self, RakuAST::Role) || $type.HOW.is_composed($type)
+              ?? $type
+              !! Mu
+        }
+        else {
+            self.has-meta-object && !$!compose-exception ?? $type !! Mu
+        }
+    }
+
     method visit-children(Code $visitor) {
         $visitor($!name) if $!name;
         self.visit-traits($visitor);
@@ -660,7 +697,7 @@ class RakuAST::Package::Attachable
     RakuAST::Doc::Declarator :$WHY
     ) {
         my $obj := nqp::create(self);
-        nqp::bindattr_s($obj, RakuAST::Declaration, '$!scope', $scope);
+        $obj.replace-scope($scope);
         nqp::bindattr($obj, RakuAST::Package, '$!name', $name // RakuAST::Name);
         nqp::bindattr($obj, RakuAST::Package, '$!attribute-type', $attribute-type);
         nqp::bindattr($obj, RakuAST::Package, '$!how', $how);
@@ -690,7 +727,7 @@ class RakuAST::Package::Attachable
     method can-have-methods()    { True }
     method can-have-attributes() { True }
 
-    method ATTACH-METHOD(RakuAST::Method $method) {
+    method ATTACH-METHOD(RakuAST::Methodish $method) {
         nqp::push($!attached-methods, $method);
         Nil
     }
@@ -742,8 +779,8 @@ class RakuAST::Package::Attachable
 class RakuAST::Role
   is RakuAST::Package::Attachable
 {
-    has Array $.instantiation-lexicals;
-    has Array $!pending-ins-lexicals;
+    has List $.instantiation-lexicals;
+    has List $!pending-ins-lexicals;
     has RakuAST::LexicalFixup $!fixup;
 
     method declarator()  { "role"                       }
@@ -1049,10 +1086,12 @@ class RakuAST::Class
 
     method PRODUCE-META-OBJECT(:$resolver, :$context) {
         my $type := self.stubbed-meta-object(:$resolver, :$context);
-        self.PRODUCE-META-ATTACHABLES($type, $type.HOW);
-        self.IMPL-COMPOSE-TYPE($type, :$resolver, :$context);
-        CATCH {
-            nqp::bindattr(self, RakuAST::Package, '$!compose-exception', $_)
+        {
+            self.PRODUCE-META-ATTACHABLES($type, $type.HOW);
+            self.IMPL-COMPOSE-TYPE($type, :$resolver, :$context);
+            CATCH {
+                nqp::bindattr(self, RakuAST::Package, '$!compose-exception', $_)
+            }
         }
         $type
     }
@@ -1063,7 +1102,6 @@ class RakuAST::Class
 
 class RakuAST::Grammar
   is RakuAST::Class
-  is RakuAST::CheckTime
 {
     method declarator()  { "grammar"             }
     method default-how() { Metamodel::GrammarHOW }
@@ -1168,7 +1206,7 @@ class RakuAST::CompilerServices
         else {
             my $sig := nqp::getattr($code, Code, '$!signature');
             my $definite := Perl6::Metamodel::DefiniteHOW.new_type(
-                :base_type($package_type), :definite(1));
+                :base_type($package_type), :definite(True));
             $!context.ensure-sc($definite);
             nqp::bindattr(
                 nqp::atpos(nqp::getattr($sig, Signature, '@!params'), 0),
@@ -1304,7 +1342,7 @@ class RakuAST::CompilerServices
         # the signature informs introspection and derivation, not a
         # run time check. Mirrors what the legacy frontend installs.
         my $definite := Perl6::Metamodel::DefiniteHOW.new_type(
-            :base_type($invocant-base), :definite(1));
+            :base_type($invocant-base), :definite(True));
         $!context.ensure-sc($definite);
         nqp::bindattr(
             nqp::atpos(nqp::getattr(

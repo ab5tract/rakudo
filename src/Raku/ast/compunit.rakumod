@@ -1,13 +1,14 @@
 # A compilation unit is the main lexical scope of a program.
 class RakuAST::CompUnit
-  is RakuAST::LexicalScope
-  is RakuAST::SinkBoundary
-  is RakuAST::ImplicitLookups
-  is RakuAST::ImplicitDeclarations
-  is RakuAST::AttachTarget
-  is RakuAST::ScopePhaser
-  is RakuAST::BeginTime
-  is RakuAST::CheckTime
+  is RakuAST::Node
+  does RakuAST::LexicalScope
+  does RakuAST::ScopePhaser
+  does RakuAST::SinkBoundary
+  does RakuAST::ImplicitLookups
+  does RakuAST::ImplicitDeclarations
+  does RakuAST::BeginTime
+  does RakuAST::CheckTime
+  does RakuAST::AttachTarget
 {
     has RakuAST::StatementList $.statement-list;
     has RakuAST::Block $.mainline;
@@ -65,7 +66,7 @@ class RakuAST::CompUnit
             $statement-list // RakuAST::StatementList.new);
 
         my $mainline := RakuAST::Block.new();
-        $mainline.set-implicit-topic(0);
+        $mainline.set-implicit-topic(False);
         $mainline.set-no-implicit-match();
         nqp::bindattr($obj, RakuAST::CompUnit, '$!mainline', $mainline);
 
@@ -103,8 +104,7 @@ class RakuAST::CompUnit
         }
 
         # If CompUnit's language revision is not set explicitly then guess it
-        nqp::bindattr($obj, RakuAST::CompUnit, '$!language-revision',
-          $language-revision := $language-revision
+        my $revision := $language-revision
             ?? Perl6::Metamodel::Configuration.language_revision_object($language-revision)
             !! nqp::isconcrete(
                  my $setting-rev := nqp::getlexrelcaller(
@@ -112,8 +112,8 @@ class RakuAST::CompUnit
                  )
                ) ?? $setting-rev
                  !! Perl6::Metamodel::Configuration.language_revision_object(
-                      nqp::getcomp("Raku").language_revision)
-                    );
+                      nqp::getcomp("Raku").language_revision);
+        nqp::bindattr($obj, RakuAST::CompUnit, '$!language-revision', $revision);
 
         my $sc;
         if $outer-cu {
@@ -143,7 +143,7 @@ class RakuAST::CompUnit
                 nqp::bindattr($obj, RakuAST::CompUnit, '$!sc', $sc);
                 my $context := RakuAST::IMPL::QASTContext.new(
                   :$sc, :$precompilation-mode,
-                  :$setting, :$language-revision);
+                  :$setting, :language-revision($revision));
                 nqp::bindattr_i($context, RakuAST::IMPL::QASTContext,
                   '$!is-nested', 1);
                 $context.set-world-bridge($nested-world);
@@ -154,7 +154,7 @@ class RakuAST::CompUnit
                 nqp::pushcompsc($sc);
                 nqp::bindattr($obj, RakuAST::CompUnit, '$!sc', $sc);
                 nqp::bindattr($obj, RakuAST::CompUnit, '$!context',
-                  RakuAST::IMPL::QASTContext.new(:$sc, :$precompilation-mode, :$setting, :$language-revision));
+                  RakuAST::IMPL::QASTContext.new(:$sc, :$precompilation-mode, :$setting, :language-revision($revision)));
                 # Set the SC description to $?FILES only on the
                 # fresh-SC path. The bridged path shares the outer
                 # World's SC, whose description was already set by
@@ -317,13 +317,13 @@ class RakuAST::CompUnit
         Nil
     }
 
-    method is-boundary-sunk() { $!is-sunk ?? True !! False }
+    method is-boundary-sunk(--> Bool) { $!is-sunk }
 
     method get-boundary-sink-propagator() { $!statement-list }
 
     # Checks if the compilation unit was created in EVAL mode, meaning that it
     # does not declare its own GLOBAL and so forth.
-    method is-eval() { $!is-eval ?? True !! False }
+    method is-eval(--> Bool) { $!is-eval }
 
     # Put this unit's SC back on the compiling-SC stack before compiling it
     # again. Creating the unit pushed the SC, but the backend pops it after
@@ -390,6 +390,11 @@ class RakuAST::CompUnit
         self.add-cu-phaser($!check-phasers, $phaser);
     }
 
+    # A code object a will trait registers to run with the check phasers.
+    method add-check-code(Code $code) {
+        self.add-cu-phaser($!check-phasers, $code);
+    }
+
     method add-end-phaser(Code $phaser) {
         self.add-cu-phaser($!end-phasers, $phaser);
     }
@@ -451,7 +456,7 @@ class RakuAST::CompUnit
     }
 
     method PERFORM-CHECK(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
-        nqp::findmethod(RakuAST::LexicalScope, 'PERFORM-CHECK')(self, $resolver, $context);
+        self.IMPL-CHECK-DECLARATIONS($resolver, $context);
 
         while $!check-phasers {
             my $check-phaser := nqp::pop($!check-phasers);
@@ -925,8 +930,8 @@ class RakuAST::CompUnit
 }
 
 class RakuAST::CtxSave
-  is RakuAST::ParseTime
   is RakuAST::Term
+  does RakuAST::ParseTime
 {
     method new() {
         nqp::create(self)

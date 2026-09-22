@@ -1,7 +1,8 @@
 # An argument list.
 class RakuAST::ArgList
-  is RakuAST::CaptureSource
-  is RakuAST::SinkPropagator
+  is RakuAST::Node
+  does RakuAST::CaptureSource
+  does RakuAST::SinkPropagator
 {
     has List $!args;
     has RakuAST::Expression $.invocant;
@@ -66,7 +67,7 @@ class RakuAST::ArgList
         nqp::unshift($!args, $arg)
     }
 
-    method has-args() { nqp::elems($!args) ?? True !! False }
+    method has-args(--> Bool) { nqp::elems($!args) }
     method arity() { nqp::elems($!args) }
 
     method args() {
@@ -108,7 +109,7 @@ class RakuAST::ArgList
     # callee at runtime from an open set of candidates, and no compile time
     # analysis commits a choice for it, so its literal arguments stay the
     # boxed values they always were.
-    method IMPL-ADD-QAST-ARGS(RakuAST::IMPL::QASTContext $context, QAST::Op $call, Bool :$native-pairing) {
+    method IMPL-ADD-QAST-ARGS(RakuAST::IMPL::QASTContext $context, QAST::Node $target, Bool :$native-pairing) {
         my $native-literal := $native-pairing
             ?? self.IMPL-NATIVE-PAIRED-LITERAL
             !! nqp::null();
@@ -128,7 +129,7 @@ class RakuAST::ArgList
                 # Flattening argument; evaluate it once and pass the array and hash
                 # flattening parts.
                 my $temp := QAST::Node.unique('flattening_');
-                $call.push(QAST::Op.new(
+                $target.push(QAST::Op.new(
                     :op('callmethod'), :name('FLATTENABLE_LIST'),
                     QAST::Op.new(
                         :op('bind'),
@@ -137,7 +138,7 @@ class RakuAST::ArgList
                     ),
                     :flat(1)
                 ));
-                $call.push(QAST::Op.new(
+                $target.push(QAST::Op.new(
                     :op('callmethod'), :name('FLATTENABLE_HASH'),
                     QAST::Var.new( :name($temp), :scope('local') ),
                     :flat(1), :named(1)
@@ -150,14 +151,14 @@ class RakuAST::ArgList
                     # named argument.
                     my $val-ast := $arg.named-arg-value.IMPL-TO-QAST($context);
                     $val-ast.named($name);
-                    $call.push($val-ast);
+                    $target.push($val-ast);
                 }
                 else {
                     # It's a discarded value. If it has side-effects, then we
                     # must evaluate those.
                     my $value := $arg.named-arg-value;
                     unless $value.pure {
-                        $call.push(QAST::Stmts.new(
+                        $target.push(QAST::Stmts.new(
                             :flat,
                             $value.IMPL-TO-QAST($context),
                             QAST::Op.new( :op('list') ) # flattens to nothing
@@ -168,7 +169,7 @@ class RakuAST::ArgList
             }
             else {
                 # Positional argument.
-                $call.push(nqp::eqaddr($arg, $native-literal)
+                $target.push(nqp::eqaddr($arg, $native-literal)
                     ?? $arg.IMPL-TO-QAST-ARG($context)
                     !! $arg.IMPL-TO-QAST($context))
             }
@@ -250,7 +251,7 @@ class RakuAST::ArgList
 
 # Base role for all kinds of calls (named sub calls, calling some term, and
 # method calls).
-class RakuAST::Call {
+role RakuAST::Call {
     has RakuAST::ArgList $.args;
 
     # Set when this call is a stage of a feed operator. The fed value is
@@ -275,11 +276,10 @@ class RakuAST::Call {
 # A call to a named sub.
 class RakuAST::Call::Name
   is RakuAST::Term
-  is RakuAST::Call
-  is RakuAST::ParseTime
-  is RakuAST::BeginTime
-  is RakuAST::CheckTime
-  is RakuAST::Lookup
+  does RakuAST::Call
+  does RakuAST::Lookup
+  does RakuAST::ParseTime
+  does RakuAST::BeginTime
 {
     has RakuAST::Name $.name;
     has RakuAST::Code $!block;
@@ -291,7 +291,7 @@ class RakuAST::Call::Name
     method new(RakuAST::Name :$name!, RakuAST::ArgList :$args) {
         my $obj := nqp::create(self);
         nqp::bindattr($obj, RakuAST::Call::Name, '$!name', $name);
-        nqp::bindattr($obj, RakuAST::Call, '$!args', $args // RakuAST::ArgList.new);
+        $obj.replace-args($args // RakuAST::ArgList.new);
         $obj
     }
 
@@ -743,12 +743,12 @@ class RakuAST::Call::Name::WithoutParentheses
 
 # A call to any term (the postfix () operator).
 class RakuAST::Call::Term
-  is RakuAST::Call
   is RakuAST::Postfixish
+  does RakuAST::Call
 {
     method new(RakuAST::ArgList :$args) {
         my $obj := nqp::create(self);
-        nqp::bindattr($obj, RakuAST::Call, '$!args', $args // RakuAST::ArgList.new);
+        $obj.replace-args($args // RakuAST::ArgList.new);
         $obj
     }
 
@@ -791,8 +791,8 @@ class RakuAST::Call::Term
 
 # The base of all method call like things.
 class RakuAST::Call::Methodish
-  is RakuAST::Call
   is RakuAST::Postfixish
+  does RakuAST::Call
 {
     has str $!dispatcher;
 
@@ -829,9 +829,9 @@ class RakuAST::Call::Methodish
 # compiled into primitive operations rather than really being method calls.
 class RakuAST::Call::Method
   is RakuAST::Call::Methodish
-  is RakuAST::BeginTime
-  is RakuAST::CheckTime
-  is RakuAST::ImplicitLookups
+  does RakuAST::ImplicitLookups
+  does RakuAST::BeginTime
+  does RakuAST::CheckTime
 {
     has RakuAST::Name $.name;
 
@@ -843,9 +843,7 @@ class RakuAST::Call::Method
         my $obj := nqp::create(self);
 
         nqp::bindattr($obj, RakuAST::Call::Method, '$!name', $name);
-        nqp::bindattr($obj, RakuAST::Call, '$!args',
-          $args // RakuAST::ArgList.new
-        );
+        $obj.replace-args($args // RakuAST::ArgList.new);
 
         $obj.set-dispatcher($dispatch);
         $obj
@@ -1162,7 +1160,7 @@ class RakuAST::Call::Method
 # A call to a method with a quoted name.
 class RakuAST::Call::QuotedMethod
   is RakuAST::Call::Methodish
-  is RakuAST::BeginTime
+  does RakuAST::BeginTime
 {
     has RakuAST::QuotedString   $.name;
     has Mu $!package;
@@ -1175,7 +1173,7 @@ class RakuAST::Call::QuotedMethod
         my $obj := nqp::create(self);
 
         nqp::bindattr($obj, RakuAST::Call::QuotedMethod, '$!name', $name);
-        nqp::bindattr($obj, RakuAST::Call, '$!args', $args // RakuAST::ArgList.new);
+        $obj.replace-args($args // RakuAST::ArgList.new);
 
         $obj.set-dispatcher($dispatch);
         $obj
@@ -1243,10 +1241,10 @@ class RakuAST::Call::QuotedMethod
 # A call to a private method.
 class RakuAST::Call::PrivateMethod
   is RakuAST::Call::Methodish
-  is RakuAST::Lookup
-  is RakuAST::ImplicitLookups
-  is RakuAST::ParseTime
-  is RakuAST::CheckTime
+  does RakuAST::Lookup
+  does RakuAST::ImplicitLookups
+  does RakuAST::ParseTime
+  does RakuAST::CheckTime
 {
     has RakuAST::Name $.name;
     has Mu $!package;
@@ -1254,7 +1252,7 @@ class RakuAST::Call::PrivateMethod
     method new(RakuAST::Name :$name!, RakuAST::ArgList :$args) {
         my $obj := nqp::create(self);
         nqp::bindattr($obj, RakuAST::Call::PrivateMethod, '$!name', $name);
-        nqp::bindattr($obj, RakuAST::Call, '$!args', $args // RakuAST::ArgList.new);
+        $obj.replace-args($args // RakuAST::ArgList.new);
         $obj
     }
 
@@ -1440,7 +1438,7 @@ class RakuAST::Call::MetaMethod
     method new(str :$name!, RakuAST::ArgList :$args) {
         my $obj := nqp::create(self);
         nqp::bindattr_s($obj, RakuAST::Call::MetaMethod, '$!name', $name);
-        nqp::bindattr($obj, RakuAST::Call, '$!args', $args // RakuAST::ArgList.new);
+        $obj.replace-args($args // RakuAST::ArgList.new);
         $obj
     }
 
@@ -1466,11 +1464,11 @@ class RakuAST::Call::MetaMethod
     }
 }
 
-class RakuAST::Call::VarMethod
+class RakuAST::Call::NameAsMethod
   is RakuAST::Call::Methodish
-  is RakuAST::Lookup
-  is RakuAST::BeginTime
-  is RakuAST::CheckTime
+  does RakuAST::Lookup
+  does RakuAST::BeginTime
+  does RakuAST::CheckTime
 {
     has RakuAST::Name $.name;
 
@@ -1481,8 +1479,8 @@ class RakuAST::Call::VarMethod
     ) {
         my $obj := nqp::create(self);
 
-        nqp::bindattr($obj, RakuAST::Call::VarMethod, '$!name', $name);
-        nqp::bindattr($obj, RakuAST::Call, '$!args', $args // RakuAST::ArgList.new);
+        nqp::bindattr($obj, RakuAST::Call::NameAsMethod, '$!name', $name);
+        $obj.replace-args($args // RakuAST::ArgList.new);
 
         $obj.set-dispatcher($dispatch);
         $obj
@@ -1607,20 +1605,20 @@ class RakuAST::Call::VarMethod
     }
 }
 
-class RakuAST::Call::BlockMethod
+class RakuAST::Call::TermAsMethod
   is RakuAST::Call::Methodish
 {
-    has RakuAST::Block $.block;
+    has RakuAST::Term $.callee;
 
     method new(
-        RakuAST::Block :$block!,
+         RakuAST::Term :$callee!,
       RakuAST::ArgList :$args,
                    str :$dispatch
     ) {
         my $obj := nqp::create(self);
 
-        nqp::bindattr($obj, RakuAST::Call::BlockMethod, '$!block', $block);
-        nqp::bindattr($obj, RakuAST::Call, '$!args', $args // RakuAST::ArgList.new);
+        nqp::bindattr($obj, RakuAST::Call::TermAsMethod, '$!callee', $callee);
+        $obj.replace-args($args // RakuAST::ArgList.new);
 
         $obj.set-dispatcher($dispatch);
         $obj
@@ -1629,7 +1627,7 @@ class RakuAST::Call::BlockMethod
     method can-be-used-with-hyper() { True }
 
     method visit-children(Code $visitor) {
-        $visitor($!block);
+        $visitor($!callee);
         $visitor(self.args);
     }
 
@@ -1644,13 +1642,13 @@ class RakuAST::Call::BlockMethod
                 :name($dispatcher),
                 $invocant-qast,
                 QAST::SVal.new( :value('dispatch:<var>')),
-                $!block.IMPL-EXPR-QAST($context),
+                $!callee.IMPL-EXPR-QAST($context),
             )
             !! QAST::Op.new(
                 :op('callmethod'),
                 :name('dispatch:<var>'),
                 $invocant-qast,
-                $!block.IMPL-EXPR-QAST($context),
+                $!callee.IMPL-EXPR-QAST($context),
             );
         self.args.IMPL-ADD-QAST-ARGS($context, $call);
         $call
@@ -1663,16 +1661,16 @@ class RakuAST::Call::BlockMethod
             ?? QAST::Op.new:
                 :op('callmethod'), :name('dispatch:<hyper>'),
                 $operand-qast,
-                $!block.IMPL-EXPR-QAST($context),
+                $!callee.IMPL-EXPR-QAST($context),
                 QAST::SVal.new( :value($dispatcher) ),
                 QAST::SVal.new( :value('dispatch:<var>') ),
-                $!block.IMPL-EXPR-QAST($context)
+                $!callee.IMPL-EXPR-QAST($context)
             !! QAST::Op.new:
                 :op('callmethod'), :name('dispatch:<hyper>'),
                 $operand-qast,
-                $!block.IMPL-EXPR-QAST($context),
+                $!callee.IMPL-EXPR-QAST($context),
                 QAST::SVal.new( :value('dispatch:<var>') ),
-                $!block.IMPL-EXPR-QAST($context);
+                $!callee.IMPL-EXPR-QAST($context);
         self.args.IMPL-ADD-QAST-ARGS($context, $call);
         $call
     }
@@ -1680,9 +1678,8 @@ class RakuAST::Call::BlockMethod
 
 # Base role for all stubs
 class RakuAST::Stub
-  is RakuAST::ImplicitLookups
   is RakuAST::Term
-  is RakuAST::CheckTime
+  does RakuAST::ImplicitLookups
 {
     has RakuAST::ArgList $.args;
 
@@ -1735,7 +1732,7 @@ class RakuAST::Stub
 # the ... stub
 class RakuAST::Stub::Fail
   is RakuAST::Stub
-  is RakuAST::BeginTime
+  does RakuAST::BeginTime
 {
     method name() { '...' }
     method IMPL-FUNC-NAME() { 'fail' }

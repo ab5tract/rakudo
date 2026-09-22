@@ -1,7 +1,8 @@
 # A name. Names range from simple (a single identifier) up to rather more
 # complex (including pseudo-packages, interpolated parts, etc.)
 class RakuAST::Name
-  is RakuAST::ImplicitLookups
+  is RakuAST::Node
+  does RakuAST::ImplicitLookups
 {
     has List $!parts;
     has List $.colonpairs;
@@ -9,11 +10,10 @@ class RakuAST::Name
     method new(*@parts, List :$colonpairs) {
         my $obj := nqp::create(self);
         nqp::bindattr($obj, RakuAST::Name, '$!parts', @parts);
-        my @colonpairs;
+        nqp::bindattr($obj, RakuAST::Name, '$!colonpairs', []);
         if $colonpairs {
-            nqp::push(@colonpairs, $_) for self.IMPL-UNWRAP-LIST($colonpairs);
+            $obj.add-colonpair($_) for self.IMPL-UNWRAP-LIST($colonpairs);
         }
-        nqp::bindattr($obj, RakuAST::Name, '$!colonpairs', @colonpairs);
         $obj
     }
 
@@ -216,9 +216,6 @@ class RakuAST::Name
                     }
                     nqp::rethrow($_);
                 }
-            }
-            elsif nqp::istype($cp, RakuAST::Term::Name) && $cp.name.canonicalize eq 'Nil' {
-                $name := $name ~ ':<>'
             }
             else {
                 nqp::die('canonicalize NYI for non-simple colonpairs: ' ~ $cp.HOW.name($cp));

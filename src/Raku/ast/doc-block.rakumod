@@ -40,7 +40,7 @@ class RakuAST::Doc::Paragraph
 # Generic block with paragraphs
 class RakuAST::Doc::Block
   is RakuAST::Doc
-  is RakuAST::CheckTime
+  does RakuAST::CheckTime
 {
     has str  $.margin;           # the left margin to be applied
     has str  $.type;             # the type (e.g. "doc", "head", "item", etc)
@@ -161,10 +161,10 @@ class RakuAST::Doc::Block
     }
     method paragraphs() { self.IMPL-WRAP-LIST($!paragraphs) }
 
-    method delimited()   { $!status == 0 }
-    method for()         { $!status == 1 }
-    method abbreviated() { $!status >= 2 }
-    method directive()   { $!status == 3 }
+    method delimited(--> Bool)   { $!status == 0 }
+    method for(--> Bool)         { $!status == 1 }
+    method abbreviated(--> Bool) { $!status >= 2 }
+    method directive(--> Bool)   { $!status == 3 }
 
     method visit-children(Code $visitor) {
         for $!paragraphs {

@@ -1,12 +1,12 @@
 # Marker for anything that can be used as the source for a capture.
-class RakuAST::CaptureSource
-  is RakuAST::Node { }
+role RakuAST::CaptureSource { }
 
 # Everything that can appear as an expression does RakuAST::Expression.
 class RakuAST::Expression
-  is RakuAST::MayCreateBlock
-  is RakuAST::Sinkable
-  is RakuAST::CheckTime
+  is RakuAST::Node
+  does RakuAST::Sinkable
+  does RakuAST::CheckTime
+  does RakuAST::MayCreateBlock
 {
     has int $!okifnil;
 
@@ -170,8 +170,9 @@ class RakuAST::Expression
 #-------------------------------------------------------------------------------
 # Role for handling operator properties
 
-class RakuAST::OperatorProperties
-{
+role RakuAST::OperatorProperties {
+    # The properties of the operator when nothing declares them.
+    method default-operator-properties() { ... }
 
     # Obtain operator properties from config or from actual object
     method properties() {
@@ -202,7 +203,8 @@ class RakuAST::OperatorProperties
 
 # Marker for all kinds of infixish operators.
 class RakuAST::Infixish
-  is RakuAST::ImplicitLookups
+  is RakuAST::Node
+  does RakuAST::ImplicitLookups
 {
     method IMPL-LIST-INFIX-QAST(RakuAST::IMPL::QASTContext $context, Mu $operands) {
         nqp::die('Cannot compile ' ~ self.HOW.name(self) ~ ' as a list infix');
@@ -311,10 +313,10 @@ class RakuAST::Infixish
 # others need more special attention.
 class RakuAST::Infix
   is RakuAST::Infixish
-  is RakuAST::OperatorProperties
-  is RakuAST::Lookup
-  is RakuAST::ParseTime
-  is RakuAST::CheckTime
+  does RakuAST::OperatorProperties
+  does RakuAST::Lookup
+  does RakuAST::ParseTime
+  does RakuAST::CheckTime
 {
     has str $.operator;
 
@@ -1114,7 +1116,7 @@ class RakuAST::Mixin
 
 class RakuAST::Feed
   is RakuAST::Infix
-  is RakuAST::BeginTime
+  does RakuAST::BeginTime
 {
     method new(str $operator) {
         my $obj := nqp::create(self);
@@ -1124,7 +1126,7 @@ class RakuAST::Feed
 
     method is-pure() { False }
 
-    method PERFORM-BEGIN(Resolver $resolver, Context $context) {
+    method PERFORM-BEGIN(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         my $operator := nqp::getattr_s(self, RakuAST::Infix, '$!operator');
         if $operator eq "==>>" || $operator eq "<<==" {
             self.add-sorry:
@@ -1214,8 +1216,7 @@ class RakuAST::Feed
 
 class RakuAST::FlipFlop
   is RakuAST::Infix
-  is RakuAST::ImplicitLookups
-  is RakuAST::BeginTime
+  does RakuAST::BeginTime
 {
     has Bool $.excludes-min;
     has Bool $.excludes-max;
@@ -1238,7 +1239,7 @@ class RakuAST::FlipFlop
         my $state-id := QAST::Node.unique('FLIPFLOP_STATE__');
         nqp::bindattr_s($obj, RakuAST::FlipFlop, '$!state-id', $state-id);
         my $state-var := RakuAST::VarDeclaration::Implicit::State.new(
-          '!' ~ $state-id, :init-to-zero(1)
+          '!' ~ $state-id, :init-to-zero(True)
         );
         nqp::bindattr($obj, RakuAST::FlipFlop, '$!state-var', $state-var);
         $obj
@@ -1528,7 +1529,7 @@ class RakuAST::FunctionInfix
 # Base class, mostly for type checking
 class RakuAST::MetaInfix
   is RakuAST::Infixish
-  is RakuAST::CheckTime
+  does RakuAST::CheckTime
 {
     # Whether this meta-op calls the operator on its two operands as the
     # plain application does, so the pairing rule of what it wraps
@@ -2458,7 +2459,7 @@ class RakuAST::MetaInfix::Hyper
 # RakuAST::ParameterTarget::Whatever nodes as targets. These parameter target nodes
 # are added to the *origin* WhateverApplicable's signature and then bound to operands
 # that were previously storing RakuAST::Term::Whatever nodes.
-class RakuAST::WhateverApplicable
+role RakuAST::WhateverApplicable
 {
     has int $!must-not-prime;
     has int $!hyperwhatever;
@@ -2615,9 +2616,9 @@ class RakuAST::WhateverApplicable
 # Application of an infix operator.
 class RakuAST::ApplyInfix
   is RakuAST::Expression
-  is RakuAST::BeginTime
-  is RakuAST::SinkPropagator
-  is RakuAST::WhateverApplicable
+  does RakuAST::SinkPropagator
+  does RakuAST::WhateverApplicable
+  does RakuAST::BeginTime
 {
     has RakuAST::Infixish $.infix;
     has RakuAST::ArgList  $.args;
@@ -2666,7 +2667,7 @@ class RakuAST::ApplyInfix
     method operands() { $!args.IMPL-UNWRAP-LIST($!args.args) }
     method operator() { $!infix }
 
-    method PERFORM-BEGIN(Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
+    method PERFORM-BEGIN(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         self.IMPL-MAYBE-PRIME($resolver, $context);
 
         $!infix.IMPL-THUNK-ARGUMENTS($resolver, $context, self.left, self.right);
@@ -2914,9 +2915,9 @@ class RakuAST::ApplyInfix
 # Application of an list-precedence infix operator.
 class RakuAST::ApplyListInfix
   is RakuAST::Expression
-  is RakuAST::BeginTime
-  is RakuAST::SinkPropagator
-  is RakuAST::WhateverApplicable
+  does RakuAST::SinkPropagator
+  does RakuAST::WhateverApplicable
+  does RakuAST::BeginTime
 {
     has RakuAST::Infixish $.infix;
     has List $!operands;
@@ -3116,8 +3117,10 @@ class RakuAST::ApplyListInfix
 # The base of all dotty infixes (`$foo .bar` or `$foo .= bar()`).
 class RakuAST::DottyInfixish
   is RakuAST::Node
-  is RakuAST::OperatorProperties
+  does RakuAST::OperatorProperties
 {
+    method default-operator-properties() { ... }
+
     method new() { nqp::create(self) }
 
     method IMPL-PRIMES() { 0 }
@@ -3265,10 +3268,10 @@ class RakuAST::Prefixish
 # A lookup of a simple (non-meta) prefix operator.
 class RakuAST::Prefix
   is RakuAST::Prefixish
-  is RakuAST::OperatorProperties
-  is RakuAST::Lookup
-  is RakuAST::ParseTime
-  is RakuAST::CheckTime
+  does RakuAST::OperatorProperties
+  does RakuAST::Lookup
+  does RakuAST::ParseTime
+  does RakuAST::CheckTime
 {
     has str $.operator;
 
@@ -3368,7 +3371,7 @@ class RakuAST::Prefix::Multislice
 # The prefix hyper meta-operator.
 class RakuAST::MetaPrefix::Hyper
   is RakuAST::Prefixish
-  is RakuAST::ImplicitLookups
+  does RakuAST::ImplicitLookups
 {
     has RakuAST::Prefix $.prefix;
 
@@ -3415,18 +3418,19 @@ class RakuAST::MetaPrefix::Hyper
 
 class RakuAST::Termish
   is RakuAST::Expression
-  is RakuAST::CaptureSource { }
+  does RakuAST::CaptureSource { }
 
 # Everything that is a kind of term does RakuAST::Term.
 class RakuAST::Term
-  is RakuAST::Termish { }
+  is RakuAST::Termish
+  does RakuAST::Contextualizable { }
 
 # Application of a prefix operator.
 class RakuAST::ApplyPrefix
   is RakuAST::Termish
-  is RakuAST::BeginTime
-  is RakuAST::SinkPropagator
-  is RakuAST::WhateverApplicable
+  does RakuAST::SinkPropagator
+  does RakuAST::WhateverApplicable
+  does RakuAST::BeginTime
 {
     has RakuAST::Prefixish $.prefix;
     has RakuAST::Expression $.operand;
@@ -3557,9 +3561,11 @@ class RakuAST::ApplyPrefix
 # Marker for all kinds of postfixish operators.
 class RakuAST::Postfixish
   is RakuAST::Node
-  is RakuAST::OperatorProperties
+  does RakuAST::OperatorProperties
 {
     has List $.colonpairs;
+
+    method default-operator-properties() { ... }
 
     method set-colonpairs(List $pairs) {
         my @pairs;
@@ -3609,9 +3615,9 @@ class RakuAST::Postfixish
 # A lookup of a simple (non-meta) postfix operator.
 class RakuAST::Postfix
   is RakuAST::Postfixish
-  is RakuAST::Lookup
-  is RakuAST::ParseTime
-  is RakuAST::CheckTime
+  does RakuAST::Lookup
+  does RakuAST::ParseTime
+  does RakuAST::CheckTime
 {
     has str $.operator;
 
@@ -3686,8 +3692,8 @@ class RakuAST::Postfix
 # Base class for literal postfixes
 class RakuAST::Postfix::Literal
   is RakuAST::Postfixish
-  is RakuAST::Lookup
-  is RakuAST::ParseTime
+  does RakuAST::Lookup
+  does RakuAST::ParseTime
 {
     has Mu $!value;
 
@@ -3707,6 +3713,8 @@ class RakuAST::Postfix::Literal
             $operand-qast,
             QAST::WVal.new( :value($!value) )
     }
+
+    method PERFORM-PARSE(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) { ... }
 
     method can-be-used-with-hyper() { False }
 
@@ -3821,9 +3829,9 @@ class RakuAST::Postcircumfix::Index
 # A postcircumfix array index operator, possibly multi-dimensional.
 class RakuAST::Postcircumfix::ArrayIndex
   is RakuAST::Postcircumfix::Index
-  is RakuAST::CheckTime
-  is RakuAST::Lookup
-  is RakuAST::ParseTime
+  does RakuAST::Lookup
+  does RakuAST::CheckTime
+  does RakuAST::ParseTime
 {
     has RakuAST::SemiList   $.index;
     has RakuAST::Expression $.assignee;
@@ -4036,9 +4044,9 @@ class RakuAST::Postcircumfix::ArrayIndex
 # A postcircumfix hash index operator, possibly multi-dimensional.
 class RakuAST::Postcircumfix::HashIndex
   is RakuAST::Postcircumfix::Index
-  is RakuAST::Lookup
-  is RakuAST::ParseTime
-  is RakuAST::CheckTime
+  does RakuAST::Lookup
+  does RakuAST::ParseTime
+  does RakuAST::CheckTime
 {
     has RakuAST::SemiList $.index;
 
@@ -4123,9 +4131,9 @@ class RakuAST::Postcircumfix::HashIndex
 # A postcircumfix literal hash index operator.
 class RakuAST::Postcircumfix::LiteralHashIndex
   is RakuAST::Postcircumfix
-  is RakuAST::Lookup
-  is RakuAST::ParseTime
-  is RakuAST::CheckTime
+  does RakuAST::Lookup
+  does RakuAST::ParseTime
+  does RakuAST::CheckTime
 {
     has RakuAST::QuotedString $.index;
     has RakuAST::Expression $.assignee;
@@ -4218,8 +4226,8 @@ class RakuAST::Postcircumfix::LiteralHashIndex
 # An hyper operator on a postfix operator.
 class RakuAST::MetaPostfix::Hyper
   is RakuAST::Postfixish
-  is RakuAST::ImplicitLookups
-  is RakuAST::CheckTime
+  does RakuAST::ImplicitLookups
+  does RakuAST::CheckTime
 {
     has RakuAST::Postfixish $.postfix;
 
@@ -4272,8 +4280,8 @@ class RakuAST::MetaPostfix::Hyper
 # Application of a postfix operator.
 class RakuAST::ApplyPostfix
   is RakuAST::Termish
-  is RakuAST::BeginTime
-  is RakuAST::WhateverApplicable
+  does RakuAST::WhateverApplicable
+  does RakuAST::BeginTime
 {
     has RakuAST::Postfixish $.postfix;
     has RakuAST::Expression $.operand;
@@ -4327,7 +4335,7 @@ class RakuAST::ApplyPostfix
         self.IMPL-MAYBE-PRIME($resolver, $context);
     }
 
-    method PERFORM-CHECK(Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
+    method PERFORM-CHECK(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         #  ApplyPostfix  ⎡(...)⎤
         #    Block  ⎡{*.{}}⎤
         #      Blockoid 𝄞 -e:1 ⎡{*.{}}⎤
@@ -4412,7 +4420,7 @@ class RakuAST::ApplyPostfix
 # The ternary conditional operator (?? !!).
 class RakuAST::Ternary
   is RakuAST::Expression
-  is RakuAST::SinkPropagator
+  does RakuAST::SinkPropagator
 {
     has RakuAST::Expression $.condition;
     has RakuAST::Expression $.then;
@@ -4460,12 +4468,12 @@ class RakuAST::Ternary
 # A for loop. Is here because it inherits from Term, so it must be defined after that.
 class RakuAST::Statement::For
   is RakuAST::Statement
-  is RakuAST::ForLoopImplementation
   is RakuAST::Term
-  is RakuAST::SinkPropagator
-  is RakuAST::BlockStatementSensitive
-  is RakuAST::ImplicitBlockSemanticsProvider
-  is RakuAST::ImplicitLookups
+  does RakuAST::ForLoopImplementation
+  does RakuAST::SinkPropagator
+  does RakuAST::BlockStatementSensitive
+  does RakuAST::ImplicitBlockSemanticsProvider
+  does RakuAST::ImplicitLookups
 {
     # The thing to iterate over.
     has RakuAST::Expression $.source;
